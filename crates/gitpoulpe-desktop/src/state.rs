@@ -23,6 +23,9 @@ const LIST_WIDTH_KEY: &str = "list_width";
 const MODE_KEY: &str = "diff_mode";
 pub const READING_LINE_PERCENT: usize = 35;
 const STICK_GRACE_CALLS: u8 = 2;
+pub const MAX_LOADED_LINES: usize = 30_000;
+const KEEP_FILES: usize = 40;
+const KEEP_CHUNKS: u64 = 6;
 const PREFETCH_BEFORE: usize = 2;
 const PREFETCH_AFTER: usize = 8;
 
@@ -108,6 +111,8 @@ pub struct State {
     pub pinned: Option<usize>,
     pub visible: Range<usize>,
     pub notice: Option<String>,
+    pub max_loaded_lines: usize,
+    visible_chunks: HashMap<usize, (u64, u64)>,
     copy_request: u64,
     pub copy_limit: usize,
     copied: Option<(String, u64, bool)>,
@@ -173,6 +178,8 @@ impl State {
             pinned: None,
             visible: 0..0,
             notice: None,
+            max_loaded_lines: MAX_LOADED_LINES,
+            visible_chunks: HashMap::new(),
             copy_request: 0,
             copy_limit: crate::engine::MAX_COPY_BYTES,
             copied: None,
@@ -450,11 +457,12 @@ impl State {
                 let Some(view) = self.matching_view(generation, side) else {
                     return false;
                 };
-                self.docs
-                    .entry((view, index))
-                    .or_default()
-                    .chunks
-                    .insert(start / CHUNK_LINES, lines);
+                let chunk = start / CHUNK_LINES;
+                let doc = self.docs.entry((view, index)).or_default();
+                if !doc.requested.contains(&chunk) {
+                    return false;
+                }
+                doc.chunks.insert(chunk, lines);
                 true
             }
             Event::ReadFailed {
@@ -506,6 +514,7 @@ impl State {
     }
 
     fn request_range(&mut self, rows: &Range<usize>) -> Option<(usize, usize)> {
+        let rows = &(rows.start..rows.end.min(self.layout.total as usize));
         if self.files.is_empty() || rows.is_empty() {
             return None;
         }
@@ -515,9 +524,10 @@ impl State {
         ) else {
             return None;
         };
+        self.visible_chunks.clear();
         let from = first.saturating_sub(PREFETCH_BEFORE);
         let to = (last + PREFETCH_AFTER).min(self.files.len() - 1);
-        for position in from..=to {
+        for position in (from..=to).filter(|p| !(first..=last).contains(p)) {
             self.request_chunk(position, 0);
         }
         for position in first..=last {
@@ -537,9 +547,13 @@ impl State {
                 None => std::iter::once(start..end + 1).collect(),
             };
             for range in ranges {
-                for chunk in
-                    (range.start / CHUNK_LINES)..=(range.end.saturating_sub(1) / CHUNK_LINES)
-                {
+                let (low, high) = (
+                    range.start / CHUNK_LINES,
+                    range.end.saturating_sub(1) / CHUNK_LINES,
+                );
+                let span = self.visible_chunks.entry(index).or_insert((low, high));
+                *span = (span.0.min(low), span.1.max(high));
+                for chunk in low..=high {
                     self.request_chunk(position, chunk);
                 }
             }
@@ -547,11 +561,48 @@ impl State {
         Some((first, last))
     }
 
+    pub fn loaded_lines(&self) -> usize {
+        self.docs
+            .values()
+            .flat_map(|d| d.chunks.values())
+            .map(Vec::len)
+            .sum()
+    }
+
+    fn trim_loaded(&mut self, first: usize, last: usize) {
+        if self.loaded_lines() <= self.max_loaded_lines {
+            return;
+        }
+        let near = first.saturating_sub(KEEP_FILES)..=(last + KEEP_FILES);
+        let positions: HashMap<usize, usize> = self
+            .files
+            .iter()
+            .enumerate()
+            .map(|(position, &index)| (index, position))
+            .collect();
+        let view = self.view;
+        for ((doc_view, index), doc) in self.docs.iter_mut() {
+            let keep = match (*doc_view == view, positions.get(index)) {
+                (true, Some(position)) if (first..=last).contains(position) => {
+                    let (low, high) = self.visible_chunks.get(index).copied().unwrap_or((0, 0));
+                    Some(low.saturating_sub(KEEP_CHUNKS)..=high + KEEP_CHUNKS)
+                }
+                (true, Some(position)) if near.contains(position) => Some(0..=KEEP_CHUNKS),
+                _ => None,
+            };
+            doc.chunks
+                .retain(|chunk, _| keep.as_ref().is_some_and(|k| k.contains(chunk)));
+            doc.requested
+                .retain(|chunk| keep.as_ref().is_some_and(|k| k.contains(chunk)));
+        }
+    }
+
     pub fn on_visible(&mut self, rows: Range<usize>) -> bool {
         self.visible = rows.clone();
         let Some((first, last)) = self.request_range(&rows) else {
             return false;
         };
+        self.trim_loaded(first, last);
         let at_end = rows.end as u64 >= self.layout.total;
         let reading_row = rows.start + rows.len() * READING_LINE_PERCENT / 100;
         let reading = self

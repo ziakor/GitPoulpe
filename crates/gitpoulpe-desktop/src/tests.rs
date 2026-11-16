@@ -1096,3 +1096,92 @@ fn a_selection_extended_after_scrolling_far_away_copies_the_text_in_between_to_t
         rt.state.notice
     );
 }
+
+fn pump(state: &mut State, until: impl Fn(&State) -> bool) {
+    for _ in 0..2000 {
+        state.drain();
+        if until(state) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("the condition was never met");
+}
+
+fn has_chunk(state: &State, position: usize, chunk: u64) -> bool {
+    let (index, _) = state.entry_at(position).unwrap();
+    state
+        .doc(index)
+        .is_some_and(|d| d.chunks.contains_key(&chunk))
+}
+
+#[test]
+fn documents_far_from_the_viewport_are_released_and_load_again_when_visited() {
+    let repo = repo_with_files(160);
+    let mut state = opened(repo.path());
+    state.max_loaded_lines = 100;
+    let total = state.files.len();
+
+    for position in (0..total).step_by(8) {
+        let row = state.layout.offsets[position] as usize;
+        state.on_visible(row..row + 30);
+        pump(&mut state, |s| has_chunk(s, position, 0));
+    }
+    assert!(
+        !has_chunk(&state, 0, 0) && !has_chunk(&state, 20, 0),
+        "files far behind the viewport were released"
+    );
+    let loaded = state.loaded_lines();
+    assert!(loaded < 120 * 10, "memory stays bounded: {loaded} lines");
+    let last = total - 1;
+    assert!(
+        has_chunk(&state, last, 0) || has_chunk(&state, total - 8, 0),
+        "files near the viewport stay"
+    );
+
+    state.on_visible(0..30);
+    pump(&mut state, |s| has_chunk(s, 0, 0));
+    assert!(
+        has_chunk(&state, 0, 0),
+        "scrolling back loads the file again"
+    );
+    assert!(
+        !has_chunk(&state, total - 1, 0),
+        "now the far end is released"
+    );
+}
+
+#[test]
+fn a_huge_document_keeps_only_the_chunks_around_the_viewport() {
+    let repo = tempfile::tempdir().unwrap();
+    git(repo.path(), &["init", "-q", "-b", "main"]);
+    std::fs::write(
+        repo.path().join("big.txt"),
+        (0..9000).map(|i| format!("row {i}\n")).collect::<String>(),
+    )
+    .unwrap();
+    let mut state = opened(repo.path());
+    state.max_loaded_lines = 1000;
+    state.settle(1, Duration::from_secs(30));
+    let base = state.layout.offsets[0] as usize + 1;
+
+    for line in (0..9000).step_by(200) {
+        state.on_visible(base + line..base + line + 40);
+        let chunk = (line as u64 + 1) / crate::state::CHUNK_LINES;
+        pump(&mut state, |s| has_chunk(s, 0, chunk));
+    }
+    assert!(
+        !has_chunk(&state, 0, 0),
+        "the start of the document was released"
+    );
+    let last_chunk = (8800 + 1) / crate::state::CHUNK_LINES;
+    assert!(
+        has_chunk(&state, 0, last_chunk),
+        "the chunk under the viewport is loaded"
+    );
+    let loaded = state.loaded_lines();
+    assert!(
+        loaded <= (2 * 6 + 4) * crate::state::CHUNK_LINES as usize,
+        "bounded around the viewport: {loaded}"
+    );
+}
