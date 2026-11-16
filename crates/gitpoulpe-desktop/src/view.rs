@@ -41,6 +41,7 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
         .w_full()
         .h_full()
         .fill(p.bg)
+        .on_layout(|s: &mut State, rect| s.window_width = rect[2])
         .child(top_bar(s))
         .child(body)
         .child(footer(s))
@@ -306,7 +307,7 @@ fn left_pane(s: &State) -> El {
             file_row,
         );
     col()
-        .w(s.list_width)
+        .w(s.effective_list_width())
         .h_full()
         .min_h(0.0)
         .fill(p.panel)
@@ -331,6 +332,11 @@ fn left_pane(s: &State) -> El {
                         .font(theme::SMALL)
                         .color(p.muted)
                         .wrap(),
+                )
+                .child(
+                    text("Rechercher un fichier")
+                        .font(theme::SMALL)
+                        .color(p.muted),
                 )
                 .child(filter)
                 .child(text(counter).font(theme::SMALL).color(p.muted)),
@@ -422,10 +428,13 @@ fn file_row(s: &State, position: usize) -> El {
                         .child(text(dir).font(theme::PATH_SMALL).color(p.muted).truncate()),
                 )
                 .child(
-                    el().w(34.0)
-                        .h_full()
-                        .center()
-                        .child(text(letter).font(theme::SMALL).color(p.muted)),
+                    el().w(34.0).h_full().py(8.0).child(
+                        text(letter)
+                            .font(theme::SMALL)
+                            .color(p.muted)
+                            .w(34.0)
+                            .align(Align::Center),
+                    ),
                 ),
         )
 }
@@ -601,12 +610,11 @@ fn build_row(s: &State, i: usize) -> El {
 fn header_row(s: &State, index: usize, entry: &ChangeEntry) -> El {
     let p = s.palette;
     let (word, _) = status_of(entry, s.view);
-    let mut meta = word.to_owned();
-    if let Some(m) = s.doc(index).and_then(|d| d.meta.as_ref())
-        && m.added + m.removed > 0
-    {
-        meta = format!("{word} · +{} −{}", m.added, m.removed);
-    }
+    let counts = s
+        .doc(index)
+        .and_then(|d| d.meta.as_ref())
+        .filter(|m| m.added + m.removed > 0)
+        .map(|m| (m.added, m.removed));
     let mut path = display_label(&entry.path);
     if let Some(original) = &entry.original_path {
         path = format!("{} → {path}", display_label(original));
@@ -625,7 +633,19 @@ fn header_row(s: &State, index: usize, entry: &ChangeEntry) -> El {
                 .fill(p.raised)
                 .border(1.0, p.line)
                 .child(text(path).font(theme::PATH).color(p.text).truncate())
-                .child(text(meta).font(theme::TINY).color(p.muted)),
+                .child({
+                    let mut line = row()
+                        .gap(0.0)
+                        .child(text(word.to_owned()).font(theme::TINY).color(p.muted));
+                    if let Some((added, removed)) = counts {
+                        line = line
+                            .child(text(" · ").font(theme::TINY).color(p.muted))
+                            .child(text(format!("+{added}")).font(theme::TINY).color(p.green))
+                            .child(text(" ").font(theme::TINY).color(p.muted))
+                            .child(text(format!("−{removed}")).font(theme::TINY).color(p.red));
+                    }
+                    line
+                }),
         )
 }
 

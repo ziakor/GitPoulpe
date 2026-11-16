@@ -1325,3 +1325,73 @@ fn left_and_right_arrows_scroll_a_wide_diff_sideways_from_the_keyboard() {
         "it stops at the left edge"
     );
 }
+
+fn sized_runtime(files: usize, width: f32, height: f32) -> (TempDir, Runtime<State>) {
+    let repo = repo_with_files(files);
+    let state = opened(repo.path());
+    let mut rt = Runtime::new(
+        state,
+        view,
+        (width, height),
+        Env {
+            system_dark: true,
+            scale: 1.0,
+        },
+    );
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+        std::thread::sleep(Duration::from_millis(5));
+        rt.state.drain();
+    }
+    (repo, rt)
+}
+
+#[test]
+fn the_file_list_never_takes_more_than_its_share_of_a_small_window() {
+    let (_repo, small) = sized_runtime(6, 720.0, 560.0);
+    let divider = rect_of(&small, "divider").unwrap();
+    assert!(
+        divider[0] <= 720.0 * 0.45 + 1.0,
+        "the list is {} wide in a 720 window",
+        divider[0]
+    );
+    let viewport = rect_of(&small, "viewport").unwrap();
+    assert!(
+        viewport[2] >= 380.0,
+        "the diff keeps room to read: {}",
+        viewport[2]
+    );
+
+    let (_repo, large) = sized_runtime(6, 1440.0, 900.0);
+    let divider = rect_of(&large, "divider").unwrap();
+    assert!(
+        (divider[0] - crate::state::LIST_WIDTH_DEFAULT).abs() < 1.0,
+        "the chosen width is kept when there is room"
+    );
+}
+
+#[test]
+fn every_control_stays_inside_the_window_at_the_smallest_supported_size() {
+    let (_repo, rt) = sized_runtime(6, 720.0, 480.0);
+    for key in [
+        "open",
+        "theme",
+        "Non indexés",
+        "Indexés",
+        "filter",
+        "mode-unified",
+        "mode-split",
+        "viewport",
+        "divider",
+    ] {
+        let rect = rect_of(&rt, key).unwrap_or_else(|| panic!("{key} is not on screen"));
+        assert!(
+            rect[0] >= 0.0 && rect[0] + rect[2] <= 720.5,
+            "{key} leaves the window horizontally: {rect:?}"
+        );
+        assert!(
+            rect[1] >= 0.0 && rect[1] + rect[3] <= 480.5,
+            "{key} leaves the window vertically: {rect:?}"
+        );
+    }
+}

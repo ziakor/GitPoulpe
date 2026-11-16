@@ -19,6 +19,7 @@ pub const CHUNK_LINES: u64 = 256;
 pub const LIST_WIDTH_DEFAULT: f32 = 372.0;
 pub const LIST_WIDTH_MIN: f32 = 260.0;
 pub const LIST_WIDTH_MAX: f32 = 640.0;
+pub const LIST_SHARE_OF_WINDOW: f32 = 0.45;
 const LIST_WIDTH_KEY: &str = "list_width";
 const MODE_KEY: &str = "diff_mode";
 pub const READING_LINE_PERCENT: usize = 35;
@@ -121,6 +122,7 @@ pub struct State {
     last_offset: f32,
     pub scroll_probe: Live<[f32; 4]>,
     pub scroll_x: Live<[f32; 2]>,
+    pub window_width: f32,
     follow: Option<usize>,
     pub list_width: f32,
     prefs: Prefs,
@@ -189,6 +191,7 @@ impl State {
             last_offset: 0.0,
             scroll_probe: Live::new([0.0; 4]),
             scroll_x: Live::new([0.0; 2]),
+            window_width: 0.0,
             follow: None,
             list_width,
             prefs,
@@ -218,6 +221,16 @@ impl State {
         } else {
             LIST_WIDTH_DEFAULT
         };
+    }
+
+    pub fn effective_list_width(&self) -> f32 {
+        let window = self.window_width;
+        if window > 0.0 {
+            self.list_width
+                .min((window * LIST_SHARE_OF_WINDOW).max(LIST_WIDTH_MIN))
+        } else {
+            self.list_width
+        }
     }
 
     pub fn save_list_width(&mut self) {
