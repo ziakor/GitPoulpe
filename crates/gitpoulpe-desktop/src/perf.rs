@@ -7,6 +7,8 @@ const IDLE_GAP_MS: f64 = 100.0;
 const WRITE_EVERY_SECONDS: f64 = 2.0;
 const WARMUP_SECONDS: f64 = 1.0;
 const DEFAULT_SPEED: f32 = 3000.0;
+const MAX_EVENTS: usize = 200;
+const EVENT_FRAME_MS: f64 = 25.0;
 const NOMINAL_FRAME_MS: f64 = 1000.0 / 60.0;
 const MIN_COVERAGE: f64 = 0.9;
 
@@ -27,6 +29,8 @@ pub struct Perf {
     last_write: f64,
     first_ready_at: Option<f64>,
     autoscroll: Option<Autoscroll>,
+    origin: f64,
+    events: Vec<(f64, f64)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -90,6 +94,8 @@ impl Perf {
             last_write: 0.0,
             first_ready_at: None,
             autoscroll,
+            origin: 0.0,
+            events: Vec::new(),
         }
     }
 
@@ -130,6 +136,14 @@ impl Perf {
             let expected = a.duration * 1000.0 / NOMINAL_FRAME_MS;
             s.frames as f64 / expected
         });
+        let events = format!(
+            "[{}]",
+            self.events
+                .iter()
+                .map(|(at, ms)| format!("[{at:.2},{ms:.1}]"))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
         let validity = match coverage {
             None => "\"unknown\"".to_owned(),
             Some(c) if c >= MIN_COVERAGE => format!("\"valid\",\"coverage\":{c:.2}"),
@@ -139,7 +153,7 @@ impl Perf {
             ),
         };
         format!(
-            "{{\"validity\":{validity},\"ready_at_s\":{},\"frames\":{},\"interval_ms\":{{\"mean\":{:.2},\"p50\":{:.2},\"p95\":{:.2},\"p99\":{:.2},\"max\":{:.2}}},\"over_16_7ms\":{},\"over_25ms\":{},\"over_33ms\":{},\"idle_gaps\":{},\"autoscroll\":{},\"rss_kib\":{},\"peak_rss_kib\":{}}}\n",
+            "{{\"validity\":{validity},\"ready_at_s\":{},\"frames\":{},\"interval_ms\":{{\"mean\":{:.2},\"p50\":{:.2},\"p95\":{:.2},\"p99\":{:.2},\"max\":{:.2}}},\"over_16_7ms\":{},\"over_25ms\":{},\"over_33ms\":{},\"idle_gaps\":{},\"autoscroll\":{},\"slow_events\":{},\"rss_kib\":{},\"peak_rss_kib\":{}}}\n",
             self.first_ready_at
                 .map_or("null".to_owned(), |t| format!("{t:.2}")),
             s.frames,
@@ -153,6 +167,7 @@ impl Perf {
             s.over_33,
             s.idle_gaps,
             scroll,
+            events,
             resident_kib("VmRSS:").unwrap_or(0),
             resident_kib("VmHWM:").unwrap_or(0),
         )
@@ -168,6 +183,11 @@ impl Perf {
     pub fn record_interval(&mut self, t: f64) {
         if let Some(previous) = self.last_t {
             let interval = (t - previous) * 1000.0;
+            if (interval > EVENT_FRAME_MS || interval > IDLE_GAP_MS)
+                && self.events.len() < MAX_EVENTS
+            {
+                self.events.push((t - self.origin, interval));
+            }
             if interval > IDLE_GAP_MS {
                 self.idle_gaps += 1;
             } else if self.intervals.len() < MAX_INTERVALS {
@@ -196,6 +216,7 @@ impl Perf {
             (Some(start), _) => start,
             (None, Some(ready_at)) if t - ready_at >= WARMUP_SECONDS => {
                 scroll.started_at = Some(t);
+                self.origin = t;
                 self.last_t = None;
                 t
             }
@@ -254,6 +275,14 @@ mod tests {
         );
         assert!((summary.max - 60.0).abs() < 0.01);
         assert!((summary.p50 - 16.0).abs() < 0.01);
+        assert_eq!(
+            perf.events.len(),
+            2,
+            "the 60 ms frame and the pause are logged: {:?}",
+            perf.events
+        );
+        assert!((perf.events[0].0 - 0.128).abs() < 1e-9 && (perf.events[0].1 - 60.0).abs() < 0.01);
+        assert!(perf.events[1].1 > 600.0);
     }
 
     #[test]
