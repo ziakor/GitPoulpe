@@ -115,7 +115,9 @@ impl Git {
         command
             .current_dir(dir)
             .arg("--no-optional-locks")
+            .arg("--no-lazy-fetch")
             .args(["-c", "core.fsmonitor=false"])
+            .args(["-c", "protocol.allow=never"])
             .args(args)
             .env("GIT_OPTIONAL_LOCKS", "0")
             .env("GIT_TERMINAL_PROMPT", "0")

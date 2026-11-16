@@ -29,6 +29,11 @@ impl Fixture {
     }
 
     async fn with_budgets(repo: TempDir, budgets: Option<(u64, u64)>) -> Self {
+        let root = repo.path().to_path_buf();
+        Self::build(repo, root, budgets).await
+    }
+
+    async fn build(repo: TempDir, root: PathBuf, budgets: Option<(u64, u64)>) -> Self {
         let cache_dir = tempfile::tempdir().unwrap();
         let mut config = CacheConfig::new(cache_dir.path());
         if let Some((memory, disk)) = budgets {
@@ -38,7 +43,7 @@ impl Fixture {
         let git = Git::new();
         let reader = DiffReader::new(git.clone(), DiffCache::open(config).unwrap());
         let cancel = Cancel::new();
-        let info = git.open(repo.path(), &cancel).await.unwrap();
+        let info = git.open(&root, &cancel).await.unwrap();
         let generation = Generation::default().next();
         let status = git.read_status(&info, generation, &cancel).await.unwrap();
         Self {
@@ -873,4 +878,63 @@ async fn a_cache_directory_inside_the_repository_is_refused() {
         entry,
     );
     assert_eq!(result.err(), Some(DiffError::CacheInsideRepository));
+}
+
+#[tokio::test]
+async fn a_partial_clone_never_fetches_missing_objects_over_the_network() {
+    let source = init_repo();
+    write(source.path(), "f.txt", "hello\n");
+    commit_all(source.path(), "base");
+    git(source.path(), &["config", "uploadpack.allowFilter", "true"]);
+    git(
+        source.path(),
+        &["config", "uploadpack.allowAnySHA1InWant", "true"],
+    );
+    let holder = tempfile::tempdir().unwrap();
+    let url = format!("file://{}", source.path().display());
+    git(
+        holder.path(),
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "clone",
+            "-q",
+            "--filter=blob:none",
+            "--no-checkout",
+            &url,
+            "dst",
+        ],
+    );
+    let dst = holder.path().join("dst");
+    let tools = tempfile::tempdir().unwrap();
+    let marker = tools.path().join("ran");
+    let script = tools.path().join("ssh.sh");
+    executable(&script, &format!("touch '{}'\nexit 1", marker.display()));
+    git(
+        &dst,
+        &["config", "core.sshCommand", script.to_str().unwrap()],
+    );
+    git(
+        &dst,
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            "ssh://example.invalid/repo.git",
+        ],
+    );
+
+    let fixture = Fixture::build(holder, dst, None).await;
+    let doc = fixture.doc(DiffSide::Staged, "f.txt");
+    let meta = doc.wait_finished(&Cancel::new()).await.unwrap();
+
+    assert!(
+        !marker.exists(),
+        "a repository-configured network command was executed"
+    );
+    assert!(
+        matches!(meta.kind, Some(DocumentKind::Unreadable(_))),
+        "{:?}",
+        meta.kind
+    );
 }
