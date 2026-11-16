@@ -385,3 +385,108 @@ async fn each_snapshot_carries_its_repository_session_and_generation() {
         a.repo == info.repo && b.repo == info.repo && a.session == info.id && b.session == info.id
     );
 }
+
+fn make_racy(path: &Path) {
+    let file = std::fs::File::options().write(true).open(path).unwrap();
+    file.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(3600))
+        .unwrap();
+}
+
+fn executable(path: &Path, body: &str) {
+    std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
+    std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+}
+
+#[tokio::test]
+async fn repository_configured_filter_programs_are_never_run() {
+    let repo = init_repo();
+    let dir = repo.path();
+    write(
+        dir,
+        ".gitattributes",
+        "*.txt filter=evil\n*.dat filter=my.driver\n",
+    );
+    write(dir, "f.txt", "hello\n");
+    write(dir, "g.dat", "hello\n");
+    write(dir, "unchanged.txt", "same\n");
+    write(dir, "unchanged.dat", "same\n");
+    commit_all(dir, "base");
+    make_racy(&dir.join("unchanged.txt"));
+    make_racy(&dir.join("unchanged.dat"));
+
+    let tools = tempfile::tempdir().unwrap();
+    let marker = tools.path().join("ran");
+    let script = tools.path().join("filter.sh");
+    executable(&script, &format!("touch '{}'\ncat", marker.display()));
+    let script = script.to_str().unwrap();
+    for key in [
+        "filter.evil.clean",
+        "filter.evil.process",
+        "filter.evil.smudge",
+        "filter.my.driver.clean",
+        "filter.my.driver.process",
+    ] {
+        git(dir, &["config", key, script]);
+    }
+    write(dir, "f.txt", "changed\n");
+    write(dir, "g.dat", "changed\n");
+
+    let (_, snapshot) = open_and_read(dir).await;
+
+    assert!(
+        !marker.exists(),
+        "a repository-configured filter program was executed"
+    );
+    assert_eq!(
+        paths(snapshot.unstaged()),
+        vec![PathBuf::from("f.txt"), PathBuf::from("g.dat")]
+    );
+}
+
+#[tokio::test]
+async fn submodule_programs_are_not_run_either() {
+    let sub_source = init_repo();
+    write(sub_source.path(), "s.txt", "s\n");
+    commit_all(sub_source.path(), "sub base");
+    let repo = init_repo();
+    let dir = repo.path();
+    write(dir, "a.txt", "a\n");
+    commit_all(dir, "base");
+    git(
+        dir,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            sub_source.path().to_str().unwrap(),
+            "sub",
+        ],
+    );
+    commit_all(dir, "add submodule");
+
+    let tools = tempfile::tempdir().unwrap();
+    let marker = tools.path().join("ran");
+    let script = tools.path().join("hook.sh");
+    executable(&script, &format!("touch '{}'\ncat", marker.display()));
+    let sub = dir.join("sub");
+    write(&sub, ".gitattributes", "*.txt filter=evil\n");
+    git(
+        &sub,
+        &["config", "filter.evil.clean", script.to_str().unwrap()],
+    );
+    git(
+        &sub,
+        &["config", "core.fsmonitor", script.to_str().unwrap()],
+    );
+    make_racy(&sub.join("s.txt"));
+    write(&sub, "other.txt", "new\n");
+
+    open_and_read(dir).await;
+
+    assert!(
+        !marker.exists(),
+        "a submodule-configured program was executed"
+    );
+}
