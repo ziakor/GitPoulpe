@@ -9,12 +9,17 @@ use gitpoulpe_core::{
     BuildState, ChangeEntry, DiffLine, DiffSide, DocumentKind, DocumentMeta, Generation,
     StatusSnapshot,
 };
+use rune::prefs::Prefs;
 use rune::{TextEdit, Waker};
 
 use crate::engine::{Command, Engine, Event, WakerSlot};
 use crate::theme::Palette;
 
 pub const CHUNK_LINES: u64 = 256;
+pub const LIST_WIDTH_DEFAULT: f32 = 372.0;
+pub const LIST_WIDTH_MIN: f32 = 260.0;
+pub const LIST_WIDTH_MAX: f32 = 640.0;
+const LIST_WIDTH_KEY: &str = "list_width";
 const PREFETCH_BEFORE: usize = 2;
 const PREFETCH_AFTER: usize = 8;
 
@@ -73,6 +78,9 @@ pub struct State {
     pub layout: Layout,
     pub layout_version: u64,
     pub current: Option<usize>,
+    pub pinned: Option<usize>,
+    pub list_width: f32,
+    prefs: Prefs,
     engine: Option<Engine>,
     events: Receiver<Event>,
     waker: WakerSlot,
@@ -95,14 +103,19 @@ fn initial_path() -> Option<PathBuf> {
 
 impl Default for State {
     fn default() -> Self {
-        Self::new(initial_path())
+        Self::new(initial_path(), Prefs::open("gitpoulpe"))
     }
 }
 
 impl State {
-    pub fn new(initial_path: Option<PathBuf>) -> Self {
+    pub fn new(initial_path: Option<PathBuf>, prefs: Prefs) -> Self {
         let (event_sender, events) = channel();
         let dark = true;
+        let list_width = prefs
+            .get::<f32>(LIST_WIDTH_KEY)
+            .map_or(LIST_WIDTH_DEFAULT, |w| {
+                w.clamp(LIST_WIDTH_MIN, LIST_WIDTH_MAX)
+            });
         Self {
             dark,
             palette: Palette::of(dark),
@@ -115,6 +128,9 @@ impl State {
             layout: Layout::default(),
             layout_version: 0,
             current: None,
+            pinned: None,
+            list_width,
+            prefs,
             engine: None,
             events,
             waker: Arc::new(Mutex::new(None)),
@@ -133,6 +149,23 @@ impl State {
         if let Some(path) = self.initial_path.take() {
             self.open_path(path);
         }
+    }
+
+    pub fn resize_list(&mut self, width: f32) {
+        self.list_width = if width.is_finite() {
+            width.clamp(LIST_WIDTH_MIN, LIST_WIDTH_MAX)
+        } else {
+            LIST_WIDTH_DEFAULT
+        };
+    }
+
+    pub fn save_list_width(&mut self) {
+        let _ = self.prefs.set(LIST_WIDTH_KEY, &self.list_width);
+    }
+
+    pub fn jump_to(&mut self, position: usize) {
+        self.current = Some(position);
+        self.pinned = Some(position);
     }
 
     pub fn set_dark(&mut self, dark: bool) {
@@ -183,6 +216,7 @@ impl State {
         if self.view != view {
             self.view = view;
             self.current = None;
+            self.pinned = None;
             self.refilter();
         }
     }
@@ -276,6 +310,7 @@ impl State {
                 });
                 self.docs.clear();
                 self.current = None;
+                self.pinned = None;
                 self.screen = Screen::Ready;
                 self.refilter();
                 true
@@ -377,15 +412,15 @@ impl State {
         }
     }
 
-    pub fn on_visible(&mut self, rows: Range<usize>) -> bool {
+    fn request_range(&mut self, rows: &Range<usize>) -> Option<(usize, usize)> {
         if self.files.is_empty() || rows.is_empty() {
-            return false;
+            return None;
         }
         let (Some((first, first_local)), Some((last, last_local))) = (
             self.locate(rows.start as u64),
             self.locate(rows.end.saturating_sub(1) as u64),
         ) else {
-            return false;
+            return None;
         };
         let from = first.saturating_sub(PREFETCH_BEFORE);
         let to = (last + PREFETCH_AFTER).min(self.files.len() - 1);
@@ -407,8 +442,23 @@ impl State {
                 self.request_chunk(position, chunk);
             }
         }
-        let changed = self.current != Some(first);
-        self.current = Some(first);
+        Some((first, last))
+    }
+
+    pub fn on_visible(&mut self, rows: Range<usize>) -> bool {
+        let Some((first, last)) = self.request_range(&rows) else {
+            return false;
+        };
+        let at_end = rows.end as u64 >= self.layout.total;
+        let current = match self.pinned.filter(|p| (first..=last).contains(p)) {
+            Some(pinned) => pinned,
+            None => {
+                self.pinned = None;
+                if at_end { last } else { first }
+            }
+        };
+        let changed = self.current != Some(current);
+        self.current = Some(current);
         changed
     }
 
@@ -421,7 +471,7 @@ impl State {
 
     pub fn settle(&mut self, files: usize, timeout: Duration) {
         let deadline = Instant::now() + timeout;
-        self.on_visible(0..self.layout.total.min(files as u64 * 2) as usize);
+        self.request_range(&(0..self.layout.total.min(files as u64 * 2) as usize));
         while Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(20));
             self.drain();

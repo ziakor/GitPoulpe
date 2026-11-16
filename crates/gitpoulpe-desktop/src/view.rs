@@ -5,13 +5,13 @@ use gitpoulpe_core::{
     ChangeEntry, DiffLine, DiffLineKind, DocumentKind, EntryKind, StatusCode, display_label,
 };
 use rune::{
-    Align, Cx, El, FileDialogOptions, GrowthSpec, ScrollSpec, Tx, col, el, row, text, text_input,
+    Align, Cursor, Cx, El, FileDialogOptions, GrowthSpec, Key, Phase, ScrollSpec, Tx, col, el, row,
+    text, text_input,
 };
 
-use crate::state::{Screen, State, ViewKind};
+use crate::state::{LIST_WIDTH_DEFAULT, Screen, State, ViewKind};
 use crate::theme::{self, Palette};
 
-const LIST_WIDTH: f32 = 372.0;
 const LIST_ROW_HEIGHT: f32 = 56.0;
 const LINE_HEIGHT: f32 = 25.0;
 
@@ -146,46 +146,91 @@ fn message_screen(p: &Palette, title: &str, detail: &str, with_open: bool) -> El
     col().w_full().grow(1.0).center().child(card)
 }
 
+fn divider(s: &State) -> El {
+    let p = s.palette;
+    el().key("divider")
+        .role("separator")
+        .label("Largeur de la liste des fichiers")
+        .focusable(true)
+        .focus_ring(2.0, 0.0, p.accent)
+        .w(6.0)
+        .h_full()
+        .cursor(Cursor::ResizeColumn)
+        .hover(p.hover)
+        .on_drag(|s: &mut State, drag, _| match drag.phase {
+            Phase::Down if drag.clicks >= 2 => s.resize_list(LIST_WIDTH_DEFAULT),
+            Phase::Down => drag.data = s.list_width,
+            Phase::Move => s.resize_list(drag.data + drag.dx),
+            Phase::Up if drag.cancelled() => s.resize_list(drag.data),
+            Phase::Up => {}
+        })
+        .on_drag_end(|s: &mut State, _, _| s.save_list_width())
+        .on_key(|s: &mut State, event, _| {
+            let step = if event.mods.shift { 64.0 } else { 16.0 };
+            match event.key {
+                Key::Left => s.resize_list(s.list_width - step),
+                Key::Right => s.resize_list(s.list_width + step),
+                Key::Home => s.resize_list(LIST_WIDTH_DEFAULT),
+                _ => return false,
+            }
+            s.save_list_width();
+            true
+        })
+}
+
 fn workspace(s: &State) -> El {
     row()
         .w_full()
         .grow(1.0)
         .min_h(0.0)
         .child(left_pane(s))
+        .child(divider(s))
         .child(right_pane(s))
 }
 
 fn tab(s: &State, kind: ViewKind, label: &'static str) -> El {
     let p = s.palette;
     let active = s.view == kind;
+    let (fill, ink, edge) = if active {
+        (p.accent, p.on_accent, p.accent)
+    } else {
+        (p.raised, p.text, p.line)
+    };
     el().key(label)
         .role("tab")
         .label(format!("{label}, {} fichiers", s.count(kind)))
         .focusable(true)
         .focus_ring(2.0, 2.0, p.accent)
-        .h(36.0)
-        .px(2.0)
-        .center_y()
+        .grow(1.0)
+        .h(34.0)
+        .radius(3.0)
+        .fill(fill)
+        .border(1.0, edge)
+        .center()
         .hover(p.hover)
         .on_press(move |s: &mut State| s.set_view(kind))
         .child(
             row()
-                .gap(6.0)
-                .child(
-                    text(label)
-                        .font(if active {
-                            theme::BODY_STRONG
-                        } else {
-                            theme::BODY
-                        })
-                        .color(if active { p.text } else { p.muted }),
-                )
+                .gap(8.0)
+                .center_y()
+                .child(text(label).font(theme::BODY_STRONG).color(ink))
                 .child(
                     text(s.count(kind).to_string())
                         .font(theme::SMALL)
-                        .color(p.muted),
+                        .color(ink),
                 ),
         )
+}
+
+fn view_hint(view: ViewKind) -> &'static str {
+    match view {
+        ViewKind::Unstaged => {
+            "Modifications du répertoire de travail, pas encore ajoutées à l'index."
+        }
+        ViewKind::Staged => {
+            "Modifications ajoutées à l'index : elles feront partie du prochain commit."
+        }
+    }
 }
 
 fn left_pane(s: &State) -> El {
@@ -223,7 +268,7 @@ fn left_pane(s: &State) -> El {
             file_row,
         );
     col()
-        .w(LIST_WIDTH)
+        .w(s.list_width)
         .h_full()
         .min_h(0.0)
         .fill(p.panel)
@@ -236,9 +281,16 @@ fn left_pane(s: &State) -> El {
                 .gap(10.0)
                 .child(
                     row()
-                        .gap(18.0)
+                        .w_full()
+                        .gap(8.0)
                         .child(tab(s, ViewKind::Unstaged, "Non indexés"))
                         .child(tab(s, ViewKind::Staged, "Indexés")),
+                )
+                .child(
+                    text(view_hint(s.view))
+                        .font(theme::SMALL)
+                        .color(p.muted)
+                        .wrap(),
                 )
                 .child(filter)
                 .child(text(counter).font(theme::SMALL).color(p.muted)),
@@ -306,7 +358,7 @@ fn file_row(s: &State, position: usize) -> El {
         .fill(fill)
         .hover(p.hover)
         .on_press_tx(move |s: &mut State, tx: &mut Tx| {
-            s.current = Some(position);
+            s.jump_to(position);
             tx.scroll_into_view(format!("h{index}"));
         })
         .child(

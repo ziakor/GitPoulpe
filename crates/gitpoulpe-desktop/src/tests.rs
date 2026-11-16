@@ -3,6 +3,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
+use rune::prefs::Prefs;
 use rune::{Env, Runtime};
 use tempfile::TempDir;
 
@@ -56,7 +57,7 @@ fn repo_with_files(count: usize) -> TempDir {
 }
 
 fn opened(dir: &Path) -> State {
-    let mut state = State::new(None);
+    let mut state = State::new(None, Prefs::memory());
     state.setup(Arc::new(|| {}));
     state.open_blocking(dir.to_path_buf(), Duration::from_secs(20));
     state
@@ -165,7 +166,7 @@ fn failures_to_open_are_explicit_screens_not_an_empty_repository() {
     };
     assert_eq!(message, "Ce dossier n'existe pas.");
 
-    let fresh = State::new(None);
+    let fresh = State::new(None, Prefs::memory());
     assert_eq!(fresh.screen, Screen::Welcome);
 }
 
@@ -211,4 +212,109 @@ fn headers_show_status_and_line_counts_once_the_document_is_known() {
             .line(index, 0)
             .is_some_and(|l| l.text.starts_with(b"@@"))
     );
+}
+
+#[test]
+fn reaching_the_end_of_the_scroll_makes_the_last_file_current() {
+    let repo = repo_with_files(30);
+    let mut state = opened(repo.path());
+    let total = state.layout.total as usize;
+    let last = state.files.len() - 1;
+    state.on_visible(0..8);
+    assert_eq!(state.current, Some(0));
+    state.on_visible(total - 6..total);
+    assert_eq!(state.current, Some(last));
+}
+
+#[test]
+fn a_file_chosen_in_the_list_stays_current_while_it_is_on_screen() {
+    let repo = repo_with_files(30);
+    let mut state = opened(repo.path());
+    let total = state.layout.total as usize;
+    let last = state.files.len() - 1;
+    state.jump_to(last - 1);
+    state.on_visible(total - 6..total);
+    assert_eq!(
+        state.current,
+        Some(last - 1),
+        "the explicit choice wins at the end of the scroll"
+    );
+    state.on_visible(0..8);
+    assert_eq!(state.current, Some(0), "scrolling away releases the choice");
+    state.on_visible(total - 6..total);
+    assert_eq!(state.current, Some(last));
+}
+
+#[test]
+fn the_list_width_is_clamped_remembered_and_resettable() {
+    let mut state = State::new(None, Prefs::memory());
+    assert_eq!(state.list_width, crate::state::LIST_WIDTH_DEFAULT);
+    state.resize_list(10.0);
+    assert_eq!(state.list_width, crate::state::LIST_WIDTH_MIN);
+    state.resize_list(5000.0);
+    assert_eq!(state.list_width, crate::state::LIST_WIDTH_MAX);
+    state.resize_list(f32::NAN);
+    assert_eq!(state.list_width, crate::state::LIST_WIDTH_DEFAULT);
+
+    let mut prefs = Prefs::memory();
+    prefs.set("list_width", &500.0f32).unwrap();
+    assert_eq!(State::new(None, prefs).list_width, 500.0);
+    let mut prefs = Prefs::memory();
+    prefs.set("list_width", &9000.0f32).unwrap();
+    assert_eq!(
+        State::new(None, prefs).list_width,
+        crate::state::LIST_WIDTH_MAX
+    );
+}
+
+#[test]
+fn dragging_the_divider_resizes_the_list_and_a_double_click_resets_it() {
+    let repo = repo_with_files(5);
+    let mut rt = runtime(opened(repo.path()));
+    let start = rt.state.list_width;
+    let (x, y) = rt.find("divider").expect("the divider is on screen");
+
+    rt.pointer_move(x, y);
+    rt.pointer_down(x, y);
+    rt.pointer_move(x + 80.0, y);
+    rt.pointer_move(x + 120.0, y);
+    rt.pointer_up(x + 120.0, y);
+    rt.frame(1.0 / 60.0);
+    assert!(
+        (rt.state.list_width - (start + 120.0)).abs() < 1.5,
+        "width after drag: {}",
+        rt.state.list_width
+    );
+
+    let (x, y) = rt.find("divider").unwrap();
+    for _ in 0..2 {
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        rt.frame(0.05);
+    }
+    assert_eq!(rt.state.list_width, crate::state::LIST_WIDTH_DEFAULT);
+}
+
+#[test]
+fn the_divider_can_be_resized_from_the_keyboard() {
+    let repo = repo_with_files(5);
+    let mut rt = runtime(opened(repo.path()));
+    let start = rt.state.list_width;
+    rt.update(|_, tx| tx.focus("divider", true));
+    rt.frame(1.0 / 60.0);
+    rt.key(rune::KeyEvent {
+        key: rune::Key::Right,
+        mods: rune::Mods::default(),
+    });
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.state.list_width, start + 16.0);
+    rt.key(rune::KeyEvent {
+        key: rune::Key::Left,
+        mods: rune::Mods {
+            shift: true,
+            ..Default::default()
+        },
+    });
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.state.list_width, start - 48.0);
 }

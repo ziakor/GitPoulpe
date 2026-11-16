@@ -18,6 +18,7 @@ fn demo(state: &mut State) {
         state.open_blocking(PathBuf::from(path), Duration::from_secs(20));
         state.settle(40, Duration::from_secs(20));
         state.drain();
+        state.current = (!state.files.is_empty()).then_some(0);
     }
 }
 
