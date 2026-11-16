@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hasher};
-use std::io;
-use std::os::unix::fs::DirBuilderExt;
+use std::io::{self, Write};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -76,6 +76,23 @@ impl Drop for Shared {
     }
 }
 
+fn verify_private_directory(dir: &Path) -> io::Result<()> {
+    let meta = std::fs::symlink_metadata(dir)?;
+    let refuse = |reason: &str| {
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            reason.to_owned(),
+        ))
+    };
+    if !meta.file_type().is_dir() {
+        return refuse("the cache directory is not a real directory");
+    }
+    if meta.permissions().mode() & 0o077 != 0 {
+        return refuse("the cache directory is accessible to other users");
+    }
+    Ok(())
+}
+
 fn pid_is_alive(pid: u32) -> bool {
     Path::new(&format!("/proc/{pid}")).exists()
 }
@@ -86,6 +103,7 @@ impl DiffCache {
             .recursive(true)
             .mode(0o700)
             .create(&config.dir)?;
+        verify_private_directory(&config.dir)?;
         Self::remove_interrupted_runs(&config.dir);
         static RUN: AtomicU64 = AtomicU64::new(0);
         let name = format!(
@@ -95,6 +113,14 @@ impl DiffCache {
         );
         let root = config.dir.join(name);
         std::fs::DirBuilder::new().mode(0o700).create(&root)?;
+        let base_owner = std::fs::symlink_metadata(&config.dir)?.uid();
+        if std::fs::symlink_metadata(&root)?.uid() != base_owner {
+            let _ = std::fs::remove_dir(&root);
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "the cache directory belongs to another user",
+            ));
+        }
         let root = std::fs::canonicalize(root)?;
         Ok(Self {
             shared: Arc::new(Shared {
@@ -273,7 +299,16 @@ impl DiffCache {
         let Some(bytes) = inner.segments[&key].memory.clone() else {
             return false;
         };
-        if std::fs::write(self.path(key.0, key.1), bytes.as_slice()).is_err() {
+        let path = self.path(key.0, key.1);
+        let _ = std::fs::remove_file(&path);
+        let written = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .and_then(|mut file| file.write_all(bytes.as_slice()));
+        if written.is_err() {
+            let _ = std::fs::remove_file(&path);
             return false;
         }
         inner.disk_bytes += size;
@@ -349,8 +384,14 @@ pub(crate) fn decode(mut bytes: &[u8]) -> Result<Vec<DiffLine>, String> {
 mod tests {
     use super::*;
 
-    fn cache(memory: u64, disk: u64) -> (tempfile::TempDir, DiffCache) {
+    fn private_tempdir() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        dir
+    }
+
+    fn cache(memory: u64, disk: u64) -> (tempfile::TempDir, DiffCache) {
+        let dir = private_tempdir();
         let mut config = CacheConfig::new(dir.path());
         config.memory_bytes = memory;
         config.disk_bytes = disk;
@@ -432,7 +473,7 @@ mod tests {
 
     #[test]
     fn the_run_directory_is_private_and_removed_on_drop_and_interrupted_runs_are_cleaned() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = private_tempdir();
         let stale = dir.path().join("run-4194999-0");
         std::fs::create_dir(&stale).unwrap();
         std::fs::write(stale.join("1-0.seg"), b"x").unwrap();
@@ -452,5 +493,40 @@ mod tests {
         let config = CacheConfig::new("/nonexistent");
         assert_eq!(config.memory_bytes, 64 * 1024 * 1024);
         assert_eq!(config.disk_bytes, 512 * 1024 * 1024);
+    }
+
+    #[test]
+    fn a_cache_directory_that_is_a_symlink_or_open_to_others_is_refused() {
+        let base = tempfile::tempdir().unwrap();
+        let real = base.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let link = base.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(DiffCache::open(CacheConfig::new(&link)).is_err());
+
+        let open = base.path().join("open");
+        std::fs::create_dir(&open).unwrap();
+        std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(DiffCache::open(CacheConfig::new(&open)).is_err());
+
+        std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(DiffCache::open(CacheConfig::new(&open)).is_ok());
+    }
+
+    #[test]
+    fn spilled_segments_are_private_files_and_never_follow_a_planted_link() {
+        let (_dir, cache) = cache(50, 10_000);
+        let planted_target = tempfile::tempdir().unwrap().keep().join("victim");
+        std::os::unix::fs::symlink(&planted_target, cache.root().join("1-0.seg")).unwrap();
+        cache.insert(1, 0, vec![1u8; 100]);
+        cache.insert(1, 1, vec![2u8; 100]);
+        assert!(!planted_target.exists(), "a planted symlink was followed");
+        let SegmentRead::Disk(path) = cache.get(1, 0) else {
+            panic!("segment 0 should have spilled")
+        };
+        let meta = std::fs::symlink_metadata(&path).unwrap();
+        assert!(meta.file_type().is_file());
+        assert_eq!(meta.permissions().mode() & 0o777, 0o600);
     }
 }

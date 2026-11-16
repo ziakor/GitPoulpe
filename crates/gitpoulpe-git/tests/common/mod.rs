@@ -32,6 +32,16 @@ pub fn git_output(dir: &Path, args: &[&str]) -> std::process::Output {
         .expect("git runs")
 }
 
+pub fn private_tempdir() -> TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(
+        dir.path(),
+        std::os::unix::fs::PermissionsExt::from_mode(0o700),
+    )
+    .unwrap();
+    dir
+}
+
 pub fn init_repo() -> TempDir {
     let dir = tempfile::tempdir().unwrap();
     git(dir.path(), &["init", "-q", "-b", "main"]);

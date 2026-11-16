@@ -34,7 +34,7 @@ impl Fixture {
     }
 
     async fn build(repo: TempDir, root: PathBuf, budgets: Option<(u64, u64)>) -> Self {
-        let cache_dir = tempfile::tempdir().unwrap();
+        let cache_dir = private_tempdir();
         let mut config = CacheConfig::new(cache_dir.path());
         if let Some((memory, disk)) = budgets {
             config.memory_bytes = memory;
@@ -604,7 +604,7 @@ async fn cancelling_a_document_stops_and_reaps_git_and_marks_it_cancelled() {
             pid_file.display()
         ),
     );
-    let cache_dir = tempfile::tempdir().unwrap();
+    let cache_dir = private_tempdir();
     let reader = DiffReader::new(
         Git::with_program(fake),
         DiffCache::open(CacheConfig::new(cache_dir.path())).unwrap(),
@@ -672,7 +672,7 @@ async fn waiting_for_a_range_can_be_cancelled_without_stopping_the_document() {
         &fake,
         "case \"$*\" in *\" config \"*) exit 1;; esac\nprintf '@@ -0,0 +1,1 @@\\n+a\\n'\nexec sleep 60",
     );
-    let cache_dir = tempfile::tempdir().unwrap();
+    let cache_dir = private_tempdir();
     let reader = DiffReader::new(
         Git::with_program(fake),
         DiffCache::open(CacheConfig::new(cache_dir.path())).unwrap(),

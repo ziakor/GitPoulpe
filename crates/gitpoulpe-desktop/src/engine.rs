@@ -107,25 +107,30 @@ impl Shared {
     }
 }
 
+fn open_cache() -> std::io::Result<DiffCache> {
+    DiffCache::open(CacheConfig::new(DiffCache::default_dir())).or_else(|first| {
+        let runtime = std::env::var_os("XDG_RUNTIME_DIR")
+            .map(|dir| std::path::PathBuf::from(dir).join("gitpoulpe"));
+        match runtime {
+            Some(dir) => DiffCache::open(CacheConfig::new(dir)),
+            None => Err(first),
+        }
+    })
+}
+
 async fn run(mut receiver: UnboundedReceiver<Command>, events: Sender<Event>, waker: WakerSlot) {
     let git = Git::new();
-    let cache = match DiffCache::open(CacheConfig::new(DiffCache::default_dir())) {
+    let cache = match open_cache() {
         Ok(cache) => cache,
         Err(error) => {
-            let fallback = std::env::temp_dir().join("gitpoulpe-diff");
-            match DiffCache::open(CacheConfig::new(fallback)) {
-                Ok(cache) => cache,
-                Err(_) => {
-                    let _ = events.send(Event::OpenFailed {
-                        request: 0,
-                        message: format!("cache: {error}"),
-                    });
-                    if let Some(wake) = waker.lock().unwrap().as_ref() {
-                        wake();
-                    }
-                    return;
-                }
+            let _ = events.send(Event::OpenFailed {
+                request: 0,
+                message: format!("Cache indisponible : {error}"),
+            });
+            if let Some(wake) = waker.lock().unwrap().as_ref() {
+                wake();
             }
+            return;
         }
     };
     let shared = Arc::new(Shared {
