@@ -232,7 +232,6 @@ impl Perf {
         scroll.offset += scroll.speed * dt as f32;
         tx.scroll_to_y("viewport", scroll.offset);
         self.record_interval(t);
-        self.maybe_write(t);
     }
 
     fn maybe_write(&mut self, t: f64) {
