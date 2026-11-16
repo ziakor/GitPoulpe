@@ -103,9 +103,51 @@ impl StatusSnapshot {
     }
 }
 
+fn is_unsafe_for_display(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{061C}'
+                | '\u{200B}'..='\u{200F}'
+                | '\u{2028}'..='\u{202E}'
+                | '\u{2060}'..='\u{206F}'
+                | '\u{FEFF}'
+        )
+}
+
 pub fn display_label(path: &Path) -> String {
     path.to_string_lossy()
         .chars()
-        .map(|c| if c.is_control() { '\u{FFFD}' } else { c })
+        .map(|c| {
+            if is_unsafe_for_display(c) {
+                '\u{FFFD}'
+            } else {
+                c
+            }
+        })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn control_bidi_and_zero_width_characters_never_reach_the_label() {
+        let spoofed = Path::new("report\u{202E}gpj.exe\n\t\u{200B}\u{2066}x\u{FEFF}");
+        let label = display_label(spoofed);
+        assert!(label.chars().all(|c| !is_unsafe_for_display(c)));
+        assert_eq!(
+            label,
+            "report\u{FFFD}gpj.exe\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}x\u{FFFD}"
+        );
+    }
+
+    #[test]
+    fn ordinary_unicode_names_are_kept() {
+        assert_eq!(
+            display_label(Path::new("dossier/é à ü 日本語.txt")),
+            "dossier/é à ü 日本語.txt"
+        );
+    }
 }
