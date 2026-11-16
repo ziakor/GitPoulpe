@@ -12,11 +12,29 @@ use gitpoulpe_git::{CacheConfig, Cancel, DiffCache, DiffReader, Git};
 use rune::Waker;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
+pub const MAX_COPY_BYTES: usize = 32 * 1024 * 1024;
+const COPY_SPAN_LINES: u64 = 4096;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CopyRequest {
+    pub request: u64,
+    pub generation: Generation,
+    pub side: DiffSide,
+    pub files: Vec<(usize, ChangeEntry)>,
+    pub from_row: u64,
+    pub from_offset: usize,
+    pub to_row: u64,
+    pub to_offset: usize,
+    pub split_left: Option<bool>,
+    pub max_bytes: usize,
+}
+
 pub enum Command {
     Open {
         request: u64,
         path: PathBuf,
     },
+    Copy(Box<CopyRequest>),
     Read {
         generation: Generation,
         side: DiffSide,
@@ -27,6 +45,12 @@ pub enum Command {
 }
 
 pub enum Event {
+    Copied {
+        request: u64,
+        text: String,
+        lines: u64,
+        truncated: bool,
+    },
     Opened {
         request: u64,
         info: Box<SessionInfo>,
@@ -163,6 +187,15 @@ async fn run(mut receiver: UnboundedReceiver<Command>, events: Sender<Event>, wa
                     Err(message) => shared.emit(Event::OpenFailed { request, message }),
                 }
             }
+            Command::Copy(request) => {
+                let Some(current) = session
+                    .clone()
+                    .filter(|s| s.generation == request.generation)
+                else {
+                    continue;
+                };
+                tokio::spawn(copy(shared.clone(), current, *request));
+            }
             Command::Read {
                 generation,
                 side,
@@ -284,4 +317,111 @@ async fn read(
             meta: Box::new(meta),
         });
     }
+}
+
+fn clip_to_offsets(line: &str, from: Option<usize>, to: Option<usize>) -> &str {
+    let mut start = from.unwrap_or(0).min(line.len());
+    let mut end = to.unwrap_or(line.len()).clamp(start, line.len());
+    while !line.is_char_boundary(start) {
+        start += 1;
+    }
+    while !line.is_char_boundary(end) {
+        end -= 1;
+    }
+    &line[start..end.max(start)]
+}
+
+async fn copy(shared: Arc<Shared>, session: Arc<Session>, request: CopyRequest) {
+    let cancel = Cancel::new();
+    let mut text = String::new();
+    let mut lines_copied = 0u64;
+    let mut truncated = false;
+    let last_file = request.files.len().saturating_sub(1);
+    'files: for (position, (_, entry)) in request.files.iter().enumerate() {
+        let Ok(document) =
+            shared
+                .reader
+                .open_document(&session.info, request.generation, request.side, entry)
+        else {
+            continue;
+        };
+        let Ok(meta) = document.wait_finished(&cancel).await else {
+            continue;
+        };
+        if meta.kind != Some(gitpoulpe_core::DocumentKind::Text) {
+            continue;
+        }
+        let split = match request.split_left {
+            Some(_) => meta.split.clone(),
+            None => None,
+        };
+        let total_rows = split.as_ref().map_or(meta.lines, |s| s.total_rows());
+        if total_rows == 0 {
+            continue;
+        }
+        let first_row = if position == 0 { request.from_row } else { 0 };
+        let last_row = if position == last_file {
+            request.to_row.min(total_rows - 1)
+        } else {
+            total_rows - 1
+        };
+        let line_of = |row: u64| match (&split, request.split_left) {
+            (Some(split), Some(left)) => split
+                .cells(row)
+                .and_then(|c| if left { c.left } else { c.right }),
+            _ => Some(row),
+        };
+        let first_line = line_of(first_row);
+        let last_line = line_of(last_row);
+        let mut wanted: Vec<u64> = Vec::new();
+        for row in first_row..=last_row {
+            if let Some(line) = line_of(row) {
+                wanted.push(line);
+            }
+        }
+        wanted.dedup();
+        let mut cursor = 0;
+        while cursor < wanted.len() {
+            let start = wanted[cursor];
+            let mut end = start + 1;
+            let mut taken = 1;
+            while cursor + taken < wanted.len()
+                && wanted[cursor + taken] == end
+                && end - start < COPY_SPAN_LINES
+            {
+                end += 1;
+                taken += 1;
+            }
+            cursor += taken;
+            let Ok(data) = document.read_range(start..end, &cancel).await else {
+                continue 'files;
+            };
+            for (offset, line) in data.lines.iter().enumerate() {
+                use gitpoulpe_core::DiffLineKind::{HunkHeader, NoNewlineAtEof};
+                if matches!(line.kind, HunkHeader | NoNewlineAtEof) {
+                    continue;
+                }
+                let id = start + offset as u64;
+                let content = String::from_utf8_lossy(&line.text);
+                let from = (position == 0 && Some(id) == first_line).then_some(request.from_offset);
+                let to =
+                    (position == last_file && Some(id) == last_line).then_some(request.to_offset);
+                if !text.is_empty() {
+                    text.push('\n');
+                }
+                text.push_str(clip_to_offsets(&content, from, to));
+                lines_copied += 1;
+                if text.len() > request.max_bytes {
+                    truncated = true;
+                    break 'files;
+                }
+            }
+        }
+    }
+    shared.emit(Event::Copied {
+        request: request.request,
+        text,
+        lines: lines_copied,
+        truncated,
+    });
 }

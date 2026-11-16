@@ -44,6 +44,7 @@ fn main() {
         poll: Some(|state, _, tx| {
             let changed = state.drain();
             state.apply_follow(tx);
+            state.apply_copy(tx);
             changed
         }),
         scenes: &[

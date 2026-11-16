@@ -12,7 +12,7 @@ use gitpoulpe_core::{
 use rune::prefs::Prefs;
 use rune::{Live, TextEdit, Tx, Waker};
 
-use crate::engine::{Command, Engine, Event, WakerSlot};
+use crate::engine::{Command, CopyRequest, Engine, Event, WakerSlot};
 use crate::theme::Palette;
 
 pub const CHUNK_LINES: u64 = 256;
@@ -39,6 +39,13 @@ impl ViewKind {
             Self::Staged => DiffSide::Staged,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SelectionAnchor {
+    pub index: usize,
+    pub row: u64,
+    pub offset: usize,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -100,6 +107,10 @@ pub struct State {
     pub current: Option<usize>,
     pub pinned: Option<usize>,
     pub visible: Range<usize>,
+    pub notice: Option<String>,
+    copy_request: u64,
+    pub copy_limit: usize,
+    copied: Option<(String, u64, bool)>,
     pub stick_end: bool,
     stick_grace: u8,
     last_offset: f32,
@@ -161,6 +172,10 @@ impl State {
             current: None,
             pinned: None,
             visible: 0..0,
+            notice: None,
+            copy_request: 0,
+            copy_limit: crate::engine::MAX_COPY_BYTES,
+            copied: None,
             stick_end: false,
             stick_grace: 0,
             last_offset: 0.0,
@@ -379,6 +394,18 @@ impl State {
                 self.stick_end = false;
                 self.screen = Screen::Ready;
                 self.refilter();
+                true
+            }
+            Event::Copied {
+                request,
+                text,
+                lines,
+                truncated,
+            } => {
+                if request != self.copy_request {
+                    return false;
+                }
+                self.copied = Some((text, lines, truncated));
                 true
             }
             Event::OpenFailed { request, message } => {
@@ -616,6 +643,66 @@ impl State {
         let index = self.entry_at(target).map(|(index, _)| index)?;
         self.follow = Some(index);
         Some(index)
+    }
+
+    pub fn start_copy(
+        &mut self,
+        first: SelectionAnchor,
+        last: SelectionAnchor,
+        split_left: Option<bool>,
+    ) -> bool {
+        let (Some(from), Some(to)) = (
+            self.files.iter().position(|&i| i == first.index),
+            self.files.iter().position(|&i| i == last.index),
+        ) else {
+            return false;
+        };
+        let Some(generation) = self.repo.as_ref().map(|r| r.generation) else {
+            return false;
+        };
+        if from > to {
+            return false;
+        }
+        let files: Vec<_> = self.files[from..=to]
+            .iter()
+            .filter_map(|&index| self.entries().get(index).map(|e| (index, e.clone())))
+            .collect();
+        self.copy_request += 1;
+        self.notice = Some("Copie en cours…".to_owned());
+        if let Some(engine) = &self.engine {
+            engine.send(Command::Copy(Box::new(CopyRequest {
+                request: self.copy_request,
+                generation,
+                side: self.view.side(),
+                files,
+                from_row: first.row,
+                from_offset: first.offset,
+                to_row: last.row,
+                to_offset: last.offset,
+                split_left,
+                max_bytes: self.copy_limit,
+            })));
+        }
+        true
+    }
+
+    #[cfg(test)]
+    pub fn peek_copied(&self) -> Option<&(String, u64, bool)> {
+        self.copied.as_ref()
+    }
+
+    pub fn apply_copy(&mut self, tx: &mut Tx) {
+        let Some((text, lines, truncated)) = self.copied.take() else {
+            return;
+        };
+        tx.copy(text);
+        self.notice = Some(match (truncated, lines) {
+            (true, _) => {
+                format!("{lines} lignes copiées : la sélection dépasse la limite de copie.")
+            }
+            (false, 1) => "1 ligne copiée.".to_owned(),
+            (false, n) => format!("{n} lignes copiées."),
+        });
     }
 
     pub fn apply_follow(&mut self, tx: &mut Tx) {

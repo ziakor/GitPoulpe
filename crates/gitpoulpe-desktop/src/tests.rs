@@ -382,7 +382,10 @@ fn rect_of(rt: &Runtime<State>, key: &str) -> Option<[f32; 4]> {
 fn step(rt: &mut Runtime<State>) {
     for _ in 0..10 {
         rt.state.drain();
-        rt.update(|s, tx| s.apply_follow(tx));
+        rt.update(|s, tx| {
+            s.apply_follow(tx);
+            s.apply_copy(tx);
+        });
         rt.frame(1.0 / 60.0);
         std::thread::sleep(Duration::from_millis(3));
     }
@@ -847,5 +850,249 @@ fn split_mode_loads_the_lines_a_row_needs_not_the_rows_in_between() {
             .iter()
             .any(|c| *c > left_chunk + 1 && *c < right_chunk - 1),
         "the thousands of lines between the two sides are not requested: {requested:?}"
+    );
+}
+
+fn expect_copy(state: &mut State) -> (String, u64, bool) {
+    for _ in 0..1000 {
+        state.drain();
+        if let Some(copied) = state.peek_copied() {
+            return copied.clone();
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    panic!("no copy result arrived");
+}
+
+fn anchor(
+    state: &State,
+    position: usize,
+    row: u64,
+    offset: usize,
+) -> crate::state::SelectionAnchor {
+    crate::state::SelectionAnchor {
+        index: state.entry_at(position).unwrap().0,
+        row,
+        offset,
+    }
+}
+
+const FILE_LINES: [&str; 9] = [
+    "line 2",
+    "line 3",
+    "line 4",
+    "line 5",
+    "changed 5",
+    "extra",
+    "line 6",
+    "line 7",
+    "line 8",
+];
+
+#[test]
+fn a_selection_is_copied_from_the_documents_even_when_no_line_was_ever_loaded() {
+    let repo = repo_with_files(40);
+    let mut state = opened(repo.path());
+    assert!(state.docs.is_empty(), "nothing was requested yet");
+    let first = anchor(&state, 3, 3, 2);
+    let last = anchor(&state, 9, 5, 4);
+    assert!(state.start_copy(first, last, None));
+    let (text, lines, truncated) = expect_copy(&mut state);
+
+    let mut expected: Vec<String> = vec!["ne 4".to_owned()];
+    expected.extend(FILE_LINES[3..].iter().map(|l| (*l).to_owned()));
+    for _ in 4..9 {
+        expected.extend(FILE_LINES.iter().map(|l| (*l).to_owned()));
+    }
+    expected.extend(FILE_LINES[..4].iter().map(|l| (*l).to_owned()));
+    expected.push("chan".to_owned());
+    assert_eq!(text, expected.join("\n"));
+    assert_eq!(lines, expected.len() as u64);
+    assert!(!truncated);
+}
+
+#[test]
+fn in_split_mode_only_the_selected_column_is_copied() {
+    let repo = repo_with_files(4);
+    let mut state = opened(repo.path());
+    state.settle(4, Duration::from_secs(30));
+    state.set_mode(crate::state::DiffMode::Split);
+    let (first, last) = (anchor(&state, 1, 2, 0), anchor(&state, 1, 6, 6));
+
+    assert!(state.start_copy(first, last, Some(true)));
+    let (left, ..) = expect_copy(&mut state);
+    assert_eq!(left, "line 3\nline 4\nline 5\nline 6");
+
+    let mut state = opened(repo.path());
+    state.settle(4, Duration::from_secs(30));
+    state.set_mode(crate::state::DiffMode::Split);
+    let (first, last) = (anchor(&state, 1, 2, 0), anchor(&state, 1, 6, 6));
+    assert!(state.start_copy(first, last, Some(false)));
+    let (right, ..) = expect_copy(&mut state);
+    assert_eq!(right, "line 3\nline 4\nchanged 5\nextra\nline 6");
+}
+
+#[test]
+fn a_copy_larger_than_the_limit_is_cut_and_reported() {
+    let repo = repo_with_files(10);
+    let mut state = opened(repo.path());
+    state.copy_limit = 100;
+    assert!(state.start_copy(anchor(&state, 0, 1, 0), anchor(&state, 9, 5, 9), None));
+    let (text, lines, truncated) = expect_copy(&mut state);
+    assert!(truncated);
+    assert!(
+        text.len() < 200 && (10..90).contains(&lines),
+        "{} bytes, {lines} lines",
+        text.len()
+    );
+}
+
+#[test]
+fn copy_requests_that_make_no_sense_are_refused() {
+    let repo = repo_with_files(3);
+    let mut state = opened(repo.path());
+    let (a, b) = (anchor(&state, 0, 1, 0), anchor(&state, 2, 1, 0));
+    assert!(
+        !state.start_copy(b, a, None),
+        "a selection never runs backwards across files"
+    );
+    let unknown = crate::state::SelectionAnchor {
+        index: 9999,
+        row: 0,
+        offset: 0,
+    };
+    assert!(!state.start_copy(unknown, b, None));
+}
+
+fn click_at(rt: &mut Runtime<State>, x: f32, y: f32, shift: bool) {
+    if shift {
+        rt.physical_input(rune::PhysicalInput::Modifiers(rune::Mods {
+            shift: true,
+            ..Default::default()
+        }));
+    }
+    rt.pointer_move(x, y);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    if shift {
+        rt.physical_input(rune::PhysicalInput::Modifiers(rune::Mods::default()));
+    }
+    rt.frame(1.0 / 60.0);
+}
+
+fn visible_code_texts(rt: &Runtime<State>) -> Vec<(usize, u64, [f32; 4])> {
+    let viewport = rect_of(rt, "viewport").unwrap();
+    rt.elements()
+        .into_iter()
+        .filter_map(|e| {
+            let key = e.key?;
+            let rest = key.strip_prefix('t')?;
+            let mut parts = rest.split(':');
+            let (index, row) = (parts.next()?.parse().ok()?, parts.next()?.parse().ok()?);
+            let inside =
+                e.rect[1] >= viewport[1] && e.rect[1] + e.rect[3] <= viewport[1] + viewport[3];
+            inside.then_some((index, row, e.rect))
+        })
+        .collect()
+}
+
+#[test]
+fn a_selection_extended_after_scrolling_far_away_copies_the_text_in_between_to_the_clipboard() {
+    let repo = repo_with_files(30);
+    let state = opened(repo.path());
+    let mut rt = runtime(state);
+    rt.on_key = Some(crate::keys::on_key);
+    let clipboard = rune::clipboard::memory();
+    rt.use_clipboard(&clipboard);
+    step(&mut rt);
+
+    let first_position = 1;
+    let (first_index, _) = rt.state.entry_at(first_position).unwrap();
+    let anchor_key = format!("t{first_index}:3");
+    let anchor_rect = loop {
+        if let Some(rect) = rect_of(&rt, &anchor_key) {
+            break rect;
+        }
+        rt.wheel(900.0, 300.0, -100.0);
+        step(&mut rt);
+    };
+    click_at(
+        &mut rt,
+        anchor_rect[0] + 1.0,
+        anchor_rect[1] + anchor_rect[3] / 2.0,
+        false,
+    );
+
+    for _ in 0..40 {
+        rt.wheel(900.0, 300.0, -400.0);
+        step(&mut rt);
+        if rect_of(&rt, &anchor_key).is_none()
+            && rt.state.current.is_some_and(|c| c > first_position + 6)
+        {
+            break;
+        }
+    }
+    assert!(
+        rect_of(&rt, &anchor_key).is_none(),
+        "the anchor line is no longer on screen"
+    );
+    let (last_index, last_row, last_rect) = visible_code_texts(&rt)
+        .into_iter()
+        .filter(|(_, row, _)| *row >= 1)
+        .max_by(|a, b| a.2[1].partial_cmp(&b.2[1]).unwrap())
+        .expect("code lines are visible");
+    let last_position = rt
+        .state
+        .files
+        .iter()
+        .position(|&i| i == last_index)
+        .unwrap();
+    assert!(
+        last_position > first_position + 4,
+        "the selection crosses several files that were never shown"
+    );
+    click_at(
+        &mut rt,
+        last_rect[0] + last_rect[2] - 1.0,
+        last_rect[1] + last_rect[3] / 2.0,
+        true,
+    );
+
+    rt.key(rune::KeyEvent {
+        key: rune::Key::Command('c'),
+        mods: rune::Mods {
+            cmd: true,
+            ctrl: true,
+            ..Default::default()
+        },
+    });
+    for _ in 0..300 {
+        step(&mut rt);
+        if clipboard.text().is_some() {
+            break;
+        }
+    }
+    let copied = clipboard
+        .text()
+        .expect("the copy reached the clipboard")
+        .to_string();
+
+    let mut expected: Vec<String> = FILE_LINES[2..].iter().map(|l| (*l).to_owned()).collect();
+    for _ in first_position + 1..last_position {
+        expected.extend(FILE_LINES.iter().map(|l| (*l).to_owned()));
+    }
+    expected.extend(
+        FILE_LINES[..last_row as usize]
+            .iter()
+            .map(|l| (*l).to_owned()),
+    );
+    assert_eq!(copied, expected.join("\n"));
+    assert!(
+        rt.state
+            .notice
+            .as_deref()
+            .is_some_and(|n| n.contains("copiées")),
+        "{:?}",
+        rt.state.notice
     );
 }

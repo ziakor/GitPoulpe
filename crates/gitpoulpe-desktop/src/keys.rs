@@ -1,6 +1,6 @@
-use rune::{FileDialogOptions, Key, KeyEvent, Tx};
+use rune::{FileDialogOptions, Key, KeyEvent, SelectedText, Tx};
 
-use crate::state::{State, ViewKind};
+use crate::state::{SelectionAnchor, State, ViewKind};
 use crate::view::row_key;
 
 const LINES_PER_KEY: usize = 3;
@@ -43,7 +43,43 @@ fn scroll_lines(s: &mut State, tx: &mut Tx, down: bool) {
     tx.scroll_into_view_in("rows", row_key(s, target));
 }
 
+fn anchor_of(
+    text: Option<&SelectedText>,
+    at_start: bool,
+) -> Option<(SelectionAnchor, Option<bool>)> {
+    let text = text?;
+    let rest = text.key()?.strip_prefix('t')?;
+    let mut parts = rest.split(':');
+    let index = parts.next()?.parse().ok()?;
+    let row = parts.next()?.parse().ok()?;
+    let left = parts.next().map(|side| side == "L");
+    let range = text.range();
+    let offset = if at_start { range.start } else { range.end };
+    Some((SelectionAnchor { index, row, offset }, left))
+}
+
+fn copy_selection(s: &mut State, tx: &Tx) -> bool {
+    let Some(selection) = tx.text_selection() else {
+        return false;
+    };
+    let texts = selection.texts();
+    if texts.len() < 2 {
+        return false;
+    }
+    let (Some((first, left)), Some((last, _))) = (
+        anchor_of(texts.first(), true),
+        anchor_of(texts.last(), false),
+    ) else {
+        return false;
+    };
+    s.start_copy(first, last, left)
+}
+
 pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
+    if event.mods.cmd && event.is_command('c') {
+        return copy_selection(s, tx);
+    }
+    s.notice = None;
     if event.mods.cmd {
         if event.is_command('o') {
             open_dialog(tx);

@@ -57,12 +57,14 @@ fn footer(s: &State) -> El {
         .fill(p.panel)
         .border(1.0, p.line)
         .child(
-            text("/ filtrer · j et k : fichier suivant ou précédent · 1 et 2 : changer de vue · m : unifié ou séparé · ↑ ↓ PgUp PgDn : lire · Ctrl+O : ouvrir un dépôt")
+            text(s.notice.clone().unwrap_or_else(|| HINTS.to_owned()))
                 .font(theme::SMALL)
                 .color(p.muted)
                 .truncate(),
         )
 }
+
+const HINTS: &str = "/ filtrer · j et k : fichier suivant ou précédent · 1 et 2 : changer de vue · m : unifié ou séparé · ↑ ↓ PgUp PgDn : lire · Ctrl+O : ouvrir un dépôt";
 
 fn open_button(p: &Palette, primary: bool) -> El {
     let (fill, ink) = if primary {
@@ -448,6 +450,7 @@ fn right_pane(s: &State) -> El {
     }
     let rows = col()
         .key("rows")
+        .selection_group(true)
         .w_full()
         .growth(GrowthSpec::default())
         .virtual_rows_version((s.layout_version, s.view, s.dark, s.mode))
@@ -714,6 +717,7 @@ fn placeholder(s: &State, key: String, label: &str) -> El {
 }
 
 fn line_row(p: &Palette, key: String, line: &DiffLine) -> El {
+    let text_key = format!("t{}", &key[1..]);
     let number = |value: Option<u32>| {
         text(value.map(|n| n.to_string()).unwrap_or_default())
             .font(theme::CODE)
@@ -768,6 +772,7 @@ fn line_row(p: &Palette, key: String, line: &DiffLine) -> El {
                 )
                 .child(
                     text(content)
+                        .key(text_key)
                         .font(theme::CODE)
                         .color(p.text)
                         .selectable(true)
@@ -800,12 +805,22 @@ fn split_row(s: &State, index: usize, row_index: u64, split: &SplitIndex, key: S
         .key(key)
         .w_full()
         .h(LINE_HEIGHT)
-        .child(split_cell(&p, left, true))
+        .child(split_cell(
+            &p,
+            left,
+            true,
+            format!("t{index}:{row_index}:L"),
+        ))
         .child(el().w(1.0).h_full().fill(p.line))
-        .child(split_cell(&p, right, false))
+        .child(split_cell(
+            &p,
+            right,
+            false,
+            format!("t{index}:{row_index}:R"),
+        ))
 }
 
-fn split_cell(p: &Palette, line: Option<&DiffLine>, old_side: bool) -> El {
+fn split_cell(p: &Palette, line: Option<&DiffLine>, old_side: bool, text_key: String) -> El {
     let cell = row().grow(1.0).min_w(0.0).h_full().px(8.0).center_y();
     let Some(line) = line else {
         return cell.fill(p.panel);
@@ -846,6 +861,7 @@ fn split_cell(p: &Palette, line: Option<&DiffLine>, old_side: bool) -> El {
         )
         .child(
             text(String::from_utf8_lossy(&line.text).into_owned())
+                .key(text_key)
                 .font(theme::CODE)
                 .color(p.text)
                 .selectable(true)
