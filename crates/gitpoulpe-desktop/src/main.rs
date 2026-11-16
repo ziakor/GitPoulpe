@@ -1,9 +1,12 @@
 mod engine;
 mod keys;
+mod perf;
 mod state;
 mod theme;
 mod view;
 
+#[cfg(test)]
+mod bench;
 #[cfg(test)]
 mod tests;
 
@@ -41,7 +44,8 @@ fn main() {
         min_size: Some((720.0, 480.0)),
         on_key: Some(keys::on_key),
         setup: Some(|state, waker| state.setup(waker)),
-        poll: Some(|state, _, tx| {
+        poll: Some(|state, t, tx| {
+            state.perf_frame(t, tx);
             let changed = state.drain();
             state.apply_follow(tx);
             state.apply_copy(tx);

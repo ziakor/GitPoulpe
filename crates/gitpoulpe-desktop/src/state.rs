@@ -112,6 +112,7 @@ pub struct State {
     pub pinned: Option<usize>,
     pub visible: Range<usize>,
     pub notice: Option<String>,
+    perf: Option<crate::perf::Perf>,
     pub max_loaded_lines: usize,
     visible_chunks: HashMap<usize, (u64, u64)>,
     copy_request: u64,
@@ -181,6 +182,7 @@ impl State {
             pinned: None,
             visible: 0..0,
             notice: None,
+            perf: crate::perf::Perf::from_env(),
             max_loaded_lines: MAX_LOADED_LINES,
             visible_chunks: HashMap::new(),
             copy_request: 0,
@@ -769,6 +771,13 @@ impl State {
             (false, 1) => "1 ligne copiée.".to_owned(),
             (false, n) => format!("{n} lignes copiées."),
         });
+    }
+
+    pub fn perf_frame(&mut self, t: f64, tx: &mut Tx) {
+        let ready = self.layout.total > 0 && self.docs.values().any(|d| d.meta.is_some());
+        if let Some(perf) = self.perf.as_mut() {
+            perf.frame(t, ready, tx);
+        }
     }
 
     pub fn apply_follow(&mut self, tx: &mut Tx) {
