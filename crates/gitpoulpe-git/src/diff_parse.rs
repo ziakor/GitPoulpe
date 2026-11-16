@@ -26,6 +26,8 @@ pub struct DiffSummary {
     pub type_changed: bool,
     pub hunks: Vec<Hunk>,
     pub lines: u64,
+    pub added: u64,
+    pub removed: u64,
 }
 
 #[derive(Debug, Default)]
@@ -36,6 +38,8 @@ pub struct DiffParser {
     old_number: u32,
     new_number: u32,
     lines: u64,
+    added: u64,
+    removed: u64,
     hunks: Vec<Hunk>,
     binary: bool,
     old_mode: Option<String>,
@@ -61,6 +65,14 @@ impl DiffParser {
 
     pub fn line_count(&self) -> u64 {
         self.lines
+    }
+
+    pub fn added(&self) -> u64 {
+        self.added
+    }
+
+    pub fn removed(&self) -> u64 {
+        self.removed
     }
 
     pub fn hunks(&self) -> &[Hunk] {
@@ -94,6 +106,8 @@ impl DiffParser {
             type_changed: self.sections > 1,
             hunks: self.hunks,
             lines: self.lines,
+            added: self.added,
+            removed: self.removed,
         })
     }
 
@@ -102,6 +116,11 @@ impl DiffParser {
             hunk.line_count += 1;
         }
         self.lines += 1;
+        match line.kind {
+            DiffLineKind::Added => self.added += 1,
+            DiffLineKind::Removed => self.removed += 1,
+            _ => {}
+        }
         out.push(line);
     }
 

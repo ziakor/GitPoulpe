@@ -97,6 +97,8 @@ struct DocState {
     build: BuildState,
     kind: Option<DocumentKind>,
     lines: u64,
+    added: u64,
+    removed: u64,
     flushed_lines: u64,
     hunks: Vec<Hunk>,
     type_changed: bool,
@@ -136,7 +138,7 @@ impl DocInner {
         self.progress.send_modify(|version| *version += 1);
     }
 
-    fn append(&self, lines: &[DiffLine], hunks: &[Hunk]) {
+    fn append(&self, lines: &[DiffLine], hunks: &[Hunk], counts: (u64, u64)) {
         let mut state = self.state.lock().unwrap();
         for line in lines {
             state.tail_bytes += line.text.len() + 13;
@@ -147,6 +149,7 @@ impl DocInner {
             }
         }
         state.hunks = hunks.to_vec();
+        (state.added, state.removed) = counts;
         drop(state);
         self.notify();
     }
@@ -188,6 +191,8 @@ impl DocInner {
         state.tail.clear();
         state.tail_bytes = 0;
         state.lines = 0;
+        state.added = 0;
+        state.removed = 0;
         state.flushed_lines = 0;
         state.hunks.clear();
         state.kind = Some(kind);
@@ -231,7 +236,7 @@ impl DocInner {
                 parser
                     .push(chunk, &mut pending)
                     .map_err(|e| e.to_string())?;
-                self.append(&pending, parser.hunks());
+                self.append(&pending, parser.hunks(), (parser.added(), parser.removed()));
                 Ok(())
             })
             .await;
@@ -361,6 +366,8 @@ impl DiffDocument {
             state: state.build,
             kind: state.kind.clone(),
             lines: state.lines,
+            added: state.added,
+            removed: state.removed,
             hunks: state.hunks.clone(),
             type_changed: state.type_changed,
         }
@@ -545,6 +552,8 @@ impl DiffReader {
                 build: BuildState::Building,
                 kind: None,
                 lines: 0,
+                added: 0,
+                removed: 0,
                 flushed_lines: 0,
                 hunks: Vec::new(),
                 type_changed: false,

@@ -176,6 +176,7 @@ async fn ranges_match_git_for_unstaged_staged_and_untracked_files() {
     let meta = m.meta();
     assert_eq!(meta.kind, Some(DocumentKind::Text));
     assert_eq!(meta.hunks.len(), 2);
+    assert_eq!((meta.added, meta.removed), (3, 2));
     assert_eq!(meta.total_lines(), Some(lines.len() as u64));
     assert_eq!(
         lines[meta.hunks[1].first_line as usize].kind,

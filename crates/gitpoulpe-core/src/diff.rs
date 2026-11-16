@@ -75,6 +75,8 @@ pub struct DocumentMeta {
     pub state: BuildState,
     pub kind: Option<DocumentKind>,
     pub lines: u64,
+    pub added: u64,
+    pub removed: u64,
     pub hunks: Vec<Hunk>,
     pub type_changed: bool,
 }
@@ -364,6 +366,8 @@ mod tests {
             state: BuildState::Complete,
             kind: Some(DocumentKind::Text),
             lines: 30,
+            added: 0,
+            removed: 0,
             hunks: vec![hunk(0, 10), hunk(10, 12), hunk(22, 8)],
             type_changed: false,
         };

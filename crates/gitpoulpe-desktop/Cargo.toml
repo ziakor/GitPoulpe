@@ -10,4 +10,10 @@ name = "gitpoulpe"
 path = "src/main.rs"
 
 [dependencies]
+gitpoulpe-core = { path = "../gitpoulpe-core" }
+gitpoulpe-git = { path = "../gitpoulpe-git" }
 rune.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile = "=3.27.0"

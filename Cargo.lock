@@ -1055,7 +1055,11 @@ version = "0.0.0"
 name = "gitpoulpe-desktop"
 version = "0.0.0"
 dependencies = [
+ "gitpoulpe-core",
+ "gitpoulpe-git",
  "rune",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
