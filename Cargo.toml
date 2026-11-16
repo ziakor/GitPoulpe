@@ -1,0 +1,21 @@
+[workspace]
+resolver = "3"
+members = ["crates/gitpoulpe-core", "crates/gitpoulpe-git", "crates/gitpoulpe-desktop"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-only"
+rust-version = "1.100.0"
+
+[workspace.dependencies]
+rune = { git = "https://github.com/anomalyco/rune", rev = "1dba3423fd1f1904553422e7814700f817abe8af" }
+tokio = { version = "=1.54.1", features = ["rt-multi-thread", "process", "sync", "time", "io-util"] }
+notify = "=8.2.2"
+
+[patch.crates-io]
+winit = { git = "https://github.com/anomalyco/rune", rev = "1dba3423fd1f1904553422e7814700f817abe8af" }
+parley_engine = { git = "https://github.com/anomalyco/rune", rev = "1dba3423fd1f1904553422e7814700f817abe8af" }
+wgpu-hal = { git = "https://github.com/anomalyco/rune", rev = "1dba3423fd1f1904553422e7814700f817abe8af" }
+accesskit_windows = { git = "https://github.com/anomalyco/rune", rev = "1dba3423fd1f1904553422e7814700f817abe8af" }
+accesskit_macos = { git = "https://github.com/anomalyco/rune", rev = "1dba3423fd1f1904553422e7814700f817abe8af" }

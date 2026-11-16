@@ -1,0 +1,13 @@
+[package]
+name = "gitpoulpe-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "gitpoulpe"
+path = "src/main.rs"
+
+[dependencies]
+rune.workspace = true
