@@ -10,7 +10,7 @@ use gitpoulpe_core::{
     StatusSnapshot,
 };
 use rune::prefs::Prefs;
-use rune::{TextEdit, Waker};
+use rune::{TextEdit, Tx, Waker};
 
 use crate::engine::{Command, Engine, Event, WakerSlot};
 use crate::theme::Palette;
@@ -80,6 +80,7 @@ pub struct State {
     pub layout_version: u64,
     pub current: Option<usize>,
     pub pinned: Option<usize>,
+    follow: Option<usize>,
     pub list_width: f32,
     prefs: Prefs,
     engine: Option<Engine>,
@@ -130,6 +131,7 @@ impl State {
             layout_version: 0,
             current: None,
             pinned: None,
+            follow: None,
             list_width,
             prefs,
             engine: None,
@@ -167,6 +169,7 @@ impl State {
     pub fn jump_to(&mut self, position: usize) {
         self.current = Some(position);
         self.pinned = Some(position);
+        self.follow = None;
     }
 
     pub fn set_dark(&mut self, dark: bool) {
@@ -469,7 +472,16 @@ impl State {
         let current = pinned.unwrap_or(by_scroll);
         let changed = self.current != Some(current);
         self.current = Some(current);
+        if changed {
+            self.follow = self.entry_at(current).map(|(index, _)| index);
+        }
         changed
+    }
+
+    pub fn apply_follow(&mut self, tx: &mut Tx) {
+        if let Some(index) = self.follow.take() {
+            tx.scroll_into_view_in("list-rows", format!("f{index}"));
+        }
     }
 
     pub fn line(&self, index: usize, line: u64) -> Option<&DiffLine> {

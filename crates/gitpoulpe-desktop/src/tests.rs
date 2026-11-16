@@ -371,3 +371,69 @@ fn a_chosen_file_is_released_once_it_is_no_longer_the_first_on_screen() {
     );
     assert_eq!(state.pinned, None);
 }
+
+fn rect_of(rt: &Runtime<State>, key: &str) -> Option<[f32; 4]> {
+    rt.elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some(key))
+        .map(|e| e.rect)
+}
+
+fn step(rt: &mut Runtime<State>) {
+    for _ in 0..10 {
+        rt.state.drain();
+        rt.update(|s, tx| s.apply_follow(tx));
+        rt.frame(1.0 / 60.0);
+        std::thread::sleep(Duration::from_millis(3));
+    }
+}
+
+fn current_row_is_inside_the_list(rt: &Runtime<State>) -> bool {
+    let Some(position) = rt.state.current else {
+        return false;
+    };
+    let (index, _) = rt.state.entry_at(position).unwrap();
+    let Some(viewport) = rect_of(rt, "list-viewport") else {
+        return false;
+    };
+    let Some(row) = rect_of(rt, &format!("f{index}")) else {
+        return false;
+    };
+    row[1] >= viewport[1] - 1.0 && row[1] + row[3] <= viewport[1] + viewport[3] + 1.0
+}
+
+#[test]
+fn the_file_list_scrolls_to_keep_the_current_file_in_view_both_ways() {
+    let repo = repo_with_files(80);
+    let mut rt = runtime(opened(repo.path()));
+    step(&mut rt);
+    assert!(current_row_is_inside_the_list(&rt));
+    let list_rows = rt.state.files.len();
+
+    let mut moved_past_the_first_screen = false;
+    for _ in 0..16 {
+        rt.wheel(900.0, 300.0, -2200.0);
+        step(&mut rt);
+        assert!(
+            current_row_is_inside_the_list(&rt),
+            "current={:?} of {list_rows}",
+            rt.state.current
+        );
+        moved_past_the_first_screen |= rt.state.current.is_some_and(|c| c > 20);
+    }
+    assert!(
+        moved_past_the_first_screen,
+        "the fixture must scroll the diff past the first list screen"
+    );
+
+    for _ in 0..16 {
+        rt.wheel(900.0, 300.0, 2200.0);
+        step(&mut rt);
+        assert!(
+            current_row_is_inside_the_list(&rt),
+            "going back up, current={:?}",
+            rt.state.current
+        );
+    }
+    assert!(rt.state.current.is_some_and(|c| c < 5));
+}

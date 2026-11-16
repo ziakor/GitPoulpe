@@ -33,7 +33,11 @@ fn main() {
         families: theme::FAMILIES,
         min_size: Some((720.0, 480.0)),
         setup: Some(|state, waker| state.setup(waker)),
-        poll: Some(|state, _, _| state.drain()),
+        poll: Some(|state, _, tx| {
+            let changed = state.drain();
+            state.apply_follow(tx);
+            changed
+        }),
         scenes: &[("demo", demo), ("demo-light", demo_light)],
         ..AppSpec::new("GitPoulpe", (1280.0, 800.0), State::default, view::view)
     });
