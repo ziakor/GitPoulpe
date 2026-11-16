@@ -152,3 +152,30 @@ async fn a_technical_failure_never_looks_like_a_clean_repository() {
         .await;
     assert!(matches!(result, Err(ReadError::GitFailed(_))));
 }
+
+#[tokio::test]
+async fn a_program_busy_for_writing_is_retried_instead_of_reported_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let program = fake_git(dir.path(), "exit 3");
+    let writer = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&program)
+        .unwrap();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(150));
+        drop(writer);
+    });
+    let git = Git::with_program(program);
+    let err = git
+        .read_status(
+            &session_in(dir.path()),
+            Generation::default().next(),
+            &Cancel::new(),
+        )
+        .await
+        .unwrap_err();
+    let ReadError::GitFailed(diagnostic) = err else {
+        panic!("expected GitFailed, got {err:?}")
+    };
+    assert_eq!(diagnostic.exit_code, Some(3));
+}

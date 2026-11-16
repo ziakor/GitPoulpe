@@ -68,6 +68,32 @@ impl RunError {
     }
 }
 
+const SPAWN_ATTEMPTS: u32 = 20;
+const SPAWN_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(25);
+
+async fn spawn_with_retry(
+    command: &mut Command,
+    cancel: &Cancel,
+) -> Result<tokio::process::Child, RunError> {
+    let mut attempt = 1;
+    loop {
+        match command.spawn() {
+            Ok(child) => return Ok(child),
+            Err(error)
+                if error.kind() == io::ErrorKind::ExecutableFileBusy
+                    && attempt < SPAWN_ATTEMPTS =>
+            {
+                attempt += 1;
+                tokio::select! {
+                    () = tokio::time::sleep(SPAWN_RETRY_DELAY) => {}
+                    () = cancel.cancelled() => return Err(RunError::Cancelled),
+                }
+            }
+            Err(error) => return Err(RunError::Spawn(error)),
+        }
+    }
+}
+
 async fn drain_stderr(mut stream: impl AsyncRead + Unpin) -> Vec<u8> {
     let mut kept = Vec::new();
     let mut buf = vec![0u8; 8 * 1024];
@@ -130,7 +156,7 @@ impl Git {
             command.env_remove(name);
         }
         command.envs(env.iter().map(|(k, v)| (k, v)));
-        let mut child = command.spawn().map_err(RunError::Spawn)?;
+        let mut child = spawn_with_retry(&mut command, cancel).await?;
         let mut stdout = child.stdout.take().expect("stdout is piped");
         let stderr = child.stderr.take().expect("stderr is piped");
         let stderr_task = tokio::spawn(drain_stderr(stderr));
