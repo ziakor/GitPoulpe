@@ -9,6 +9,7 @@ window must stay visible and focused: a hidden window is not asked for frames an
 reported as invalid.
 """
 import argparse
+import datetime
 import json
 import os
 import subprocess
@@ -30,7 +31,10 @@ def run_once(binary: str, repo: str, mode: str, seconds: int, speed: int) -> dic
         if not os.path.exists(report):
             return {"validity": "invalid: no report was written"}
         with open(report) as handle:
-            return json.load(handle)
+            data = json.load(handle)
+        if not data.get("autoscroll", {}).get("finished", False):
+            data["validity"] = "invalid: the window was closed or the run interrupted before it finished"
+        return data
 
 
 def main() -> int:
@@ -40,25 +44,37 @@ def main() -> int:
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--seconds", type=int, default=20)
     parser.add_argument("--speed", type=int, default=3000)
+    parser.add_argument("--results", default=os.path.expanduser("~/bench/results"))
     args = parser.parse_args()
     if not os.path.exists(args.binary):
         sys.exit(f"{args.binary} is missing: cargo build --release -p gitpoulpe-desktop")
+    os.makedirs(args.results, exist_ok=True)
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    log_path = os.path.join(args.results, f"{stamp}.jsonl")
+    print(f"each run is saved in {log_path}; keep the window visible and focused, do not touch the mouse\n", flush=True)
     invalid = 0
-    for mode in ("unified", "split"):
-        for run in range(1, args.runs + 1):
-            report = run_once(args.binary, args.repo, mode, args.seconds, args.speed)
-            validity = report.get("validity", "invalid")
-            if not str(validity).startswith("valid"):
-                invalid += 1
-                print(f"{mode:8} run {run}: {validity}")
-                continue
-            interval = report["interval_ms"]
-            print(f"{mode:8} run {run}: {report['frames']} frames, interval p50 {interval['p50']} p95 {interval['p95']} "
-                  f"p99 {interval['p99']} max {interval['max']} ms, over 25 ms: {report['over_25ms']}, "
-                  f"over 33 ms: {report['over_33ms']}, idle gaps: {report['idle_gaps']}, "
-                  f"first document at {report['ready_at_s']} s, {report['rss_kib'] / 1024:.0f} MiB")
+    try:
+        for mode in ("unified", "split"):
+            for run in range(1, args.runs + 1):
+                report = run_once(args.binary, args.repo, mode, args.seconds, args.speed)
+                with open(log_path, "a") as log:
+                    log.write(json.dumps({"mode": mode, "run": run, "report": report}) + "\n")
+                validity = report.get("validity", "invalid")
+                if not str(validity).startswith("valid"):
+                    invalid += 1
+                    print(f"{mode:8} run {run}: {validity}", flush=True)
+                    continue
+                interval = report["interval_ms"]
+                print(f"{mode:8} run {run}: {report['frames']} frames, interval p50 {interval['p50']} p95 {interval['p95']} "
+                      f"p99 {interval['p99']} max {interval['max']} ms, over 25 ms: {report['over_25ms']}, "
+                      f"over 33 ms: {report['over_33ms']}, idle gaps: {report['idle_gaps']}, "
+                      f"first document at {report['ready_at_s']} s, {report['rss_kib'] / 1024:.0f} MiB", flush=True)
+    except KeyboardInterrupt:
+        print(f"\ninterrupted; what was measured so far is in {log_path}")
+        return 130
     if invalid:
         print(f"\n{invalid} run(s) invalid: keep the window visible and focused during the whole run.")
+    print(f"\nresults: {log_path}")
     return 1 if invalid else 0
 
 
