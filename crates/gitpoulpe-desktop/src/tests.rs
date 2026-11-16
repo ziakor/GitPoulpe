@@ -318,3 +318,56 @@ fn the_divider_can_be_resized_from_the_keyboard() {
     rt.frame(1.0 / 60.0);
     assert_eq!(rt.state.list_width, start - 48.0);
 }
+
+#[test]
+fn the_current_file_is_the_one_under_the_reading_line_not_the_first_one_on_screen() {
+    let repo = repo_with_files(30);
+    let mut state = opened(repo.path());
+    let start = state.layout.offsets[5] as usize + 1;
+    let rows = start..start + 40;
+    let (first_file, _) = state.locate(start as u64).unwrap();
+    let reading_row = start + 40 * crate::state::READING_LINE_PERCENT / 100;
+    let (reading_file, _) = state.locate(reading_row as u64).unwrap();
+    assert_ne!(
+        first_file, reading_file,
+        "the fixture must separate the two rules"
+    );
+    state.on_visible(rows);
+    assert_eq!(state.current, Some(reading_file));
+}
+
+#[test]
+fn the_first_file_is_current_at_the_very_top_and_the_last_at_the_very_bottom() {
+    let repo = repo_with_files(30);
+    let mut state = opened(repo.path());
+    let total = state.layout.total as usize;
+    state.on_visible(0..60);
+    assert_eq!(state.current, Some(0));
+    state.on_visible(total - 60..total);
+    assert_eq!(state.current, Some(state.files.len() - 1));
+}
+
+#[test]
+fn a_chosen_file_is_released_once_it_is_no_longer_the_first_on_screen() {
+    let repo = repo_with_files(30);
+    let mut state = opened(repo.path());
+    state.settle(state.files.len(), Duration::from_secs(30));
+    assert!(
+        state.layout.total > 31 * 8,
+        "every document is loaded: {}",
+        state.layout.total
+    );
+    let target = 10;
+    let top = state.layout.offsets[target] as usize;
+    state.jump_to(target);
+    state.on_visible(top..top + 40);
+    assert_eq!(state.current, Some(target));
+    let moved = state.layout.offsets[target] as usize + 30;
+    state.on_visible(moved..moved + 40);
+    assert_ne!(
+        state.current,
+        Some(target),
+        "scrolling past the chosen file releases it"
+    );
+    assert_eq!(state.pinned, None);
+}

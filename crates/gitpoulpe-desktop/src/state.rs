@@ -20,6 +20,7 @@ pub const LIST_WIDTH_DEFAULT: f32 = 372.0;
 pub const LIST_WIDTH_MIN: f32 = 260.0;
 pub const LIST_WIDTH_MAX: f32 = 640.0;
 const LIST_WIDTH_KEY: &str = "list_width";
+pub const READING_LINE_PERCENT: usize = 35;
 const PREFETCH_BEFORE: usize = 2;
 const PREFETCH_AFTER: usize = 8;
 
@@ -450,13 +451,22 @@ impl State {
             return false;
         };
         let at_end = rows.end as u64 >= self.layout.total;
-        let current = match self.pinned.filter(|p| (first..=last).contains(p)) {
-            Some(pinned) => pinned,
-            None => {
-                self.pinned = None;
-                if at_end { last } else { first }
-            }
+        let reading_row = rows.start + rows.len() * READING_LINE_PERCENT / 100;
+        let reading = self
+            .locate(reading_row as u64)
+            .map_or(first, |(position, _)| position);
+        let by_scroll = if at_end {
+            last
+        } else if rows.start == 0 {
+            first
+        } else {
+            reading
         };
+        let pinned = self
+            .pinned
+            .filter(|&p| (first..=last).contains(&p) && (p == first || at_end));
+        self.pinned = pinned;
+        let current = pinned.unwrap_or(by_scroll);
         let changed = self.current != Some(current);
         self.current = Some(current);
         changed
