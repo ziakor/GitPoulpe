@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use gitpoulpe_core::{
     BuildState, ChangeEntry, Diagnostic, DiffKey, DiffLine, DiffSide, DocumentKind, DocumentMeta,
     EntryKind, FileRef, Generation, Hunk, RangeData, RangeError, ReadError, SessionId, SessionInfo,
+    SplitIndex, SplitIndexBuilder,
 };
 use tokio::sync::watch;
 
@@ -102,6 +103,8 @@ struct DocState {
     flushed_lines: u64,
     hunks: Vec<Hunk>,
     type_changed: bool,
+    splitter: SplitIndexBuilder,
+    split: Option<Arc<SplitIndex>>,
     segments: Vec<SegmentMeta>,
     tail: Vec<DiffLine>,
     tail_bytes: usize,
@@ -142,6 +145,7 @@ impl DocInner {
         let mut state = self.state.lock().unwrap();
         for line in lines {
             state.tail_bytes += line.text.len() + 13;
+            state.splitter.push(line.kind);
             state.tail.push(line.clone());
             state.lines += 1;
             if state.tail.len() >= SEGMENT_MAX_LINES || state.tail_bytes >= SEGMENT_MAX_BYTES {
@@ -178,6 +182,8 @@ impl DocInner {
             state.hunks = hunks;
         }
         state.type_changed = type_changed;
+        let splitter = std::mem::take(&mut state.splitter);
+        state.split = (kind == DocumentKind::Text).then(|| Arc::new(splitter.finish()));
         state.kind = Some(kind);
         state.build = BuildState::Complete;
         drop(state);
@@ -195,6 +201,8 @@ impl DocInner {
         state.removed = 0;
         state.flushed_lines = 0;
         state.hunks.clear();
+        state.splitter = SplitIndexBuilder::new();
+        state.split = None;
         state.kind = Some(kind);
         state.build = BuildState::Complete;
         drop(state);
@@ -370,6 +378,7 @@ impl DiffDocument {
             removed: state.removed,
             hunks: state.hunks.clone(),
             type_changed: state.type_changed,
+            split: state.split.clone(),
         }
     }
 
@@ -557,6 +566,8 @@ impl DiffReader {
                 flushed_lines: 0,
                 hunks: Vec::new(),
                 type_changed: false,
+                splitter: SplitIndexBuilder::new(),
+                split: None,
                 segments: Vec::new(),
                 tail: Vec::new(),
                 tail_bytes: 0,

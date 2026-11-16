@@ -9,7 +9,7 @@ use std::time::Duration;
 use common::*;
 use gitpoulpe_core::{
     BuildState, ChangeEntry, DiffLine, DiffLineKind, DiffSide, DocumentKind, EntryKind, Generation,
-    RangeError, SessionInfo, StatusCode, StatusSnapshot,
+    RangeError, SessionInfo, SplitIndex, StatusCode, StatusSnapshot, split_rows,
 };
 use gitpoulpe_git::{CacheConfig, Cancel, DiffCache, DiffDocument, DiffError, DiffReader, Git};
 use tempfile::TempDir;
@@ -938,4 +938,70 @@ async fn a_partial_clone_never_fetches_missing_objects_over_the_network() {
         "{:?}",
         meta.kind
     );
+}
+
+#[tokio::test]
+async fn the_split_index_describes_exactly_the_lines_of_each_text_document() {
+    let repo = init_repo();
+    let dir_buf = repo.path().to_path_buf();
+    let dir = dir_buf.as_path();
+    write(dir, "m.txt", &numbered(60));
+    write(dir, "nl.txt", "a\nb");
+    std::fs::write(dir.join("bin.dat"), b"\0\x01old").unwrap();
+    commit_all(dir, "base");
+    write(
+        dir,
+        "m.txt",
+        &numbered(60)
+            .replace("line 5\n", "five\n")
+            .replace("line 40\n", "forty\nextra\n"),
+    );
+    write(dir, "nl.txt", "a\nB");
+    std::fs::write(dir.join("bin.dat"), b"\0\x02new").unwrap();
+    write(dir, "u.txt", "first\nlast without newline");
+    let fixture = Fixture::new(repo).await;
+
+    for path in ["m.txt", "nl.txt", "u.txt"] {
+        let doc = fixture.doc(DiffSide::Unstaged, path);
+        let lines = all_lines(&doc).await;
+        let meta = doc.wait_finished(&Cancel::new()).await.unwrap();
+        let index = meta
+            .split
+            .clone()
+            .unwrap_or_else(|| panic!("{path} has no split index"));
+        assert_eq!(
+            *index,
+            SplitIndex::from_kinds(lines.iter().map(|l| l.kind)),
+            "{path}"
+        );
+        assert_eq!(index.total_lines(), lines.len() as u64, "{path}");
+        assert_eq!(
+            index.total_rows(),
+            split_rows(&lines).len() as u64,
+            "{path}"
+        );
+    }
+    let binary = fixture.doc(DiffSide::Unstaged, "bin.dat");
+    assert!(
+        binary
+            .wait_finished(&Cancel::new())
+            .await
+            .unwrap()
+            .split
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn a_huge_added_file_has_one_change_block_in_its_split_index() {
+    let repo = init_repo();
+    let content: String = (0..50_000).map(|i| format!("line {i}\n")).collect();
+    write(repo.path(), "big.txt", &content);
+    let fixture = Fixture::new(repo).await;
+    let doc = fixture.doc(DiffSide::Unstaged, "big.txt");
+    let meta = doc.wait_finished(&Cancel::new()).await.unwrap();
+    let index = meta.split.unwrap();
+    assert_eq!((index.total_lines(), index.total_rows()), (50_001, 50_001));
+    assert_eq!(index.units().len(), 2, "one header and one change block");
+    assert_eq!(index.line_ranges(30_000..30_010), vec![30_000..30_010]);
 }
