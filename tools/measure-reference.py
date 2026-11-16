@@ -26,8 +26,12 @@ def run_once(binary: str, repo: str, mode: str, seconds: int, speed: int) -> dic
         report = os.path.join(out, "report.json")
         env = dict(os.environ, GITPOULPE_PERF_LOG=report, GITPOULPE_AUTOSCROLL=str(seconds),
                    GITPOULPE_SCROLL_SPEED=str(speed), RUNE_PREFS_DIR=prefs, RUNE_PERF_WARN="0")
-        subprocess.run([binary, repo], env=env, timeout=seconds + 60, check=False,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            subprocess.run([binary, repo], env=env, timeout=seconds + 60, check=False,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except subprocess.TimeoutExpired:
+            return {"validity": "invalid: the window was never asked to draw frames, so the scroll never finished "
+                                "(hidden window, screen asleep or session locked); the process was stopped"}
         if not os.path.exists(report):
             return {"validity": "invalid: no report was written"}
         with open(report) as handle:
