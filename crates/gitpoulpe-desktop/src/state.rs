@@ -10,7 +10,7 @@ use gitpoulpe_core::{
     StatusSnapshot,
 };
 use rune::prefs::Prefs;
-use rune::{TextEdit, Tx, Waker};
+use rune::{Live, TextEdit, Tx, Waker};
 
 use crate::engine::{Command, Engine, Event, WakerSlot};
 use crate::theme::Palette;
@@ -21,6 +21,7 @@ pub const LIST_WIDTH_MIN: f32 = 260.0;
 pub const LIST_WIDTH_MAX: f32 = 640.0;
 const LIST_WIDTH_KEY: &str = "list_width";
 pub const READING_LINE_PERCENT: usize = 35;
+const STICK_GRACE_CALLS: u8 = 2;
 const PREFETCH_BEFORE: usize = 2;
 const PREFETCH_AFTER: usize = 8;
 
@@ -80,6 +81,11 @@ pub struct State {
     pub layout_version: u64,
     pub current: Option<usize>,
     pub pinned: Option<usize>,
+    pub visible: Range<usize>,
+    pub stick_end: bool,
+    stick_grace: u8,
+    last_offset: f32,
+    pub scroll_probe: Live<[f32; 4]>,
     follow: Option<usize>,
     pub list_width: f32,
     prefs: Prefs,
@@ -131,6 +137,11 @@ impl State {
             layout_version: 0,
             current: None,
             pinned: None,
+            visible: 0..0,
+            stick_end: false,
+            stick_grace: 0,
+            last_offset: 0.0,
+            scroll_probe: Live::new([0.0; 4]),
             follow: None,
             list_width,
             prefs,
@@ -170,6 +181,7 @@ impl State {
         self.current = Some(position);
         self.pinned = Some(position);
         self.follow = None;
+        self.stick_end = false;
     }
 
     pub fn set_dark(&mut self, dark: bool) {
@@ -221,6 +233,7 @@ impl State {
             self.view = view;
             self.current = None;
             self.pinned = None;
+            self.stick_end = false;
             self.refilter();
         }
     }
@@ -280,7 +293,20 @@ impl State {
         Some((position, row - self.layout.offsets[position]))
     }
 
+    fn watch_scroll(&mut self) {
+        let offset = self.scroll_probe.get()[0];
+        if self.stick_end {
+            if self.stick_grace > 0 {
+                self.stick_grace -= 1;
+            } else if offset < self.last_offset - 1.0 {
+                self.stick_end = false;
+            }
+        }
+        self.last_offset = offset;
+    }
+
     pub fn drain(&mut self) -> bool {
+        self.watch_scroll();
         let mut changed = false;
         while let Ok(event) = self.events.try_recv() {
             changed |= self.apply(event);
@@ -315,6 +341,7 @@ impl State {
                 self.docs.clear();
                 self.current = None;
                 self.pinned = None;
+                self.stick_end = false;
                 self.screen = Screen::Ready;
                 self.refilter();
                 true
@@ -450,6 +477,7 @@ impl State {
     }
 
     pub fn on_visible(&mut self, rows: Range<usize>) -> bool {
+        self.visible = rows.clone();
         let Some((first, last)) = self.request_range(&rows) else {
             return false;
         };
@@ -476,6 +504,24 @@ impl State {
             self.follow = self.entry_at(current).map(|(index, _)| index);
         }
         changed
+    }
+
+    pub fn stick_to_end(&mut self) {
+        self.stick_end = true;
+        self.stick_grace = STICK_GRACE_CALLS;
+    }
+
+    pub fn step_file(&mut self, delta: isize) -> Option<usize> {
+        if self.files.is_empty() {
+            return None;
+        }
+        let last = self.files.len() - 1;
+        let from = self.current.unwrap_or(0);
+        let target = from.saturating_add_signed(delta).min(last);
+        self.jump_to(target);
+        let index = self.entry_at(target).map(|(index, _)| index)?;
+        self.follow = Some(index);
+        Some(index)
     }
 
     pub fn apply_follow(&mut self, tx: &mut Tx) {

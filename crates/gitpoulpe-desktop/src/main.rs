@@ -1,4 +1,5 @@
 mod engine;
+mod keys;
 mod state;
 mod theme;
 mod view;
@@ -32,6 +33,7 @@ fn main() {
         fonts: theme::FONTS,
         families: theme::FAMILIES,
         min_size: Some((720.0, 480.0)),
+        on_key: Some(keys::on_key),
         setup: Some(|state, waker| state.setup(waker)),
         poll: Some(|state, _, tx| {
             let changed = state.drain();

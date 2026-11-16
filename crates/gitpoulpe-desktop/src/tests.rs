@@ -437,3 +437,232 @@ fn the_file_list_scrolls_to_keep_the_current_file_in_view_both_ways() {
     }
     assert!(rt.state.current.is_some_and(|c| c < 5));
 }
+
+fn keyboard_runtime(files: usize) -> (TempDir, Runtime<State>) {
+    let repo = repo_with_files(files);
+    let mut rt = runtime(opened(repo.path()));
+    rt.on_key = Some(crate::keys::on_key);
+    (repo, rt)
+}
+
+fn focused(rt: &Runtime<State>) -> Option<String> {
+    rt.elements()
+        .into_iter()
+        .find(|e| e.focused)
+        .and_then(|e| e.key)
+}
+
+fn press(rt: &mut Runtime<State>, key: rune::Key) {
+    rt.key(rune::KeyEvent {
+        key,
+        mods: rune::Mods::default(),
+    });
+    step(rt);
+}
+
+fn type_text(rt: &mut Runtime<State>, text: &str) {
+    press(rt, rune::Key::Text(text.to_owned()));
+}
+
+fn focus(rt: &mut Runtime<State>, key: &str) {
+    let key = key.to_owned();
+    rt.update(move |_, tx| tx.focus(key, true));
+    step(rt);
+}
+
+#[test]
+fn slash_focuses_the_filter_and_escape_clears_then_leaves_it() {
+    let (_repo, mut rt) = keyboard_runtime(10);
+    assert_eq!(focused(&rt), None);
+    type_text(&mut rt, "/");
+    assert_eq!(focused(&rt).as_deref(), Some("filter"));
+    assert_eq!(
+        rt.state.filter.text, "",
+        "the slash opens the filter, it is not typed into it"
+    );
+    assert!(
+        rt.elements().iter().any(|e| e.focused && e.focus_visible),
+        "the focus ring is visible"
+    );
+
+    type_text(&mut rt, "file_0003");
+    assert_eq!(rt.state.filter.text, "file_0003");
+    assert_eq!(rt.state.files.len(), 1);
+
+    press(&mut rt, rune::Key::Escape);
+    assert_eq!(rt.state.filter.text, "");
+    assert_eq!(
+        rt.state.files.len(),
+        11,
+        "the first Escape clears the filter"
+    );
+    assert_eq!(focused(&rt).as_deref(), Some("filter"));
+
+    press(&mut rt, rune::Key::Escape);
+    assert_eq!(focused(&rt), None, "the second Escape leaves the field");
+}
+
+#[test]
+fn enter_in_the_filter_jumps_to_the_first_result() {
+    let (_repo, mut rt) = keyboard_runtime(10);
+    type_text(&mut rt, "/");
+    type_text(&mut rt, "file_0006");
+    press(&mut rt, rune::Key::Enter);
+    assert_eq!(rt.state.current, Some(0));
+    assert_eq!(rt.state.pinned, Some(0));
+    assert_eq!(focused(&rt), None);
+}
+
+#[test]
+fn j_and_k_step_through_the_files_and_stop_at_the_ends() {
+    let (_repo, mut rt) = keyboard_runtime(10);
+    let last = rt.state.files.len() - 1;
+    type_text(&mut rt, "j");
+    assert_eq!(rt.state.current, Some(1));
+    type_text(&mut rt, "j");
+    assert_eq!(rt.state.current, Some(2));
+    type_text(&mut rt, "k");
+    type_text(&mut rt, "k");
+    type_text(&mut rt, "k");
+    assert_eq!(rt.state.current, Some(0));
+    for _ in 0..(last + 3) {
+        type_text(&mut rt, "j");
+    }
+    assert_eq!(rt.state.current, Some(last));
+}
+
+#[test]
+fn digits_switch_between_the_two_views() {
+    let (_repo, mut rt) = keyboard_runtime(5);
+    type_text(&mut rt, "2");
+    assert_eq!(rt.state.view, ViewKind::Staged);
+    type_text(&mut rt, "1");
+    assert_eq!(rt.state.view, ViewKind::Unstaged);
+}
+
+#[test]
+fn shortcuts_never_fire_while_typing_in_the_filter() {
+    let (_repo, mut rt) = keyboard_runtime(5);
+    type_text(&mut rt, "/");
+    type_text(&mut rt, "j1k2/");
+    assert_eq!(rt.state.filter.text, "j1k2/");
+    assert_eq!(rt.state.view, ViewKind::Unstaged);
+    assert_eq!(rt.state.pinned, None);
+}
+
+#[test]
+fn the_tabs_are_one_tab_stop_and_arrows_move_between_them() {
+    let (_repo, mut rt) = keyboard_runtime(5);
+    focus(&mut rt, "Non indexés");
+    assert_eq!(focused(&rt).as_deref(), Some("Non indexés"));
+    press(&mut rt, rune::Key::Right);
+    assert_eq!(focused(&rt).as_deref(), Some("Indexés"));
+    type_text(&mut rt, " ");
+    assert_eq!(
+        rt.state.view,
+        ViewKind::Staged,
+        "Space presses the focused tab"
+    );
+    press(&mut rt, rune::Key::Left);
+    assert_eq!(focused(&rt).as_deref(), Some("Non indexés"));
+}
+
+#[test]
+fn the_file_list_is_navigated_with_arrows_and_entered_with_return() {
+    let (_repo, mut rt) = keyboard_runtime(10);
+    let (first, _) = rt.state.entry_at(0).unwrap();
+    let (second, _) = rt.state.entry_at(1).unwrap();
+    let (third, _) = rt.state.entry_at(2).unwrap();
+    focus(&mut rt, &format!("f{first}"));
+    assert_eq!(focused(&rt), Some(format!("f{first}")));
+    press(&mut rt, rune::Key::Down);
+    assert_eq!(focused(&rt), Some(format!("f{second}")));
+    press(&mut rt, rune::Key::Down);
+    assert_eq!(focused(&rt), Some(format!("f{third}")));
+    press(&mut rt, rune::Key::Enter);
+    assert_eq!(rt.state.current, Some(2));
+    assert_eq!(rt.state.pinned, Some(2));
+    press(&mut rt, rune::Key::Up);
+    assert_eq!(focused(&rt), Some(format!("f{second}")));
+}
+
+#[test]
+fn page_keys_home_and_arrows_scroll_the_diff_from_the_keyboard() {
+    let (_repo, mut rt) = keyboard_runtime(60);
+    let start = rt.state.visible.start;
+    press(&mut rt, rune::Key::PageDown);
+    let after_page = rt.state.visible.start;
+    assert!(
+        after_page > start + 10,
+        "a page moves many rows: {start} -> {after_page}"
+    );
+    press(&mut rt, rune::Key::Down);
+    let after_line = rt.state.visible.start;
+    assert!(
+        after_line > after_page && after_line - after_page <= 5,
+        "a line key moves a few rows"
+    );
+    press(&mut rt, rune::Key::End);
+    for _ in 0..6 {
+        step(&mut rt);
+    }
+    assert!(
+        rt.state.visible.end as u64 >= rt.state.layout.total,
+        "End reaches the end: visible={:?} total={}",
+        rt.state.visible,
+        rt.state.layout.total
+    );
+    assert_eq!(rt.state.current, Some(rt.state.files.len() - 1));
+    press(&mut rt, rune::Key::Home);
+    assert_eq!(rt.state.visible.start, 0);
+    assert_eq!(rt.state.current, Some(0));
+}
+
+#[test]
+fn every_focusable_control_shows_a_visible_focus_when_reached_by_tab() {
+    let (_repo, mut rt) = keyboard_runtime(5);
+    let mut visited = std::collections::BTreeSet::new();
+    for _ in 0..12 {
+        press(&mut rt, rune::Key::Tab);
+        if let Some(info) = rt.elements().into_iter().find(|e| e.focused) {
+            assert!(info.focus_visible, "no visible focus on {:?}", info.key);
+            visited.insert(info.key.unwrap_or_default());
+        }
+    }
+    for expected in ["open", "theme", "filter", "viewport", "divider"] {
+        assert!(
+            visited.contains(expected),
+            "Tab never reached {expected}: {visited:?}"
+        );
+    }
+}
+
+#[test]
+fn the_end_key_stays_at_the_true_end_while_the_last_files_load_and_is_released_by_scrolling_up() {
+    let (_repo, mut rt) = keyboard_runtime(60);
+    press(&mut rt, rune::Key::End);
+    for _ in 0..12 {
+        step(&mut rt);
+    }
+    assert!(rt.state.stick_end);
+    assert!(
+        rt.state.visible.end as u64 >= rt.state.layout.total,
+        "still at the end after the last documents loaded: visible={:?} total={}",
+        rt.state.visible,
+        rt.state.layout.total
+    );
+
+    rt.wheel(900.0, 300.0, 1500.0);
+    for _ in 0..8 {
+        step(&mut rt);
+    }
+    assert!(!rt.state.stick_end, "scrolling up releases the end");
+    let position = rt.state.visible.start;
+    for _ in 0..6 {
+        step(&mut rt);
+    }
+    assert!(
+        rt.state.visible.start <= position + 1,
+        "the view no longer snaps back to the end"
+    );
+}

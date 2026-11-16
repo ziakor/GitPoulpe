@@ -5,8 +5,7 @@ use gitpoulpe_core::{
     ChangeEntry, DiffLine, DiffLineKind, DocumentKind, EntryKind, StatusCode, display_label,
 };
 use rune::{
-    Align, Cursor, Cx, El, FileDialogOptions, GrowthSpec, Key, Phase, ScrollSpec, Tx, col, el, row,
-    text, text_input,
+    Align, Cursor, Cx, El, GrowthSpec, Key, Phase, ScrollSpec, Tx, col, el, row, text, text_input,
 };
 
 use crate::state::{LIST_WIDTH_DEFAULT, Screen, State, ViewKind};
@@ -41,6 +40,27 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
         .fill(p.bg)
         .child(top_bar(s))
         .child(body)
+        .child(footer(s))
+}
+
+fn footer(s: &State) -> El {
+    let p = s.palette;
+    if s.screen != Screen::Ready {
+        return el().h(0.0);
+    }
+    row()
+        .w_full()
+        .h(28.0)
+        .px(20.0)
+        .center_y()
+        .fill(p.panel)
+        .border(1.0, p.line)
+        .child(
+            text("/ filtrer · j et k : fichier suivant ou précédent · 1 et 2 : changer de vue · ↑ ↓ PgUp PgDn : lire · Ctrl+O : ouvrir un dépôt")
+                .font(theme::SMALL)
+                .color(p.muted)
+                .truncate(),
+        )
 }
 
 fn open_button(p: &Palette, primary: bool) -> El {
@@ -61,17 +81,7 @@ fn open_button(p: &Palette, primary: bool) -> El {
         .fill(fill)
         .border(1.0, if primary { fill } else { p.line })
         .hover(p.hover)
-        .on_press_tx(|_: &mut State, tx: &mut Tx| {
-            let options = FileDialogOptions {
-                title: "Ouvrir un dépôt Git".into(),
-                ..Default::default()
-            };
-            tx.open_folder(options, |s: &mut State, result, _| {
-                if let Ok(Some(path)) = result {
-                    s.open_path(path);
-                }
-            });
-        })
+        .on_press_tx(|_: &mut State, tx: &mut Tx| crate::keys::open_dialog(tx))
         .child(text("Ouvrir un dépôt…").font(theme::BODY_STRONG).color(ink))
 }
 
@@ -198,6 +208,7 @@ fn tab(s: &State, kind: ViewKind, label: &'static str) -> El {
     };
     el().key(label)
         .role("tab")
+        .focus_selected(active)
         .label(format!("{label}, {} fichiers", s.count(kind)))
         .focusable(true)
         .focus_ring(2.0, 2.0, p.accent)
@@ -249,8 +260,28 @@ fn left_pane(s: &State) -> El {
         .border(1.0, p.line)
         .color(p.text)
         .placeholder(format!("Nom ou chemin parmi {total} fichiers"), p.muted)
+        .focus_ring(2.0, 2.0, p.accent)
         .on_edit(|s: &mut State| &mut s.filter)
-        .on_input_change(|s: &mut State, _| s.refilter());
+        .on_input_change(|s: &mut State, _| s.refilter())
+        .on_input_key(|s: &mut State, event, tx| {
+            if event.key != Key::Escape {
+                return false;
+            }
+            if s.filter.text.is_empty() {
+                tx.blur();
+            } else {
+                s.filter.text.clear();
+                s.refilter();
+            }
+            true
+        })
+        .on_submit(|s: &mut State, tx: &mut Tx| {
+            if let Some((index, _)) = s.entry_at(0) {
+                s.jump_to(0);
+                crate::keys::align_file(tx, index);
+                tx.blur();
+            }
+        });
     let counter = if s.files.len() == total {
         format!("{total} fichiers")
     } else {
@@ -258,6 +289,8 @@ fn left_pane(s: &State) -> El {
     };
     let list = col()
         .key("list-rows")
+        .role("listbox")
+        .focus_group()
         .w_full()
         .growth(GrowthSpec::default())
         .virtual_rows_version((s.layout_version, s.view, s.current))
@@ -283,6 +316,8 @@ fn left_pane(s: &State) -> El {
                     row()
                         .w_full()
                         .gap(8.0)
+                        .role("tablist")
+                        .focus_group()
                         .child(tab(s, ViewKind::Unstaged, "Non indexés"))
                         .child(tab(s, ViewKind::Staged, "Indexés")),
                 )
@@ -349,7 +384,8 @@ fn file_row(s: &State, position: usize) -> El {
     let selected = s.current == Some(position);
     let fill = if selected { p.selected } else { p.panel };
     el().key(format!("fr{index}"))
-        .role("button")
+        .role("option")
+        .focus_selected(selected)
         .label(format!("{}, {word}", display_label(&entry.path)))
         .focusable(true)
         .focus_ring(2.0, -2.0, p.accent)
@@ -359,7 +395,7 @@ fn file_row(s: &State, position: usize) -> El {
         .hover(p.hover)
         .on_press_tx(move |s: &mut State, tx: &mut Tx| {
             s.jump_to(position);
-            tx.scroll_into_view(format!("h{index}"));
+            crate::keys::align_file(tx, index);
         })
         .child(
             row()
@@ -424,11 +460,21 @@ fn right_pane(s: &State) -> El {
     col().grow(1.0).h_full().min_w(0.0).min_h(0.0).child(
         col()
             .key("viewport")
+            .role("region")
+            .label("Diffs")
+            .focusable(true)
+            .focus_ring(2.0, -2.0, p.accent)
             .w_full()
             .grow(1.0)
             .min_h(0.0)
             .scroll(ScrollSpec {
-                stick_bottom: false,
+                stick_bottom: s.stick_end,
+            })
+            .on_scroll_offset({
+                let probe = s.scroll_probe.clone();
+                move |at| {
+                    probe.set([at.offset[1], at.max[1], at.viewport[1], 1.0]);
+                }
             })
             .child(rows),
     )
@@ -451,7 +497,7 @@ fn message_card(p: &Palette, title: &str, detail: &str) -> El {
         )
 }
 
-fn row_key(s: &State, i: usize) -> String {
+pub(crate) fn row_key(s: &State, i: usize) -> String {
     match s.locate(i as u64) {
         Some((position, 0)) => format!("h{}", s.files[position]),
         Some((position, local)) => format!("l{}:{}", s.files[position], local - 1),
