@@ -23,6 +23,12 @@ fn demo(state: &mut State) {
     }
 }
 
+fn demo_split(state: &mut State) {
+    demo(state);
+    state.set_mode(state::DiffMode::Split);
+    state.current = (!state.files.is_empty()).then_some(0);
+}
+
 fn demo_light(state: &mut State) {
     state.set_dark(false);
     demo(state);
@@ -40,7 +46,11 @@ fn main() {
             state.apply_follow(tx);
             changed
         }),
-        scenes: &[("demo", demo), ("demo-light", demo_light)],
+        scenes: &[
+            ("demo", demo),
+            ("demo-light", demo_light),
+            ("demo-split", demo_split),
+        ],
         ..AppSpec::new("GitPoulpe", (1280.0, 800.0), State::default, view::view)
     });
 }

@@ -666,3 +666,186 @@ fn the_end_key_stays_at_the_true_end_while_the_last_files_load_and_is_released_b
         "the view no longer snaps back to the end"
     );
 }
+
+fn settled(files: usize) -> (TempDir, State) {
+    let repo = repo_with_files(files);
+    let mut state = opened(repo.path());
+    state.settle(state.files.len(), Duration::from_secs(30));
+    (repo, state)
+}
+
+#[test]
+fn split_mode_counts_one_row_per_pairing_instead_of_one_per_line() {
+    let (_repo, mut state) = settled(4);
+    let (index, _) = state.entry_at(0).unwrap();
+    let unified = state.body_rows(index);
+    state.set_mode(crate::state::DiffMode::Split);
+    let split = state.body_rows(index);
+    assert_eq!(
+        unified, 10,
+        "header, 3 context, 1 removed, 2 added, 3 context"
+    );
+    assert_eq!(
+        split, 9,
+        "the removed line shares a row with the first added line"
+    );
+    assert_eq!(
+        state.layout.total,
+        state
+            .files
+            .iter()
+            .map(|&i| 1 + state.body_rows(i))
+            .sum::<u64>()
+    );
+}
+
+#[test]
+fn the_saved_mode_is_restored_and_an_unknown_one_falls_back_to_unified() {
+    let mut prefs = Prefs::memory();
+    prefs.set("diff_mode", "split").unwrap();
+    assert_eq!(State::new(None, prefs).mode, crate::state::DiffMode::Split);
+    let mut prefs = Prefs::memory();
+    prefs.set("diff_mode", "sideways").unwrap();
+    assert_eq!(
+        State::new(None, prefs).mode,
+        crate::state::DiffMode::Unified
+    );
+    assert_eq!(
+        State::new(None, Prefs::memory()).mode,
+        crate::state::DiffMode::Unified
+    );
+}
+
+#[test]
+fn the_m_key_and_the_toggle_buttons_switch_modes_both_ways() {
+    let (_repo, mut rt) = keyboard_runtime(6);
+    type_text(&mut rt, "m");
+    assert_eq!(rt.state.mode, crate::state::DiffMode::Split);
+    type_text(&mut rt, "m");
+    assert_eq!(rt.state.mode, crate::state::DiffMode::Unified);
+
+    let (x, y) = rect_of(&rt, "mode-split")
+        .map(|r| (r[0] + r[2] / 2.0, r[1] + r[3] / 2.0))
+        .unwrap();
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    step(&mut rt);
+    assert_eq!(rt.state.mode, crate::state::DiffMode::Split);
+    let (x, y) = rect_of(&rt, "mode-unified")
+        .map(|r| (r[0] + r[2] / 2.0, r[1] + r[3] / 2.0))
+        .unwrap();
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    step(&mut rt);
+    assert_eq!(rt.state.mode, crate::state::DiffMode::Unified);
+}
+
+#[test]
+fn switching_mode_keeps_the_reading_position_on_the_same_context_line() {
+    let (_repo, state) = settled(30);
+    let mut rt = runtime(state);
+    step(&mut rt);
+    let position = 12;
+    let (index, _) = rt.state.entry_at(position).unwrap();
+    let context_line = 2;
+    let target_row = rt.state.layout.offsets[position] + 1 + context_line;
+    let view_rows = 30usize;
+    let start = target_row as usize - view_rows * crate::state::READING_LINE_PERCENT / 100;
+    rt.state.visible = start..start + view_rows;
+    assert_eq!(
+        rt.state.reading_anchor(),
+        Some((position, Some(context_line)))
+    );
+
+    rt.update(|s, tx| s.toggle_mode(tx));
+    step(&mut rt);
+    let split = rt
+        .state
+        .split_index(index)
+        .expect("the document has a split index")
+        .clone();
+    let expected_row =
+        rt.state.layout.offsets[position] + 1 + split.row_of_line(context_line).unwrap();
+    let top = rt.state.visible.start as u64;
+    assert!(
+        top.abs_diff(expected_row) <= 1,
+        "top row {top}, expected {expected_row}"
+    );
+    assert!(
+        rt.state.layout.offsets[position + 1] > expected_row,
+        "the anchor stays inside the same file"
+    );
+}
+
+#[test]
+fn split_rows_render_two_cells_and_the_row_count_follows_the_mode() {
+    let (_repo, state) = settled(6);
+    let (index, _) = state.entry_at(0).unwrap();
+    let mut rt = runtime(state);
+    step(&mut rt);
+    let mounted_rows = |rt: &Runtime<State>| -> Vec<String> {
+        rt.elements()
+            .into_iter()
+            .filter_map(|e| e.key)
+            .filter(|k| k.starts_with(&format!("l{index}:")))
+            .collect()
+    };
+    assert!(
+        mounted_rows(&rt).contains(&format!("l{index}:9")),
+        "unified has ten lines (0..=9)"
+    );
+    rt.update(|s, tx| s.toggle_mode(tx));
+    for _ in 0..12 {
+        step(&mut rt);
+    }
+    let rows = mounted_rows(&rt);
+    assert!(rows.contains(&format!("l{index}:8")));
+    assert!(
+        !rows.contains(&format!("l{index}:9")),
+        "split has nine rows (0..=8)"
+    );
+}
+
+#[test]
+fn split_mode_loads_the_lines_a_row_needs_not_the_rows_in_between() {
+    let repo = tempfile::tempdir().unwrap();
+    git(repo.path(), &["init", "-q", "-b", "main"]);
+    std::fs::write(
+        repo.path().join("big.txt"),
+        (0..6000).map(|i| format!("old {i}\n")).collect::<String>(),
+    )
+    .unwrap();
+    git(repo.path(), &["add", "-A"]);
+    git(repo.path(), &["commit", "-q", "-m", "base"]);
+    std::fs::write(
+        repo.path().join("big.txt"),
+        (0..6000).map(|i| format!("new {i}\n")).collect::<String>(),
+    )
+    .unwrap();
+    let mut state = opened(repo.path());
+    state.settle(1, Duration::from_secs(30));
+    state.set_mode(crate::state::DiffMode::Split);
+    let (index, _) = state.entry_at(0).unwrap();
+    let doc_rows = state.body_rows(index);
+    assert_eq!(doc_rows, 6001, "one header row and 6000 paired rows");
+
+    let first_row = state.layout.offsets[0] + 1 + 3000;
+    state.on_visible(first_row as usize..first_row as usize + 30);
+    let requested = &state.doc(index).unwrap().requested;
+    let left_chunk = (1 + 3000) / crate::state::CHUNK_LINES;
+    let right_chunk = (1 + 6000 + 3000) / crate::state::CHUNK_LINES;
+    assert!(
+        requested.contains(&left_chunk),
+        "the removed side is loaded: {requested:?}"
+    );
+    assert!(
+        requested.contains(&right_chunk),
+        "the added side is loaded: {requested:?}"
+    );
+    assert!(
+        !requested
+            .iter()
+            .any(|c| *c > left_chunk + 1 && *c < right_chunk - 1),
+        "the thousands of lines between the two sides are not requested: {requested:?}"
+    );
+}

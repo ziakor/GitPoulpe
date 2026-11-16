@@ -2,13 +2,14 @@ use std::borrow::Cow;
 use std::path::Path;
 
 use gitpoulpe_core::{
-    ChangeEntry, DiffLine, DiffLineKind, DocumentKind, EntryKind, StatusCode, display_label,
+    ChangeEntry, DiffLine, DiffLineKind, DocumentKind, EntryKind, SplitIndex, StatusCode,
+    display_label,
 };
 use rune::{
     Align, Cursor, Cx, El, GrowthSpec, Key, Phase, ScrollSpec, Tx, col, el, row, text, text_input,
 };
 
-use crate::state::{LIST_WIDTH_DEFAULT, Screen, State, ViewKind};
+use crate::state::{DiffMode, LIST_WIDTH_DEFAULT, Screen, State, ViewKind};
 use crate::theme::{self, Palette};
 
 const LIST_ROW_HEIGHT: f32 = 56.0;
@@ -56,7 +57,7 @@ fn footer(s: &State) -> El {
         .fill(p.panel)
         .border(1.0, p.line)
         .child(
-            text("/ filtrer · j et k : fichier suivant ou précédent · 1 et 2 : changer de vue · ↑ ↓ PgUp PgDn : lire · Ctrl+O : ouvrir un dépôt")
+            text("/ filtrer · j et k : fichier suivant ou précédent · 1 et 2 : changer de vue · m : unifié ou séparé · ↑ ↓ PgUp PgDn : lire · Ctrl+O : ouvrir un dépôt")
                 .font(theme::SMALL)
                 .color(p.muted)
                 .truncate(),
@@ -449,7 +450,7 @@ fn right_pane(s: &State) -> El {
         .key("rows")
         .w_full()
         .growth(GrowthSpec::default())
-        .virtual_rows_version((s.layout_version, s.view, s.dark))
+        .virtual_rows_version((s.layout_version, s.view, s.dark, s.mode))
         .virtual_rows(
             s.layout.total as usize,
             LINE_HEIGHT,
@@ -457,27 +458,95 @@ fn right_pane(s: &State) -> El {
             build_row,
         )
         .on_visible_rows(|s: &mut State, range| s.on_visible(range));
-    col().grow(1.0).h_full().min_w(0.0).min_h(0.0).child(
-        col()
-            .key("viewport")
-            .role("region")
-            .label("Diffs")
-            .focusable(true)
-            .focus_ring(2.0, -2.0, p.accent)
-            .w_full()
-            .grow(1.0)
-            .min_h(0.0)
-            .scroll(ScrollSpec {
-                stick_bottom: s.stick_end,
-            })
-            .on_scroll_offset({
-                let probe = s.scroll_probe.clone();
-                move |at| {
-                    probe.set([at.offset[1], at.max[1], at.viewport[1], 1.0]);
-                }
-            })
-            .child(rows),
-    )
+    col()
+        .grow(1.0)
+        .h_full()
+        .min_w(0.0)
+        .min_h(0.0)
+        .child(diff_toolbar(s))
+        .child(
+            col()
+                .key("viewport")
+                .role("region")
+                .label("Diffs")
+                .focusable(true)
+                .focus_ring(2.0, -2.0, p.accent)
+                .w_full()
+                .grow(1.0)
+                .min_h(0.0)
+                .scroll(ScrollSpec {
+                    stick_bottom: s.stick_end,
+                })
+                .on_scroll_offset({
+                    let probe = s.scroll_probe.clone();
+                    move |at| {
+                        probe.set([at.offset[1], at.max[1], at.viewport[1], 1.0]);
+                    }
+                })
+                .child(rows),
+        )
+}
+
+fn mode_button(s: &State, mode: DiffMode, key: &'static str, label: &'static str) -> El {
+    let p = s.palette;
+    let active = s.mode == mode;
+    let (fill, ink, edge) = if active {
+        (p.accent, p.on_accent, p.accent)
+    } else {
+        (p.raised, p.text, p.line)
+    };
+    el().key(key)
+        .role("tab")
+        .label(format!("Affichage {label}"))
+        .focusable(true)
+        .focus_ring(2.0, 2.0, p.accent)
+        .focus_selected(active)
+        .h(28.0)
+        .px(12.0)
+        .center()
+        .radius(3.0)
+        .fill(fill)
+        .border(1.0, edge)
+        .hover(p.hover)
+        .on_press_tx(move |s: &mut State, tx: &mut Tx| {
+            if s.mode != mode {
+                s.toggle_mode(tx);
+            }
+        })
+        .child(
+            text(label)
+                .font(if active {
+                    theme::BODY_STRONG
+                } else {
+                    theme::BODY
+                })
+                .color(ink),
+        )
+}
+
+fn diff_toolbar(s: &State) -> El {
+    let p = s.palette;
+    let position = match s.current {
+        Some(current) => format!("Fichier {} sur {}", current + 1, s.files.len()),
+        None => format!("{} fichiers", s.files.len()),
+    };
+    row()
+        .w_full()
+        .h(44.0)
+        .px(16.0)
+        .gap(12.0)
+        .center_y()
+        .fill(p.bg)
+        .border(1.0, p.line)
+        .child(text(position).font(theme::BODY).color(p.muted).grow(1.0))
+        .child(
+            row()
+                .gap(6.0)
+                .role("tablist")
+                .focus_group()
+                .child(mode_button(s, DiffMode::Unified, "mode-unified", "Unifié"))
+                .child(mode_button(s, DiffMode::Split, "mode-split", "Séparé")),
+        )
 }
 
 fn message_card(p: &Palette, title: &str, detail: &str) -> El {
@@ -585,10 +654,15 @@ fn body_row(s: &State, index: usize, line: u64) -> El {
         return placeholder(s, key, "Chargement…");
     };
     match &meta.kind {
-        Some(DocumentKind::Text) | None => match s.line(index, line) {
-            Some(diff_line) => line_row(&s.palette, key, diff_line),
-            None => placeholder(s, key, "…"),
-        },
+        Some(DocumentKind::Text) | None => {
+            if let Some(split) = s.split_index(index) {
+                return split_row(s, index, line, split, key);
+            }
+            match s.line(index, line) {
+                Some(diff_line) => line_row(&s.palette, key, diff_line),
+                None => placeholder(s, key, "…"),
+            }
+        }
         Some(other) => notice(
             s,
             index,
@@ -704,5 +778,81 @@ fn line_row(p: &Palette, key: String, line: &DiffLine) -> El {
             }
             line_el
         }
+    }
+}
+
+fn split_row(s: &State, index: usize, row_index: u64, split: &SplitIndex, key: String) -> El {
+    let p = s.palette;
+    let Some(cells) = split.cells(row_index) else {
+        return placeholder(s, key, "…");
+    };
+    let left = cells.left.and_then(|l| s.line(index, l));
+    let right = cells.right.and_then(|l| s.line(index, l));
+    if (cells.left.is_some() && left.is_none()) || (cells.right.is_some() && right.is_none()) {
+        return placeholder(s, key, "…");
+    }
+    if let (true, Some(line)) = (cells.full_width, left)
+        && line.kind == DiffLineKind::HunkHeader
+    {
+        return line_row(&p, key, line);
+    }
+    row()
+        .key(key)
+        .w_full()
+        .h(LINE_HEIGHT)
+        .child(split_cell(&p, left, true))
+        .child(el().w(1.0).h_full().fill(p.line))
+        .child(split_cell(&p, right, false))
+}
+
+fn split_cell(p: &Palette, line: Option<&DiffLine>, old_side: bool) -> El {
+    let cell = row().grow(1.0).min_w(0.0).h_full().px(8.0).center_y();
+    let Some(line) = line else {
+        return cell.fill(p.panel);
+    };
+    let number = |value: Option<u32>| {
+        text(value.map(|n| n.to_string()).unwrap_or_default())
+            .font(theme::CODE)
+            .color(p.muted)
+            .w(40.0)
+            .align(Align::End)
+    };
+    if line.kind == DiffLineKind::NoNewlineAtEof {
+        return cell.child(el().w(66.0)).child(
+            text("\\ Pas de saut de ligne à la fin du fichier")
+                .font(theme::CODE)
+                .color(p.muted)
+                .truncate(),
+        );
+    }
+    let (fill, sign, ink) = match line.kind {
+        DiffLineKind::Added => (Some(p.added), "+", p.green),
+        DiffLineKind::Removed => (Some(p.removed), "−", p.red),
+        _ => (None, " ", p.muted),
+    };
+    let numeral = if old_side {
+        line.old_number
+    } else {
+        line.new_number
+    };
+    let cell = cell
+        .child(number(numeral))
+        .child(
+            text(sign)
+                .font(theme::CODE)
+                .color(ink)
+                .w(22.0)
+                .align(Align::Center),
+        )
+        .child(
+            text(String::from_utf8_lossy(&line.text).into_owned())
+                .font(theme::CODE)
+                .color(p.text)
+                .selectable(true)
+                .truncate(),
+        );
+    match fill {
+        Some(fill) => cell.fill(fill),
+        None => cell,
     }
 }

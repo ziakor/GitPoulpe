@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use gitpoulpe_core::{
     BuildState, ChangeEntry, DiffLine, DiffSide, DocumentKind, DocumentMeta, Generation,
-    StatusSnapshot,
+    SplitIndex, StatusSnapshot,
 };
 use rune::prefs::Prefs;
 use rune::{Live, TextEdit, Tx, Waker};
@@ -20,6 +20,7 @@ pub const LIST_WIDTH_DEFAULT: f32 = 372.0;
 pub const LIST_WIDTH_MIN: f32 = 260.0;
 pub const LIST_WIDTH_MAX: f32 = 640.0;
 const LIST_WIDTH_KEY: &str = "list_width";
+const MODE_KEY: &str = "diff_mode";
 pub const READING_LINE_PERCENT: usize = 35;
 const STICK_GRACE_CALLS: u8 = 2;
 const PREFETCH_BEFORE: usize = 2;
@@ -36,6 +37,22 @@ impl ViewKind {
         match self {
             Self::Unstaged => DiffSide::Unstaged,
             Self::Staged => DiffSide::Staged,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum DiffMode {
+    #[default]
+    Unified,
+    Split,
+}
+
+impl DiffMode {
+    fn pref(self) -> &'static str {
+        match self {
+            Self::Unified => "unified",
+            Self::Split => "split",
         }
     }
 }
@@ -74,6 +91,7 @@ pub struct State {
     pub screen: Screen,
     pub repo: Option<Repo>,
     pub view: ViewKind,
+    pub mode: DiffMode,
     pub filter: TextEdit,
     pub files: Vec<usize>,
     pub docs: HashMap<(ViewKind, usize), DocView>,
@@ -119,6 +137,10 @@ impl State {
     pub fn new(initial_path: Option<PathBuf>, prefs: Prefs) -> Self {
         let (event_sender, events) = channel();
         let dark = true;
+        let mode = match prefs.get::<String>(MODE_KEY).as_deref() {
+            Some("split") => DiffMode::Split,
+            _ => DiffMode::Unified,
+        };
         let list_width = prefs
             .get::<f32>(LIST_WIDTH_KEY)
             .map_or(LIST_WIDTH_DEFAULT, |w| {
@@ -130,6 +152,7 @@ impl State {
             screen: Screen::Welcome,
             repo: None,
             view: ViewKind::Unstaged,
+            mode,
             filter: TextEdit::new(""),
             files: Vec::new(),
             docs: HashMap::new(),
@@ -259,12 +282,24 @@ impl State {
         self.docs.get(&(self.view, index))
     }
 
+    pub fn split_index(&self, index: usize) -> Option<&Arc<SplitIndex>> {
+        if self.mode != DiffMode::Split {
+            return None;
+        }
+        self.doc(index)?.meta.as_ref()?.split.as_ref()
+    }
+
     pub fn body_rows(&self, index: usize) -> u64 {
         let Some(meta) = self.doc(index).and_then(|d| d.meta.as_ref()) else {
             return 1;
         };
         match (&meta.kind, meta.state) {
-            (Some(DocumentKind::Text), _) | (None, BuildState::Building) => meta.lines.max(1),
+            (Some(DocumentKind::Text), _) | (None, BuildState::Building) => {
+                match self.split_index(index) {
+                    Some(split) => split.total_rows().max(1),
+                    None => meta.lines.max(1),
+                }
+            }
             _ => 1,
         }
     }
@@ -469,8 +504,17 @@ impl State {
             } else {
                 self.body_rows(self.files[position])
             };
-            for chunk in (start / CHUNK_LINES)..=(end / CHUNK_LINES) {
-                self.request_chunk(position, chunk);
+            let index = self.files[position];
+            let ranges = match self.split_index(index) {
+                Some(split) => split.line_ranges(start..end),
+                None => std::iter::once(start..end + 1).collect(),
+            };
+            for range in ranges {
+                for chunk in
+                    (range.start / CHUNK_LINES)..=(range.end.saturating_sub(1) / CHUNK_LINES)
+                {
+                    self.request_chunk(position, chunk);
+                }
             }
         }
         Some((first, last))
@@ -504,6 +548,56 @@ impl State {
             self.follow = self.entry_at(current).map(|(index, _)| index);
         }
         changed
+    }
+
+    pub fn reading_anchor(&self) -> Option<(usize, Option<u64>)> {
+        let row = self.visible.start + self.visible.len() * READING_LINE_PERCENT / 100;
+        let (position, local) = self.locate(row as u64)?;
+        if local == 0 {
+            return Some((position, None));
+        }
+        let index = self.files[position];
+        let line = match self.split_index(index) {
+            Some(split) => {
+                let cells = split.cells(local - 1)?;
+                cells.left.or(cells.right)?
+            }
+            None => local - 1,
+        };
+        Some((position, Some(line)))
+    }
+
+    pub fn set_mode(&mut self, mode: DiffMode) {
+        self.mode = mode;
+        self.relayout();
+    }
+
+    pub fn toggle_mode(&mut self, tx: &mut Tx) {
+        let anchor = self.reading_anchor();
+        self.mode = match self.mode {
+            DiffMode::Unified => DiffMode::Split,
+            DiffMode::Split => DiffMode::Unified,
+        };
+        let _ = self.prefs.set(MODE_KEY, self.mode.pref());
+        self.stick_end = false;
+        self.relayout();
+        let Some((position, line)) = anchor else {
+            return;
+        };
+        let Some((index, _)) = self.entry_at(position) else {
+            return;
+        };
+        let key = match line {
+            None => format!("h{index}"),
+            Some(line) => {
+                let row = self
+                    .split_index(index)
+                    .and_then(|split| split.row_of_line(line))
+                    .unwrap_or(line);
+                format!("l{index}:{row}")
+            }
+        };
+        tx.scroll_key_to(key, 0.0);
     }
 
     pub fn stick_to_end(&mut self) {

@@ -59,6 +59,7 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
     match &event.key {
         Key::Text(text) if reading && free => match text.as_str() {
             "/" => tx.focus("filter", true),
+            "m" => s.toggle_mode(tx),
             "j" => reveal_file(s, tx, 1),
             "k" => reveal_file(s, tx, -1),
             "1" => s.set_view(ViewKind::Unstaged),
