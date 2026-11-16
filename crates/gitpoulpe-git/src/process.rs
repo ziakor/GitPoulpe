@@ -1,4 +1,4 @@
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::io;
 use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
@@ -15,13 +15,14 @@ const CHUNK_BYTES: usize = 64 * 1024;
 const MAX_STDERR_BYTES: usize = 64 * 1024;
 const MAX_COLLECTED_BYTES: usize = 1024 * 1024;
 
-const SCRUBBED_ENV: [&str; 6] = [
+const SCRUBBED_ENV: [&str; 7] = [
     "GIT_DIR",
     "GIT_WORK_TREE",
     "GIT_INDEX_FILE",
     "GIT_COMMON_DIR",
     "GIT_EXTERNAL_DIFF",
     "GIT_PAGER",
+    "GIT_DIFF_OPTS",
 ];
 
 pub(crate) struct Run {
@@ -80,11 +81,27 @@ async fn drain_stderr(mut stream: impl AsyncRead + Unpin) -> Vec<u8> {
     kept
 }
 
+pub(crate) type EnvPairs = [(OsString, OsString)];
+
 impl Git {
     pub(crate) async fn run<F>(
         &self,
         dir: &Path,
         args: &[&OsStr],
+        cancel: &Cancel,
+        on_chunk: F,
+    ) -> Result<Run, RunError>
+    where
+        F: FnMut(&[u8]) -> Result<(), String>,
+    {
+        self.run_env(dir, args, &[], cancel, on_chunk).await
+    }
+
+    pub(crate) async fn run_env<F>(
+        &self,
+        dir: &Path,
+        args: &[&OsStr],
+        env: &EnvPairs,
         cancel: &Cancel,
         mut on_chunk: F,
     ) -> Result<Run, RunError>
@@ -110,6 +127,7 @@ impl Git {
         for name in SCRUBBED_ENV {
             command.env_remove(name);
         }
+        command.envs(env.iter().map(|(k, v)| (k, v)));
         let mut child = command.spawn().map_err(RunError::Spawn)?;
         let mut stdout = child.stdout.take().expect("stdout is piped");
         let stderr = child.stderr.take().expect("stderr is piped");

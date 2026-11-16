@@ -490,3 +490,33 @@ async fn submodule_programs_are_not_run_either() {
         "a submodule-configured program was executed"
     );
 }
+
+#[tokio::test]
+async fn filter_drivers_with_unusual_names_are_neutralised() {
+    let repo = init_repo();
+    let dir = repo.path();
+    write(dir, ".gitattributes", "*.txt filter=a=b\n");
+    write(dir, "f.txt", "x\n");
+    commit_all(dir, "base");
+    make_racy(&dir.join("f.txt"));
+
+    let tools = tempfile::tempdir().unwrap();
+    let marker = tools.path().join("ran");
+    let script = tools.path().join("filter.sh");
+    executable(&script, &format!("touch '{}'\ncat", marker.display()));
+    git(
+        dir,
+        &["config", "filter.a=b.clean", script.to_str().unwrap()],
+    );
+    git(
+        dir,
+        &["config", "filter.a=b.process", script.to_str().unwrap()],
+    );
+
+    open_and_read(dir).await;
+
+    assert!(
+        !marker.exists(),
+        "a filter whose name contains '=' was executed"
+    );
+}
