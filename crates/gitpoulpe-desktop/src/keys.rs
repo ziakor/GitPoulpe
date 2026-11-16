@@ -1,9 +1,10 @@
 use rune::{FileDialogOptions, Key, KeyEvent, SelectedText, Tx};
 
-use crate::state::{SelectionAnchor, State, ViewKind};
+use crate::state::{DiffMode, SelectionAnchor, State, ViewKind};
 use crate::view::row_key;
 
 const LINES_PER_KEY: usize = 3;
+const SIDEWAYS_STEP: f32 = 96.0;
 
 pub fn open_dialog(tx: &mut Tx) {
     let options = FileDialogOptions {
@@ -102,6 +103,15 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
             "2" => s.set_view(ViewKind::Staged),
             _ => return false,
         },
+        Key::Left | Key::Right if reading && free && s.mode == DiffMode::Unified => {
+            let [offset, max] = s.scroll_x.get();
+            let step = if event.key == Key::Right {
+                SIDEWAYS_STEP
+            } else {
+                -SIDEWAYS_STEP
+            };
+            tx.scroll_to_x("viewport", (offset + step).clamp(0.0, max.max(0.0)));
+        }
         Key::Down if reading && free => scroll_lines(s, tx, true),
         Key::Up if reading && free => scroll_lines(s, tx, false),
         Key::PageDown if reading && tx.focused().is_none() => tx.scroll_page("viewport", 1),

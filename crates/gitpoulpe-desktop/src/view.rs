@@ -6,7 +6,8 @@ use gitpoulpe_core::{
     display_label,
 };
 use rune::{
-    Align, Cursor, Cx, El, GrowthSpec, Key, Phase, ScrollSpec, Tx, col, el, row, text, text_input,
+    Align, Color, Cursor, Cx, El, GrowthSpec, Key, Phase, ScrollSpec, Tx, col, el, row, text,
+    text_input,
 };
 
 use crate::state::{DiffMode, LIST_WIDTH_DEFAULT, Screen, State, ViewKind};
@@ -14,6 +15,7 @@ use crate::theme::{self, Palette};
 
 const LIST_ROW_HEIGHT: f32 = 56.0;
 const LINE_HEIGHT: f32 = 25.0;
+const GUTTER_WIDTH: f32 = 128.0;
 
 pub fn view(s: &State, _: &mut Cx<State>) -> El {
     let p = s.palette;
@@ -64,7 +66,7 @@ fn footer(s: &State) -> El {
         )
 }
 
-const HINTS: &str = "/ filtrer · j et k : fichier suivant ou précédent · 1 et 2 : changer de vue · m : unifié ou séparé · ↑ ↓ PgUp PgDn : lire · Ctrl+O : ouvrir un dépôt";
+const HINTS: &str = "/ filtrer · j et k : fichier suivant ou précédent · 1 et 2 : changer de vue · m : unifié ou séparé · ↑ ↓ ← → PgUp PgDn : lire · Ctrl+O : ouvrir un dépôt";
 
 fn open_button(p: &Palette, primary: bool) -> El {
     let (fill, ink) = if primary {
@@ -461,33 +463,39 @@ fn right_pane(s: &State) -> El {
             build_row,
         )
         .on_visible_rows(|s: &mut State, range| s.on_visible(range));
+    let viewport = col()
+        .key("viewport")
+        .role("region")
+        .label("Diffs")
+        .focusable(true)
+        .focus_ring(2.0, -2.0, p.accent)
+        .w_full()
+        .grow(1.0)
+        .min_h(0.0)
+        .scroll(ScrollSpec {
+            stick_bottom: s.stick_end,
+        })
+        .on_scroll_offset({
+            let probe = s.scroll_probe.clone();
+            let horizontal = s.scroll_x.clone();
+            move |at| {
+                probe.set([at.offset[1], at.max[1], at.viewport[1], 1.0]);
+                horizontal.set([at.offset[0], at.max[0]]);
+            }
+        })
+        .child(rows);
+    let viewport = if s.mode == DiffMode::Unified {
+        viewport.scroll_xy()
+    } else {
+        viewport
+    };
     col()
         .grow(1.0)
         .h_full()
         .min_w(0.0)
         .min_h(0.0)
         .child(diff_toolbar(s))
-        .child(
-            col()
-                .key("viewport")
-                .role("region")
-                .label("Diffs")
-                .focusable(true)
-                .focus_ring(2.0, -2.0, p.accent)
-                .w_full()
-                .grow(1.0)
-                .min_h(0.0)
-                .scroll(ScrollSpec {
-                    stick_bottom: s.stick_end,
-                })
-                .on_scroll_offset({
-                    let probe = s.scroll_probe.clone();
-                    move |at| {
-                        probe.set([at.offset[1], at.max[1], at.viewport[1], 1.0]);
-                    }
-                })
-                .child(rows),
-        )
+        .child(viewport)
 }
 
 fn mode_button(s: &State, mode: DiffMode, key: &'static str, label: &'static str) -> El {
@@ -716,8 +724,14 @@ fn placeholder(s: &State, key: String, label: &str) -> El {
         )
 }
 
-fn line_row(p: &Palette, key: String, line: &DiffLine) -> El {
-    let text_key = format!("t{}", &key[1..]);
+fn gutter(
+    p: &Palette,
+    old: Option<u32>,
+    new: Option<u32>,
+    sign: &'static str,
+    ink: Color,
+    fill: Color,
+) -> El {
     let number = |value: Option<u32>| {
         text(value.map(|n| n.to_string()).unwrap_or_default())
             .font(theme::CODE)
@@ -725,30 +739,49 @@ fn line_row(p: &Palette, key: String, line: &DiffLine) -> El {
             .w(46.0)
             .align(Align::End)
     };
+    row()
+        .w(GUTTER_WIDTH)
+        .h(LINE_HEIGHT)
+        .center_y()
+        .fill(fill)
+        .sticky_left(0.0)
+        .child(el().w(14.0))
+        .child(number(old))
+        .child(number(new))
+        .child(
+            text(sign)
+                .font(theme::CODE)
+                .color(ink)
+                .w(22.0)
+                .align(Align::Center),
+        )
+}
+
+fn line_row(p: &Palette, key: String, line: &DiffLine) -> El {
+    let text_key = format!("t{}", &key[1..]);
     let content = String::from_utf8_lossy(&line.text).into_owned();
     match line.kind {
         DiffLineKind::HunkHeader => row()
             .key(key)
             .w_full()
             .h(LINE_HEIGHT)
-            .px(14.0)
             .center_y()
             .fill(p.panel)
-            .child(el().w(100.0))
-            .child(text(content).font(theme::CODE).color(p.muted).truncate()),
+            .child(gutter(p, None, None, " ", p.muted, p.panel))
+            .child(text(content).font(theme::CODE).color(p.muted))
+            .child(el().w(14.0)),
         DiffLineKind::NoNewlineAtEof => row()
             .key(key)
             .w_full()
             .h(LINE_HEIGHT)
-            .px(14.0)
             .center_y()
-            .child(el().w(116.0))
+            .child(gutter(p, None, None, " ", p.muted, p.bg))
             .child(
                 text("\\ Pas de saut de ligne à la fin du fichier")
                     .font(theme::CODE)
-                    .color(p.muted)
-                    .truncate(),
-            ),
+                    .color(p.muted),
+            )
+            .child(el().w(14.0)),
         kind => {
             let (fill, sign, ink) = match kind {
                 DiffLineKind::Added => (Some(p.added), "+", p.green),
@@ -759,25 +792,23 @@ fn line_row(p: &Palette, key: String, line: &DiffLine) -> El {
                 .key(key)
                 .w_full()
                 .h(LINE_HEIGHT)
-                .px(14.0)
                 .center_y()
-                .child(number(line.old_number))
-                .child(number(line.new_number))
-                .child(
-                    text(sign)
-                        .font(theme::CODE)
-                        .color(ink)
-                        .w(22.0)
-                        .align(Align::Center),
-                )
+                .child(gutter(
+                    p,
+                    line.old_number,
+                    line.new_number,
+                    sign,
+                    ink,
+                    fill.unwrap_or(p.bg),
+                ))
                 .child(
                     text(content)
                         .key(text_key)
                         .font(theme::CODE)
                         .color(p.text)
-                        .selectable(true)
-                        .truncate(),
-                );
+                        .selectable(true),
+                )
+                .child(el().w(14.0));
             if let Some(fill) = fill {
                 line_el = line_el.fill(fill);
             }
@@ -804,14 +835,14 @@ fn split_row(s: &State, index: usize, row_index: u64, split: &SplitIndex, key: S
     row()
         .key(key)
         .w_full()
-        .h(LINE_HEIGHT)
+        .min_h(LINE_HEIGHT)
         .child(split_cell(
             &p,
             left,
             true,
             format!("t{index}:{row_index}:L"),
         ))
-        .child(el().w(1.0).h_full().fill(p.line))
+        .child(el().w(1.0).fill(p.line))
         .child(split_cell(
             &p,
             right,
@@ -821,7 +852,7 @@ fn split_row(s: &State, index: usize, row_index: u64, split: &SplitIndex, key: S
 }
 
 fn split_cell(p: &Palette, line: Option<&DiffLine>, old_side: bool, text_key: String) -> El {
-    let cell = row().grow(1.0).min_w(0.0).h_full().px(8.0).center_y();
+    let cell = row().grow(1.0).min_w(0.0).px(8.0);
     let Some(line) = line else {
         return cell.fill(p.panel);
     };
@@ -837,7 +868,9 @@ fn split_cell(p: &Palette, line: Option<&DiffLine>, old_side: bool, text_key: St
             text("\\ Pas de saut de ligne à la fin du fichier")
                 .font(theme::CODE)
                 .color(p.muted)
-                .truncate(),
+                .wrap()
+                .grow(1.0)
+                .min_w(0.0),
         );
     }
     let (fill, sign, ink) = match line.kind {
@@ -865,7 +898,9 @@ fn split_cell(p: &Palette, line: Option<&DiffLine>, old_side: bool, text_key: St
                 .font(theme::CODE)
                 .color(p.text)
                 .selectable(true)
-                .truncate(),
+                .wrap()
+                .grow(1.0)
+                .min_w(0.0),
         );
     match fill {
         Some(fill) => cell.fill(fill),

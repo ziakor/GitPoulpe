@@ -1185,3 +1185,143 @@ fn a_huge_document_keeps_only_the_chunks_around_the_viewport() {
         "bounded around the viewport: {loaded}"
     );
 }
+
+fn repo_with_long_line() -> (TempDir, String) {
+    let dir = tempfile::tempdir().unwrap();
+    git(dir.path(), &["init", "-q", "-b", "main"]);
+    let long = |tag: &str| {
+        format!(
+            "let value = {tag}({});\n",
+            (0..80)
+                .map(|i| format!("argument_{i}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    std::fs::write(
+        dir.path().join("a.rs"),
+        format!("fn short() {{}}\n{}fn tail() {{}}\n", long("compute")),
+    )
+    .unwrap();
+    git(dir.path(), &["add", "-A"]);
+    git(dir.path(), &["commit", "-q", "-m", "base"]);
+    std::fs::write(
+        dir.path().join("a.rs"),
+        format!("fn short() {{}}\n{}fn tail() {{}}\n", long("changed")),
+    )
+    .unwrap();
+    (dir, long("changed").trim_end().to_owned())
+}
+
+#[test]
+fn long_lines_are_not_truncated_and_the_diff_scrolls_sideways_with_sticky_line_numbers() {
+    let (repo, long_line) = repo_with_long_line();
+    let mut state = opened(repo.path());
+    state.settle(1, Duration::from_secs(30));
+    let (index, _) = state.entry_at(0).unwrap();
+    let mut rt = runtime(state);
+    step(&mut rt);
+
+    let key = format!("t{index}:3");
+    let viewport = rect_of(&rt, "viewport").unwrap();
+    let before = rect_of(&rt, &key).expect("the added long line is on screen");
+    let columns = long_line.chars().count() as f32;
+    assert!(
+        before[2] > columns * 5.0,
+        "the text keeps its natural width: {} for {columns} columns",
+        before[2]
+    );
+    assert!(before[2] > viewport[2], "it is wider than the viewport");
+    assert!(
+        rt.elements().iter().all(|e| e.stuck == 0.0),
+        "nothing is stuck before scrolling"
+    );
+
+    rt.wheel_xy(viewport[0] + 300.0, viewport[1] + 120.0, -600.0, 0.0);
+    for _ in 0..30 {
+        step(&mut rt);
+    }
+    let after = rect_of(&rt, &key).unwrap();
+    assert!(
+        before[0] - after[0] > 300.0,
+        "the code moved left by the scroll: {} -> {}",
+        before[0],
+        after[0]
+    );
+    let stuck: Vec<f32> = rt
+        .elements()
+        .iter()
+        .map(|e| e.stuck)
+        .filter(|s| *s > 0.0)
+        .collect();
+    assert!(
+        stuck.len() >= 3,
+        "the line number columns stay at the left edge: {stuck:?}"
+    );
+}
+
+#[test]
+fn in_split_mode_long_lines_wrap_inside_their_column_and_nothing_scrolls_sideways() {
+    let (repo, _) = repo_with_long_line();
+    let mut state = opened(repo.path());
+    state.settle(1, Duration::from_secs(30));
+    let (index, _) = state.entry_at(0).unwrap();
+    state.set_mode(crate::state::DiffMode::Split);
+    let mut rt = runtime(state);
+    step(&mut rt);
+
+    let viewport = rect_of(&rt, "viewport").unwrap();
+    let left = rect_of(&rt, &format!("t{index}:2:L")).expect("the removed long line is on screen");
+    let right = rect_of(&rt, &format!("t{index}:2:R")).expect("the added long line is on screen");
+    for cell in [left, right] {
+        assert!(
+            cell[3] > 4.0 * 25.0,
+            "the line wrapped onto several lines: height {}",
+            cell[3]
+        );
+        assert!(
+            cell[0] + cell[2] <= viewport[0] + viewport[2] + 1.0,
+            "it stays inside the viewport"
+        );
+    }
+    rt.wheel_xy(viewport[0] + 300.0, viewport[1] + 120.0, 600.0, 0.0);
+    for _ in 0..10 {
+        step(&mut rt);
+    }
+    let again = rect_of(&rt, &format!("t{index}:2:L")).unwrap();
+    assert!(
+        (again[0] - left[0]).abs() < 1.0,
+        "split mode has no horizontal scroll"
+    );
+}
+
+#[test]
+fn left_and_right_arrows_scroll_a_wide_diff_sideways_from_the_keyboard() {
+    let (repo, _) = repo_with_long_line();
+    let mut state = opened(repo.path());
+    state.settle(1, Duration::from_secs(30));
+    let (index, _) = state.entry_at(0).unwrap();
+    let mut rt = runtime(state);
+    rt.on_key = Some(crate::keys::on_key);
+    step(&mut rt);
+    let key = format!("t{index}:3");
+    let start = rect_of(&rt, &key).unwrap()[0];
+
+    press(&mut rt, rune::Key::Right);
+    press(&mut rt, rune::Key::Right);
+    let moved = rect_of(&rt, &key).unwrap()[0];
+    assert!(
+        (start - moved - 192.0).abs() < 2.0,
+        "two presses move the code by two steps: {start} -> {moved}"
+    );
+    press(&mut rt, rune::Key::Left);
+    let back = rect_of(&rt, &key).unwrap()[0];
+    assert!((start - back - 96.0).abs() < 2.0, "one step back: {back}");
+    for _ in 0..4 {
+        press(&mut rt, rune::Key::Left);
+    }
+    assert!(
+        (rect_of(&rt, &key).unwrap()[0] - start).abs() < 2.0,
+        "it stops at the left edge"
+    );
+}
