@@ -31,6 +31,7 @@ pub struct Perf {
     autoscroll: Option<Autoscroll>,
     origin: f64,
     events: Vec<(f64, f64)>,
+    window: [f32; 2],
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -96,6 +97,7 @@ impl Perf {
             autoscroll,
             origin: 0.0,
             events: Vec::new(),
+            window: [0.0; 2],
         }
     }
 
@@ -153,7 +155,7 @@ impl Perf {
             ),
         };
         format!(
-            "{{\"validity\":{validity},\"ready_at_s\":{},\"frames\":{},\"interval_ms\":{{\"mean\":{:.2},\"p50\":{:.2},\"p95\":{:.2},\"p99\":{:.2},\"max\":{:.2}}},\"over_16_7ms\":{},\"over_25ms\":{},\"over_33ms\":{},\"idle_gaps\":{},\"autoscroll\":{},\"slow_events\":{},\"rss_kib\":{},\"peak_rss_kib\":{}}}\n",
+            "{{\"validity\":{validity},\"ready_at_s\":{},\"frames\":{},\"interval_ms\":{{\"mean\":{:.2},\"p50\":{:.2},\"p95\":{:.2},\"p99\":{:.2},\"max\":{:.2}}},\"over_16_7ms\":{},\"over_25ms\":{},\"over_33ms\":{},\"idle_gaps\":{},\"window\":{{\"width\":{:.0},\"viewport_height\":{:.0}}},\"autoscroll\":{},\"slow_events\":{},\"rss_kib\":{},\"peak_rss_kib\":{}}}\n",
             self.first_ready_at
                 .map_or("null".to_owned(), |t| format!("{t:.2}")),
             s.frames,
@@ -166,6 +168,8 @@ impl Perf {
             s.over_25,
             s.over_33,
             s.idle_gaps,
+            self.window[0],
+            self.window[1],
             scroll,
             events,
             resident_kib("VmRSS:").unwrap_or(0),
@@ -197,7 +201,8 @@ impl Perf {
         self.last_t = Some(t);
     }
 
-    pub fn frame(&mut self, t: f64, ready: bool, tx: &mut Tx) {
+    pub fn frame(&mut self, t: f64, ready: bool, window: [f32; 2], tx: &mut Tx) {
+        self.window = window;
         if ready && self.first_ready_at.is_none() {
             self.first_ready_at = Some(t);
         }
@@ -298,6 +303,7 @@ mod tests {
             "p99",
             "over_16_7ms",
             "idle_gaps",
+            "window",
             "autoscroll",
             "rss_kib",
             "peak_rss_kib",

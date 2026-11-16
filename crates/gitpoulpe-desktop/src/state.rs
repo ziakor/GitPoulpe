@@ -776,7 +776,12 @@ impl State {
     pub fn perf_frame(&mut self, t: f64, tx: &mut Tx) {
         let ready = self.layout.total > 0 && self.docs.values().any(|d| d.meta.is_some());
         if let Some(perf) = self.perf.as_mut() {
-            perf.frame(t, ready, tx);
+            perf.frame(
+                t,
+                ready,
+                [self.window_width, self.scroll_probe.get()[2]],
+                tx,
+            );
         }
     }
 

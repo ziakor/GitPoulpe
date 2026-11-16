@@ -72,7 +72,8 @@ def main() -> int:
                 print(f"{mode:8} run {run}: {report['frames']} frames, interval p50 {interval['p50']} p95 {interval['p95']} "
                       f"p99 {interval['p99']} max {interval['max']} ms, over 25 ms: {report['over_25ms']}, "
                       f"over 33 ms: {report['over_33ms']}, idle gaps: {report['idle_gaps']}, "
-                      f"first document at {report['ready_at_s']} s, {report['rss_kib'] / 1024:.0f} MiB", flush=True)
+                      f"first document at {report['ready_at_s']} s, {report['rss_kib'] / 1024:.0f} MiB, "
+                      f"window {report.get('window', {}).get('width', '?')} wide, viewport {report.get('window', {}).get('viewport_height', '?')} high", flush=True)
     except KeyboardInterrupt:
         print(f"\ninterrupted; what was measured so far is in {log_path}")
         return 130
