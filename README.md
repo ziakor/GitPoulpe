@@ -52,7 +52,7 @@ cargo +1.100.0 clippy --workspace --all-targets -- -D warnings
 
 ## Organisation
 
-Le code est découpé en trois crates : `gitpoulpe-core` (types et contrats), `gitpoulpe-git` (lecture de l'état et des diffs, cache, surveillance), `gitpoulpe-desktop` (interface). Le suivi du travail se fait dans Linear.
+Le code est découpé en trois crates : `gitpoulpe-core` (types et contrats), `gitpoulpe-git` (lecture de l'état et des diffs, cache, surveillance), `gitpoulpe-desktop` (interface).
 
 ## Licence
 
