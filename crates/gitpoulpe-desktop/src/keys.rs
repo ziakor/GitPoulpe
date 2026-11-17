@@ -11,10 +11,10 @@ pub fn open_dialog(tx: &mut Tx) {
         title: "Ouvrir un dépôt Git".into(),
         ..Default::default()
     };
-    tx.open_folder(options, |s: &mut State, result, _| {
-        if let Ok(Some(path)) = result {
-            s.open_path(path);
-        }
+    tx.open_folder(options, |s: &mut State, result, _| match result {
+        Ok(Some(path)) => s.open_path(path),
+        Ok(None) => {}
+        Err(error) => s.notice = Some(format!("Sélecteur de dossier indisponible : {error}")),
     });
 }
 

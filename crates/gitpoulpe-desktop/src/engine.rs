@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use gitpoulpe_core::{
     ChangeEntry, DiffLine, DiffSide, DocumentMeta, Generation, OpenError, RangeError, ReadError,
-    SessionInfo, StatusSnapshot,
+    SessionId, SessionInfo, StatusSnapshot,
 };
 use gitpoulpe_git::{
     CacheConfig, Cancel, DiffCache, DiffReader, Git, MAX_WAIT, QUIET_PERIOD, RepoWatcher, Signal,
@@ -225,6 +225,7 @@ async fn run(
     let mut signals: Option<UnboundedReceiver<Signal>> = None;
     let watched = Arc::new(std::sync::Mutex::new(HashSet::new()));
     let mut shutdown = None;
+    let (started_sender, mut started_receiver) = unbounded_channel::<Started>();
     loop {
         let signal = async {
             match signals.as_mut() {
@@ -246,12 +247,13 @@ async fn run(
                         match open(&shared, &path).await {
                             Ok((info, snapshot)) => {
                                 session = Some(Arc::new(Session::new(info.clone(), snapshot.generation)));
-                                (watcher, signals) = start_watching(&shared, &info);
+                                let id = info.id;
                                 shared.emit(Event::Opened {
                                     request,
-                                    info: Box::new(info),
+                                    info: Box::new(info.clone()),
                                     snapshot: Box::new(snapshot),
                                 });
+                                start_watching(info, id, started_sender.clone());
                             }
                             Err(message) => shared.emit(Event::OpenFailed { request, message }),
                         }
@@ -282,6 +284,13 @@ async fn run(
                     }
                 }
             }
+            started = started_receiver.recv() => {
+                let Some(started) = started else { continue };
+                if session.as_ref().is_some_and(|s| s.info.id == started.id) {
+                    shared.emit(started.state);
+                    (watcher, signals) = (started.watcher, started.signals);
+                }
+            },
             signal = signal => match signal {
                 Some(signal) => {
                     if let Some(current) = &session {
@@ -300,29 +309,42 @@ async fn run(
     shutdown
 }
 
-fn start_watching(
-    shared: &Shared,
-    info: &SessionInfo,
-) -> (Option<RepoWatcher>, Option<UnboundedReceiver<Signal>>) {
-    let (raw_sender, raw_receiver) = unbounded_channel();
-    let (out_sender, out_receiver) = unbounded_channel();
-    match RepoWatcher::start(info, raw_sender) {
-        Ok(watcher) => {
-            tokio::spawn(coalesce(raw_receiver, out_sender, QUIET_PERIOD, MAX_WAIT));
-            shared.emit(Event::WatchState {
-                available: true,
-                reason: String::new(),
-            });
-            (Some(watcher), Some(out_receiver))
-        }
-        Err(error) => {
-            shared.emit(Event::WatchState {
-                available: false,
-                reason: error.to_string(),
-            });
-            (None, None)
-        }
-    }
+struct Started {
+    id: SessionId,
+    state: Event,
+    watcher: Option<RepoWatcher>,
+    signals: Option<UnboundedReceiver<Signal>>,
+}
+
+fn start_watching(info: SessionInfo, id: SessionId, started: UnboundedSender<Started>) {
+    tokio::task::spawn_blocking(move || {
+        let (raw_sender, raw_receiver) = unbounded_channel();
+        let (out_sender, out_receiver) = unbounded_channel();
+        let result = match RepoWatcher::start(&info, raw_sender) {
+            Ok(watcher) => {
+                tokio::spawn(coalesce(raw_receiver, out_sender, QUIET_PERIOD, MAX_WAIT));
+                Started {
+                    id,
+                    state: Event::WatchState {
+                        available: true,
+                        reason: String::new(),
+                    },
+                    watcher: Some(watcher),
+                    signals: Some(out_receiver),
+                }
+            }
+            Err(error) => Started {
+                id,
+                state: Event::WatchState {
+                    available: false,
+                    reason: error.to_string(),
+                },
+                watcher: None,
+                signals: None,
+            },
+        };
+        let _ = started.send(result);
+    });
 }
 
 fn start_refresh(shared: &Arc<Shared>, session: &Arc<Session>, request: u64, events_lost: bool) {
