@@ -1,41 +1,43 @@
 # GitPoulpe
 
-Client Git natif, gratuit et open source (GPLv3), écrit en Rust avec l'interface [Rune](https://github.com/anomalyco/rune). Linux d'abord ; Windows et macOS suivront.
+A free, open-source native Git client written in Rust, with the [Rune](https://github.com/anomalyco/rune) UI toolkit (GPLv3). Linux first; Windows and macOS will follow.
 
-État : le jalon M1, « Inspection locale », est livré. L'application lit un dépôt local et affiche ses changements ; elle ne modifie jamais le dépôt (ni index, ni fichiers, ni références).
+Status: milestone M1, "local inspection", is delivered. The app reads a local repository and shows its changes. It never modifies the repository: no index, file or reference is touched.
 
-## Ce que fait M1
+The interface is currently in French only.
 
-- Ouvre un dépôt par le sélecteur de dossier (bouton « Ouvrir un dépôt… » ou Ctrl+O) ou par un chemin en argument. Dépôt ordinaire, sans premier commit, worktree lié. Un dépôt bare est signalé comme n'ayant pas de répertoire de travail.
-- Deux vues, « Non indexés » et « Indexés » ; un fichier modifié dans les deux apparaît dans chacune avec son propre diff.
-- Tous les diffs défilent dans un seul flux, en mode unifié ou séparé, avec sélection et copie. Les fichiers binaires, les conflits et les fichiers illisibles sont annoncés à leur place.
-- Filtre par nom ou chemin.
-- Actualisation sur changement du dépôt, au retour sur la fenêtre, ou à la demande (bouton Actualiser, touche `r`). La position de lecture est conservée.
+## What M1 does
 
-Git est lancé comme programme externe, sans shell, avec les filtres, programmes de surveillance et accès réseau du dépôt neutralisés.
+- Opens a repository from the folder picker ("Ouvrir un dépôt…" button or Ctrl+O) or from a path given as an argument. Ordinary repositories, repositories without a first commit and linked worktrees work. A bare repository is reported as having no working directory.
+- Two views, unstaged and staged. A file changed in both appears in each, with its own diff.
+- All diffs scroll in a single stream, in unified or split mode, with selection and copy. Binary files, conflicts and unreadable files are announced where they sit in the stream.
+- Filter by name or path.
+- Refreshes when the repository changes, when the window regains focus, or on demand (Refresh button, `r` key). The reading position is kept.
 
-## Raccourcis
+Git runs as an external program, without a shell, with the repository's filters, fsmonitor programs and network access disabled.
 
-| Touche | Action |
+## Keyboard shortcuts
+
+| Key | Action |
 | -- | -- |
-| `/` | filtrer |
-| `j` / `k` | fichier suivant / précédent |
-| `1` / `2` | vue Non indexés / Indexés |
-| `m` | mode unifié / séparé |
-| `r` | actualiser |
-| flèches, PgUp, PgDn, Début, Fin | lire |
-| Ctrl+O | ouvrir un dépôt |
+| `/` | filter |
+| `j` / `k` | next / previous file |
+| `1` / `2` | unstaged / staged view |
+| `m` | unified / split mode |
+| `r` | refresh |
+| arrows, PgUp, PgDn, Home, End | read |
+| Ctrl+O | open a repository |
 
-## Compiler et lancer
+## Build and run
 
-Prérequis : Rust 1.100.0 (`rustup toolchain install 1.100.0`), Git dans le `PATH` (testé avec 2.53.0), un GPU et une session graphique Linux. Le sélecteur de dossier passe par le portail XDG.
+Requirements: Rust 1.100.0 (`rustup toolchain install 1.100.0`), Git on the `PATH` (tested with 2.53.0), a GPU and a Linux graphical session. The folder picker uses the XDG desktop portal.
 
 ```sh
 cargo +1.100.0 build --release -p gitpoulpe-desktop
-target/release/gitpoulpe /chemin/du/depot
+target/release/gitpoulpe /path/to/repository
 ```
 
-Sans argument, l'application s'ouvre sur l'écran d'accueil.
+Without an argument, the app opens on its welcome screen.
 
 ## Tests
 
@@ -44,16 +46,16 @@ cargo +1.100.0 test --workspace
 cargo +1.100.0 clippy --workspace --all-targets -- -D warnings
 ```
 
-## Limites connues
+## Known limits
 
-- Testé uniquement sous Linux.
-- Mesure de performance (CV-05) : tenue avec réserve. En fenêtre réelle, une pause de 90 à 100 ms environ toutes les 10 s n'est pas expliquée. Rune ne fournit pas d'horodatage de présentation, donc aucun résultat sans fenêtre ne prouve 60 images/s.
-- Une modification de `.gitignore` en cours de session n'est prise en compte par la surveillance qu'à la réouverture du dépôt.
+- Tested on Linux only.
+- Performance (CV-05) is accepted with a reservation. In a real window, a pause of about 90 to 100 ms roughly every 10 s is unexplained. Rune provides no presentation timestamps, so no headless result proves 60 frames per second.
+- A change to `.gitignore` during a session is only picked up by the watcher when the repository is reopened.
 
-## Organisation
+## Layout
 
-Le code est découpé en trois crates : `gitpoulpe-core` (types et contrats), `gitpoulpe-git` (lecture de l'état et des diffs, cache, surveillance), `gitpoulpe-desktop` (interface).
+Three crates: `gitpoulpe-core` (types and contracts), `gitpoulpe-git` (reading status and diffs, cache, watching) and `gitpoulpe-desktop` (the UI).
 
-## Licence
+## License
 
-GNU General Public License v3.0 uniquement. Voir [LICENSE](LICENSE).
+GNU General Public License v3.0 only. See [LICENSE](LICENSE).
