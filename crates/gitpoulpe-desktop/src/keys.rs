@@ -102,6 +102,13 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
             "/" => tx.focus("filter", true),
             "m" => s.toggle_mode(tx),
             "r" => s.refresh(),
+            "s" => s.stage_current(),
+            "S" => s.stage_marked(),
+            "x" => {
+                if let Some(position) = s.current {
+                    s.toggle_mark(position);
+                }
+            }
             "j" => reveal_file(s, tx, 1),
             "k" => reveal_file(s, tx, -1),
             "1" => s.set_view(ViewKind::Unstaged),

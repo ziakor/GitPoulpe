@@ -128,9 +128,16 @@ impl Git {
                 ..run.diagnostic()
             }));
         }
-        parser
+        let mut snapshot = parser
             .finish(info.repo.clone(), info.id, generation)
-            .map_err(|e| ReadError::Parse(e.to_string()))
+            .map_err(|e| ReadError::Parse(e.to_string()))?;
+        for entry in snapshot.entries.iter().filter(|e| e.is_unstaged()) {
+            snapshot.stamps.insert(
+                entry.path.clone(),
+                crate::stage::stamp_of(&worktree.join(&entry.path)),
+            );
+        }
+        Ok(snapshot)
     }
 }
 

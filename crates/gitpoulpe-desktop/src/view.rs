@@ -73,7 +73,7 @@ fn footer(s: &State) -> El {
         .child(text(message).font(theme::SMALL).color(p.muted).truncate())
 }
 
-const HINTS: &str = "/ filtrer · j et k : fichier suivant ou précédent · 1 et 2 : changer de vue · m : unifié ou séparé · ↑ ↓ ← → PgUp PgDn : lire · r : actualiser · Ctrl+O : ouvrir un dépôt";
+const HINTS: &str = "/ filtrer · j et k : fichier suivant ou précédent · 1 et 2 : changer de vue · m : unifié ou séparé · ↑ ↓ ← → PgUp PgDn : lire · r : actualiser · s : indexer le fichier · x : sélectionner · Maj+S : indexer la sélection · Ctrl+O : ouvrir un dépôt";
 
 fn open_button(p: &Palette, primary: bool) -> El {
     let (fill, ink) = if primary {
@@ -322,7 +322,7 @@ fn left_pane(s: &State) -> El {
         .focus_group()
         .w_full()
         .growth(GrowthSpec::default())
-        .virtual_rows_version((s.layout_version, s.view, s.current))
+        .virtual_rows_version((s.layout_version, s.view, s.current, s.marks_version))
         .virtual_rows(
             s.files.len(),
             LIST_ROW_HEIGHT,
@@ -362,7 +362,8 @@ fn left_pane(s: &State) -> El {
                         .color(p.muted),
                 )
                 .child(filter)
-                .child(text(counter).font(theme::SMALL).color(p.muted)),
+                .child(text(counter).font(theme::SMALL).color(p.muted))
+                .child(marked_bar(s)),
         )
         .child(
             col()
@@ -374,6 +375,40 @@ fn left_pane(s: &State) -> El {
                     stick_bottom: false,
                 })
                 .child(list),
+        )
+}
+
+fn marked_bar(s: &State) -> El {
+    if s.view != ViewKind::Unstaged || s.marked.is_empty() {
+        return el().h(0.0);
+    }
+    let p = s.palette;
+    let count = s.marked.len();
+    let caption = if count == 1 {
+        "1 fichier sélectionné".to_owned()
+    } else {
+        format!("{count} fichiers sélectionnés")
+    };
+    row()
+        .w_full()
+        .gap(8.0)
+        .center_y()
+        .child(
+            text(caption)
+                .font(theme::SMALL)
+                .color(p.muted)
+                .grow(1.0)
+                .truncate(),
+        )
+        .child(
+            stage_button(
+                s,
+                "stage-marked".to_owned(),
+                "Indexer la sélection".to_owned(),
+                "Indexer la sélection".to_owned(),
+                true,
+            )
+            .on_press(|s: &mut State| s.stage_marked()),
         )
 }
 
@@ -440,11 +475,12 @@ fn file_row(s: &State, position: usize) -> El {
                         .h_full()
                         .fill(p.accent),
                 )
+                .child(mark_box(s, position, index))
                 .child(
                     col()
                         .grow(1.0)
                         .min_w(0.0)
-                        .px(16.0)
+                        .pr(16.0)
                         .py(8.0)
                         .gap(2.0)
                         .child(text(name).font(theme::BODY_MEDIUM).color(p.text).truncate())
@@ -460,6 +496,59 @@ fn file_row(s: &State, position: usize) -> El {
                     ),
                 ),
         )
+}
+
+fn mark_box(s: &State, position: usize, index: usize) -> El {
+    let p = s.palette;
+    if !s.can_mark(position) {
+        return el().w(16.0).h_full();
+    }
+    let path = s
+        .entry_at(position)
+        .map(|(_, e)| e.path.clone())
+        .unwrap_or_default();
+    let marked = s.marked.contains(&path);
+    let label = format!("Sélectionner {} pour l'indexation", display_label(&path));
+    el().w(40.0).h_full().center().child(
+        el().key(format!("mk{index}"))
+            .role("checkbox")
+            .label(label)
+            .w(18.0)
+            .h(18.0)
+            .radius(3.0)
+            .center()
+            .fill(if marked { p.accent } else { p.raised })
+            .border(1.0, if marked { p.accent } else { p.line })
+            .hover(p.hover)
+            .on_press(move |s: &mut State| s.toggle_mark(position))
+            .child(
+                text(if marked { "✓" } else { "" })
+                    .font(theme::TINY)
+                    .color(p.on_accent),
+            ),
+    )
+}
+
+fn stage_button(s: &State, key: String, label: String, caption: String, primary: bool) -> El {
+    let p = s.palette;
+    let (fill, ink) = if primary {
+        (p.accent, p.on_accent)
+    } else {
+        (p.raised, p.text)
+    };
+    el().key(key)
+        .role("button")
+        .label(label)
+        .focusable(true)
+        .focus_ring(2.0, 2.0, p.accent)
+        .h(28.0)
+        .px(10.0)
+        .center()
+        .radius(3.0)
+        .fill(fill)
+        .border(1.0, if primary { fill } else { p.line })
+        .hover(p.hover)
+        .child(text(caption).font(theme::SMALL).color(ink))
 }
 
 fn right_pane(s: &State) -> El {
@@ -655,7 +744,21 @@ fn header_row(s: &State, index: usize, entry: &ChangeEntry) -> El {
                 .gap(3.0)
                 .fill(p.raised)
                 .border(1.0, p.line)
-                .child(text(path).font(theme::PATH).color(p.text).truncate())
+                .child(
+                    row()
+                        .w_full()
+                        .gap(10.0)
+                        .center_y()
+                        .child(
+                            text(path.clone())
+                                .font(theme::PATH)
+                                .color(p.text)
+                                .grow(1.0)
+                                .min_w(0.0)
+                                .truncate(),
+                        )
+                        .child(header_action(s, index, entry, &path)),
+                )
                 .child({
                     let mut line = row()
                         .gap(0.0)
@@ -670,6 +773,21 @@ fn header_row(s: &State, index: usize, entry: &ChangeEntry) -> El {
                     line
                 }),
         )
+}
+
+fn header_action(s: &State, index: usize, entry: &ChangeEntry, label: &str) -> El {
+    if s.view != ViewKind::Unstaged || !entry.is_unstaged() || entry.is_conflict() {
+        return el().w(0.0);
+    }
+    let target = entry.path.clone();
+    stage_button(
+        s,
+        format!("st{index}"),
+        format!("Indexer {label}"),
+        "Indexer".to_owned(),
+        false,
+    )
+    .on_press(move |s: &mut State| s.stage_paths(vec![target.clone()]))
 }
 
 fn notice(s: &State, index: usize, key: String, message: String, tone: Tone) -> El {

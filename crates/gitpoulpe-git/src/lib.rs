@@ -6,6 +6,7 @@ mod diff_parse;
 mod open;
 mod parse;
 mod process;
+mod stage;
 mod status;
 mod watch;
 
@@ -15,6 +16,7 @@ pub use diagnostics::filter_diagnostic;
 pub use diff::{DiffDocument, DiffError, DiffReader};
 pub use diff_parse::{DiffParseError, DiffParser, DiffSummary};
 pub use parse::{ParseError, StatusParser};
+pub use stage::stamp_of;
 pub use watch::{MAX_WAIT, QUIET_PERIOD, RepoWatcher, Signal, WatchError, coalesce, is_relevant};
 
 use std::ffi::OsString;

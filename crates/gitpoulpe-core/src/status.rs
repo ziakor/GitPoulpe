@@ -1,6 +1,8 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::identity::{Generation, RepoId, SessionId};
+use crate::write::FileStamp;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StatusCode {
@@ -87,6 +89,7 @@ pub struct StatusSnapshot {
     pub generation: Generation,
     pub branch: BranchInfo,
     pub entries: Vec<ChangeEntry>,
+    pub stamps: BTreeMap<PathBuf, FileStamp>,
 }
 
 impl StatusSnapshot {

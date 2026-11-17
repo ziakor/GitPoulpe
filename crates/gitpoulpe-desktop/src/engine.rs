@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use gitpoulpe_core::{
     ChangeEntry, DiffLine, DiffSide, DocumentMeta, Generation, OpenError, RangeError, ReadError,
-    SessionId, SessionInfo, StatusSnapshot,
+    SessionId, SessionInfo, StageOutcome, StageTarget, StatusSnapshot, WriteError,
 };
 use gitpoulpe_git::{
     CacheConfig, Cancel, DiffCache, DiffReader, Git, MAX_WAIT, QUIET_PERIOD, RepoWatcher, Signal,
@@ -44,6 +44,10 @@ pub enum Command {
     Refresh {
         request: u64,
     },
+    Stage {
+        request: u64,
+        targets: Vec<StageTarget>,
+    },
     Shutdown(std::sync::mpsc::Sender<()>),
     Read {
         generation: Generation,
@@ -63,6 +67,10 @@ pub enum Event {
     RefreshFailed {
         request: u64,
         message: String,
+    },
+    Staged {
+        request: u64,
+        result: Result<StageOutcome, WriteError>,
     },
     WatchState {
         available: bool,
@@ -146,6 +154,7 @@ impl Engine {
 struct Session {
     info: SessionInfo,
     generation: Mutex<Generation>,
+    writer: tokio::sync::Mutex<()>,
 }
 
 impl Session {
@@ -153,6 +162,7 @@ impl Session {
         Self {
             info,
             generation: Mutex::new(generation),
+            writer: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -262,6 +272,12 @@ async fn run(
                         if let Some(current) = &session {
                             start_refresh(&shared, current, request, false);
                         }
+                    }
+                    Command::Stage { request, targets } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        tokio::spawn(stage(shared.clone(), current, request, targets));
                     }
                     Command::Copy(request) => {
                         let Some(current) = session
@@ -389,6 +405,23 @@ async fn open(
         .await
         .map_err(describe_read_error)?;
     Ok((info, snapshot))
+}
+
+async fn stage(
+    shared: Arc<Shared>,
+    session: Arc<Session>,
+    request: u64,
+    targets: Vec<StageTarget>,
+) {
+    let result = {
+        let _writer = session.writer.lock().await;
+        shared
+            .git
+            .stage(&session.info, &targets, &Cancel::new())
+            .await
+    };
+    shared.emit(Event::Staged { request, result });
+    start_refresh(&shared, &session, 0, false);
 }
 
 fn describe_read_error(error: ReadError) -> String {

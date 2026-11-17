@@ -2,7 +2,7 @@
 
 A free, open-source native Git client written in Rust, with the [Rune](https://github.com/anomalyco/rune) UI toolkit (GPLv3). Linux first; Windows and macOS will follow.
 
-Status: milestone M1, "local inspection", is delivered. The app reads a local repository and shows its changes. It never modifies the repository: no index, file or reference is touched.
+Status: milestone M1, "local inspection", is delivered. Milestone M2, "local work", is in progress: so far the app can stage whole files. Reading a repository never modifies it; the only writes are the explicit actions listed under "Writing".
 
 The interface is currently in French only.
 
@@ -16,6 +16,12 @@ The interface is currently in French only.
 
 Git runs as an external program, without a shell, with the repository's filters, fsmonitor programs and network access disabled.
 
+## Writing
+
+- Stage files (unstaged view): "Indexer" button in a file header, `s` for the current file, or tick several files (checkbox or `x`) and use "Indexer la sélection" or `Shift+S`.
+- Nothing is staged if a file changed after it was displayed, if the index changed, or if the file is in conflict; the state is re-read and a message says why.
+- Git runs as configured for these actions (clean filters, such as Git LFS, apply). An existing `index.lock` is reported, never removed.
+
 ## Keyboard shortcuts
 
 | Key | Action |
@@ -25,6 +31,7 @@ Git runs as an external program, without a shell, with the repository's filters,
 | `1` / `2` | unstaged / staged view |
 | `m` | unified / split mode |
 | `r` | refresh |
+| `s` / `x` / `Shift+S` | stage the current file / tick it / stage the ticked files |
 | arrows, PgUp, PgDn, Home, End | read |
 | Ctrl+O | open a repository |
 

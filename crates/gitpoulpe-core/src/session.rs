@@ -96,6 +96,7 @@ mod tests {
             generation,
             branch: BranchInfo::default(),
             entries: Vec::new(),
+            stamps: Default::default(),
         }
     }
 

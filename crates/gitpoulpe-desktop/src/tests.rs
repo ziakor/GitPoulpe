@@ -8,6 +8,7 @@ use rune::{Env, Runtime};
 use tempfile::TempDir;
 
 mod acceptance;
+mod staging;
 
 use crate::state::{Screen, State, ViewKind, path_from_args};
 use crate::view::view;

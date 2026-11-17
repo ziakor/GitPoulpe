@@ -67,6 +67,7 @@ impl StatusParser {
             generation,
             branch: self.branch,
             entries: self.entries,
+            stamps: Default::default(),
         })
     }
 

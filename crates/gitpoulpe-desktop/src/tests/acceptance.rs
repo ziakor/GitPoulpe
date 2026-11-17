@@ -324,7 +324,6 @@ fn a_file_changed_in_the_index_and_in_the_working_directory_has_a_different_diff
 fn the_interface_never_offers_an_action_that_changes_the_repository() {
     let (_repo, rt) = keyboard_runtime(5);
     let forbidden = [
-        "indexer",
         "ajouter",
         "valider",
         "commit",

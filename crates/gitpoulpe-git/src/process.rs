@@ -129,6 +129,21 @@ impl Git {
         args: &[&OsStr],
         env: &EnvPairs,
         cancel: &Cancel,
+        on_chunk: F,
+    ) -> Result<Run, RunError>
+    where
+        F: FnMut(&[u8]) -> Result<(), String>,
+    {
+        self.run_input(dir, args, env, None, cancel, on_chunk).await
+    }
+
+    pub(crate) async fn run_input<F>(
+        &self,
+        dir: &Path,
+        args: &[&OsStr],
+        env: &EnvPairs,
+        input: Option<Vec<u8>>,
+        cancel: &Cancel,
         mut on_chunk: F,
     ) -> Result<Run, RunError>
     where
@@ -148,7 +163,11 @@ impl Git {
             .env("GIT_OPTIONAL_LOCKS", "0")
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("LC_ALL", "C")
-            .stdin(Stdio::null())
+            .stdin(if input.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
@@ -157,6 +176,14 @@ impl Git {
         }
         command.envs(env.iter().map(|(k, v)| (k, v)));
         let mut child = spawn_with_retry(&mut command, cancel).await?;
+        let writer = input.and_then(|bytes| {
+            child.stdin.take().map(|mut stdin| {
+                tokio::spawn(async move {
+                    use tokio::io::AsyncWriteExt;
+                    let _ = stdin.write_all(&bytes).await;
+                })
+            })
+        });
         let mut stdout = child.stdout.take().expect("stdout is piped");
         let stderr = child.stderr.take().expect("stderr is piped");
         let stderr_task = tokio::spawn(drain_stderr(stderr));
@@ -181,6 +208,9 @@ impl Git {
             let _ = child.start_kill();
         }
         let status = child.wait().await;
+        if let Some(writer) = writer {
+            writer.abort();
+        }
         if outcome.is_err() {
             stderr_task.abort();
         }

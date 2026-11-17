@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use gitpoulpe_core::{
-    BuildState, ChangeEntry, DiffLine, DiffSide, DocumentKind, DocumentMeta, Generation,
-    SplitIndex, StatusSnapshot, display_label,
+    BuildState, ChangeEntry, DiffLine, DiffSide, DocumentKind, DocumentMeta, Generation, Refusal,
+    SplitIndex, StageOutcome, StageTarget, StatusSnapshot, WriteError, display_label,
 };
 use rune::prefs::Prefs;
 use rune::{Live, TextEdit, Tx, Waker};
@@ -135,6 +135,10 @@ pub struct State {
     pub pinned: Option<usize>,
     pub visible: Range<usize>,
     pub notice: Option<String>,
+    pub marked: HashSet<PathBuf>,
+    pub marks_version: u32,
+    pub writing: bool,
+    stage_request: u64,
     pub watch: WatchStatus,
     pub refresh_request: u64,
     last_refresh: Option<Instant>,
@@ -219,6 +223,10 @@ impl State {
             max_loaded_lines: MAX_LOADED_LINES,
             visible_chunks: HashMap::new(),
             copy_request: 0,
+            marked: HashSet::new(),
+            marks_version: 0,
+            writing: false,
+            stage_request: 0,
             copy_limit: crate::engine::MAX_COPY_BYTES,
             copied: None,
             stick_end: false,
@@ -452,6 +460,8 @@ impl State {
                     name,
                 });
                 self.docs.clear();
+                self.marked.clear();
+                self.writing = false;
                 self.positions.clear();
                 self.pending_anchor = None;
                 self.current = None;
@@ -479,6 +489,14 @@ impl State {
                 } else {
                     WatchStatus::Unavailable(reason)
                 };
+                true
+            }
+            Event::Staged { request, result } => {
+                if request != self.stage_request {
+                    return false;
+                }
+                self.writing = false;
+                self.notice = Some(self.describe_stage(result));
                 true
             }
             Event::Copied {
@@ -1020,11 +1038,13 @@ impl State {
         self.current = None;
         self.pinned = None;
         self.stick_end = false;
+        self.prune_marks();
         self.refilter();
         if self.notice.as_deref() == Some(REFRESHING_NOTICE) {
             self.notice = None;
         }
-        self.relocate(anchor, &old_paths, true);
+        let announce = self.notice.is_none();
+        self.relocate(anchor, &old_paths, announce);
         if self.notice.is_none() && (request != 0 || events_lost) {
             self.notice = Some(if events_lost {
                 "Des événements ont été perdus : le dépôt a été relu en entier.".to_owned()
@@ -1094,6 +1114,136 @@ impl State {
     pub fn shutdown(&mut self) {
         if let Some(engine) = self.engine.take() {
             engine.shutdown();
+        }
+    }
+}
+
+impl State {
+    fn describe_stage(&mut self, result: Result<StageOutcome, WriteError>) -> String {
+        match result {
+            Ok(StageOutcome::Applied { staged }) => {
+                self.clear_marks();
+                match staged {
+                    0 => "Rien à indexer.".to_owned(),
+                    1 => "1 fichier indexé.".to_owned(),
+                    n => format!("{n} fichiers indexés."),
+                }
+            }
+            Ok(StageOutcome::Stale { paths }) => format!(
+                "Rien n'a été indexé : {} a changé depuis son affichage. L'état a été relu, vérifie puis recommence.",
+                paths.first().map_or_else(String::new, |p| display_label(p))
+            ),
+            Ok(StageOutcome::Refused {
+                path,
+                reason: Refusal::Conflict,
+            }) => format!(
+                "{} est en conflit : la résolution n'est pas encore disponible, rien n'a été indexé.",
+                display_label(&path)
+            ),
+            Ok(StageOutcome::Refused {
+                path,
+                reason: Refusal::NothingToStage,
+            }) => format!("{} n'a rien à indexer.", display_label(&path)),
+            Err(WriteError::IndexLocked(path)) => format!(
+                "Git est occupé : le verrou {path} existe. Termine l'autre opération Git puis réessaie ; GitPoulpe ne supprime jamais ce verrou."
+            ),
+            Err(WriteError::NoWorktree) => "Ce dépôt n'a pas de répertoire de travail.".to_owned(),
+            Err(WriteError::Cancelled) => "Indexation annulée.".to_owned(),
+            Err(WriteError::GitUnavailable(d)) => format!("Git est introuvable : {d}"),
+            Err(WriteError::GitFailed(d)) => format!("L'indexation a échoué : {d}"),
+        }
+    }
+
+    fn prune_marks(&mut self) {
+        let still: HashSet<PathBuf> = self
+            .entries()
+            .iter()
+            .filter(|e| e.is_unstaged() && !e.is_conflict())
+            .map(|e| e.path.clone())
+            .collect();
+        let before = self.marked.len();
+        self.marked.retain(|path| still.contains(path));
+        if self.marked.len() != before {
+            self.marks_version += 1;
+        }
+    }
+
+    fn clear_marks(&mut self) {
+        if !self.marked.is_empty() {
+            self.marked.clear();
+            self.marks_version += 1;
+        }
+    }
+
+    pub fn can_mark(&self, position: usize) -> bool {
+        self.view == ViewKind::Unstaged
+            && self
+                .entry_at(position)
+                .is_some_and(|(_, entry)| entry.is_unstaged() && !entry.is_conflict())
+    }
+
+    pub fn toggle_mark(&mut self, position: usize) {
+        if !self.can_mark(position) {
+            return;
+        }
+        let Some((_, entry)) = self.entry_at(position) else {
+            return;
+        };
+        let path = entry.path.clone();
+        if !self.marked.remove(&path) {
+            self.marked.insert(path);
+        }
+        self.marks_version += 1;
+    }
+
+    pub fn stage_current(&mut self) {
+        if self.view != ViewKind::Unstaged {
+            return;
+        }
+        let Some(position) = self.current else { return };
+        let Some((_, entry)) = self.entry_at(position) else {
+            return;
+        };
+        let path = entry.path.clone();
+        self.stage_paths(vec![path]);
+    }
+
+    pub fn stage_marked(&mut self) {
+        let mut paths: Vec<PathBuf> = self.marked.iter().cloned().collect();
+        paths.sort();
+        self.stage_paths(paths);
+    }
+
+    pub fn stage_paths(&mut self, paths: Vec<PathBuf>) {
+        if self.writing {
+            self.notice = Some("Une écriture est déjà en cours.".to_owned());
+            return;
+        }
+        let Some(repo) = self.repo.as_ref() else {
+            return;
+        };
+        let targets: Vec<StageTarget> = paths
+            .iter()
+            .filter_map(|path| {
+                let entry = repo.snapshot.entries.iter().find(|e| e.path == *path)?;
+                Some(StageTarget {
+                    stamp: repo.snapshot.stamps.get(path).copied(),
+                    entry: entry.clone(),
+                })
+            })
+            .collect();
+        if targets.is_empty() {
+            self.notice = Some("Rien à indexer.".to_owned());
+            return;
+        }
+        self.stage_request += 1;
+        self.writing = true;
+        self.notice = Some("Indexation…".to_owned());
+        if let Some(engine) = &self.engine {
+            engine.send(Command::Stage {
+                request: self.stage_request,
+                targets,
+            });
         }
     }
 }
