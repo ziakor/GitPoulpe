@@ -24,9 +24,19 @@ pub struct StageTarget {
     pub stamp: Option<FileStamp>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HunkSpec {
+    pub index: usize,
+    pub old_start: u32,
+    pub old_len: u32,
+    pub new_start: u32,
+    pub new_len: u32,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StageOutcome {
     Applied { staged: usize },
+    HunkApplied,
     Stale { paths: Vec<PathBuf> },
     Refused { path: PathBuf, reason: Refusal },
 }
@@ -35,6 +45,8 @@ pub enum StageOutcome {
 pub enum Refusal {
     Conflict,
     NothingToStage,
+    NotPartial,
+    FilterConfigured,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

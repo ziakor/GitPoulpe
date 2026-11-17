@@ -5,8 +5,8 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 use gitpoulpe_core::{
-    ChangeEntry, DiffLine, DiffSide, DocumentMeta, Generation, OpenError, RangeError, ReadError,
-    SessionId, SessionInfo, StageOutcome, StageTarget, StatusSnapshot, WriteError,
+    ChangeEntry, DiffLine, DiffSide, DocumentMeta, Generation, HunkSpec, OpenError, RangeError,
+    ReadError, SessionId, SessionInfo, StageOutcome, StageTarget, StatusSnapshot, WriteError,
 };
 use gitpoulpe_git::{
     CacheConfig, Cancel, DiffCache, DiffReader, Git, MAX_WAIT, QUIET_PERIOD, RepoWatcher, Signal,
@@ -47,6 +47,11 @@ pub enum Command {
     Stage {
         request: u64,
         targets: Vec<StageTarget>,
+    },
+    StageHunk {
+        request: u64,
+        target: Box<StageTarget>,
+        hunk: HunkSpec,
     },
     Shutdown(std::sync::mpsc::Sender<()>),
     Read {
@@ -279,6 +284,16 @@ async fn run(
                         };
                         tokio::spawn(stage(shared.clone(), current, request, targets));
                     }
+                    Command::StageHunk {
+                        request,
+                        target,
+                        hunk,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        tokio::spawn(stage_hunk(shared.clone(), current, request, *target, hunk));
+                    }
                     Command::Copy(request) => {
                         let Some(current) = session
                             .clone()
@@ -418,6 +433,24 @@ async fn stage(
         shared
             .git
             .stage(&session.info, &targets, &Cancel::new())
+            .await
+    };
+    shared.emit(Event::Staged { request, result });
+    start_refresh(&shared, &session, 0, false);
+}
+
+async fn stage_hunk(
+    shared: Arc<Shared>,
+    session: Arc<Session>,
+    request: u64,
+    target: StageTarget,
+    hunk: HunkSpec,
+) {
+    let result = {
+        let _writer = session.writer.lock().await;
+        shared
+            .git
+            .stage_hunk(&session.info, &target, &hunk, &Cancel::new())
             .await
     };
     shared.emit(Event::Staged { request, result });

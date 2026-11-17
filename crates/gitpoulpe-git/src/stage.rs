@@ -4,8 +4,8 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use gitpoulpe_core::{
-    Diagnostic, FileStamp, Generation, Refusal, SessionInfo, StageOutcome, StageTarget, StampKind,
-    WriteError,
+    Diagnostic, FileStamp, Generation, HunkSpec, Refusal, SessionInfo, StageOutcome, StageTarget,
+    StampKind, WriteError,
 };
 
 use crate::process::RunError;
@@ -165,4 +165,208 @@ impl Git {
             staged: targets.len(),
         })
     }
+
+    async fn current_status(
+        &self,
+        info: &SessionInfo,
+        cancel: &Cancel,
+    ) -> Result<gitpoulpe_core::StatusSnapshot, WriteError> {
+        self.read_status(info, Generation::default().next(), cancel)
+            .await
+            .map_err(|e| match e {
+                gitpoulpe_core::ReadError::Cancelled => WriteError::Cancelled,
+                gitpoulpe_core::ReadError::NoWorktree => WriteError::NoWorktree,
+                gitpoulpe_core::ReadError::GitUnavailable(d) => WriteError::GitUnavailable(d),
+                gitpoulpe_core::ReadError::GitFailed(d) => WriteError::GitFailed(d),
+                gitpoulpe_core::ReadError::Parse(message) => WriteError::GitFailed(Diagnostic {
+                    exit_code: None,
+                    signal: None,
+                    message,
+                    cause: None,
+                }),
+            })
+    }
+
+    pub async fn stage_hunk(
+        &self,
+        info: &SessionInfo,
+        target: &StageTarget,
+        hunk: &HunkSpec,
+        cancel: &Cancel,
+    ) -> Result<StageOutcome, WriteError> {
+        let worktree = info.worktree.as_ref().ok_or(WriteError::NoWorktree)?;
+        let entry = &target.entry;
+        let refuse = |reason| {
+            Ok(StageOutcome::Refused {
+                path: entry.path.clone(),
+                reason,
+            })
+        };
+        if entry.is_conflict() {
+            return refuse(Refusal::Conflict);
+        }
+        if entry.kind != gitpoulpe_core::EntryKind::Ordinary
+            || entry.worktree != gitpoulpe_core::StatusCode::Modified
+        {
+            return refuse(Refusal::NotPartial);
+        }
+        let stale = || {
+            Ok(StageOutcome::Stale {
+                paths: vec![entry.path.clone()],
+            })
+        };
+        let Some(seen) = target.stamp else {
+            return stale();
+        };
+        let current = self.current_status(info, cancel).await?;
+        let unchanged = current.entries.iter().any(|now| {
+            now.path == entry.path
+                && now.kind == entry.kind
+                && now.index == entry.index
+                && now.worktree == entry.worktree
+                && now.original_path == entry.original_path
+        });
+        if !unchanged || current.stamps.get(&entry.path) != Some(&seen) {
+            return stale();
+        }
+        let filters = self
+            .filter_overrides(worktree, cancel)
+            .await
+            .map_err(|e| match e {
+                gitpoulpe_core::ReadError::Cancelled => WriteError::Cancelled,
+                gitpoulpe_core::ReadError::GitUnavailable(d) => WriteError::GitUnavailable(d),
+                other => WriteError::GitFailed(Diagnostic {
+                    exit_code: None,
+                    signal: None,
+                    message: other.to_string(),
+                    cause: None,
+                }),
+            })?;
+        if !filters.is_empty() {
+            return refuse(Refusal::FilterConfigured);
+        }
+
+        let mut spec = b":(literal)".to_vec();
+        spec.extend_from_slice(entry.path.as_os_str().as_bytes());
+        let args: Vec<OsString> = vec![
+            "diff".into(),
+            "--no-ext-diff".into(),
+            "--no-textconv".into(),
+            "--no-color".into(),
+            "--unified=3".into(),
+            "--".into(),
+            OsString::from(std::ffi::OsStr::from_bytes(&spec)),
+        ];
+        let refs: Vec<&OsStr> = args.iter().map(OsString::as_os_str).collect();
+        let (run, diff) = self
+            .run_collect(worktree, &refs, cancel)
+            .await
+            .map_err(write_failure)?;
+        if !run.succeeded() {
+            return Err(WriteError::GitFailed(Diagnostic {
+                cause: None,
+                ..run.diagnostic()
+            }));
+        }
+        let Some(patch) = single_hunk_patch(&diff, hunk) else {
+            return match split_diff(&diff) {
+                Some(_) => stale(),
+                None => refuse(Refusal::NotPartial),
+            };
+        };
+        let args: Vec<OsString> = ["apply", "--cached", "--recount", "--whitespace=nowarn", "-"]
+            .map(OsString::from)
+            .to_vec();
+        let refs: Vec<&OsStr> = args.iter().map(OsString::as_os_str).collect();
+        let run = self
+            .run_input(worktree, &refs, &[], Some(patch), cancel, |_| Ok(()))
+            .await
+            .map_err(write_failure)?;
+        if !run.succeeded() {
+            let diagnostic = Diagnostic {
+                cause: None,
+                ..run.diagnostic()
+            };
+            return Err(match locked_index(&diagnostic) {
+                Some(path) => WriteError::IndexLocked(path),
+                None => WriteError::GitFailed(diagnostic),
+            });
+        }
+        Ok(StageOutcome::HunkApplied)
+    }
+}
+
+struct SplitDiff<'a> {
+    header: Vec<&'a [u8]>,
+    hunks: Vec<Vec<&'a [u8]>>,
+}
+
+fn split_diff(diff: &[u8]) -> Option<SplitDiff<'_>> {
+    let mut header = Vec::new();
+    let mut hunks: Vec<Vec<&[u8]>> = Vec::new();
+    for line in diff.split_inclusive(|byte| *byte == b'\n') {
+        if line.starts_with(b"@@ ") {
+            hunks.push(vec![line]);
+        } else if let Some(current) = hunks.last_mut() {
+            current.push(line);
+        } else {
+            let partial_blocker = [
+                &b"old mode"[..],
+                b"new mode",
+                b"similarity ",
+                b"rename ",
+                b"copy ",
+                b"deleted file",
+                b"new file",
+                b"Binary files",
+                b"GIT binary patch",
+            ];
+            if partial_blocker
+                .iter()
+                .any(|prefix| line.starts_with(prefix))
+            {
+                return None;
+            }
+            header.push(line);
+        }
+    }
+    (!hunks.is_empty()).then_some(SplitDiff { header, hunks })
+}
+
+fn parse_range(field: &[u8]) -> Option<(u32, u32)> {
+    let text = std::str::from_utf8(field).ok()?;
+    let text = text.trim_start_matches(['-', '+']);
+    match text.split_once(',') {
+        Some((start, len)) => Some((start.parse().ok()?, len.parse().ok()?)),
+        None => Some((text.parse().ok()?, 1)),
+    }
+}
+
+fn hunk_numbers(first_line: &[u8]) -> Option<(u32, u32, u32, u32)> {
+    let mut parts = first_line.split(|byte| *byte == b' ');
+    parts.next()?;
+    let (old_start, old_len) = parse_range(parts.next()?)?;
+    let (new_start, new_len) = parse_range(parts.next()?)?;
+    Some((old_start, old_len, new_start, new_len))
+}
+
+fn single_hunk_patch(diff: &[u8], wanted: &HunkSpec) -> Option<Vec<u8>> {
+    let split = split_diff(diff)?;
+    let chosen = split.hunks.get(wanted.index)?;
+    let numbers = hunk_numbers(chosen.first()?)?;
+    if numbers
+        != (
+            wanted.old_start,
+            wanted.old_len,
+            wanted.new_start,
+            wanted.new_len,
+        )
+    {
+        return None;
+    }
+    let mut patch = Vec::new();
+    for line in split.header.iter().chain(chosen.iter()) {
+        patch.extend_from_slice(line);
+    }
+    Some(patch)
 }

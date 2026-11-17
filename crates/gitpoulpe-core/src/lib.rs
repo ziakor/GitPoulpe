@@ -15,4 +15,4 @@ pub use identity::{Generation, RepoId, RequestId, SessionId};
 pub use session::{RepoKind, SessionInfo, SessionState, StaleSnapshot};
 pub use split::{SplitCells, SplitIndex, SplitIndexBuilder, SplitRow, SplitUnit, split_rows};
 pub use status::{BranchInfo, ChangeEntry, EntryKind, StatusCode, StatusSnapshot, display_label};
-pub use write::{FileStamp, Refusal, StageOutcome, StageTarget, StampKind, WriteError};
+pub use write::{FileStamp, HunkSpec, Refusal, StageOutcome, StageTarget, StampKind, WriteError};

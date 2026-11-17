@@ -831,7 +831,9 @@ fn body_row(s: &State, index: usize, line: u64) -> El {
                 return split_row(s, index, line, split, key);
             }
             match s.line(index, line) {
-                Some(diff_line) => line_row(&s.palette, key, diff_line),
+                Some(diff_line) => {
+                    line_row(&s.palette, key, diff_line, hunk_action(s, index, line))
+                }
                 None => placeholder(s, key, "…"),
             }
         }
@@ -918,7 +920,40 @@ fn gutter(
         )
 }
 
-fn line_row(p: &Palette, key: String, line: &DiffLine) -> El {
+fn hunk_action(s: &State, index: usize, doc_line: u64) -> Option<El> {
+    if s.view != ViewKind::Unstaged {
+        return None;
+    }
+    let entry = s.entries().get(index)?;
+    if entry.kind != EntryKind::Ordinary
+        || entry.worktree != StatusCode::Modified
+        || entry.is_conflict()
+    {
+        return None;
+    }
+    let meta = s.doc(index)?.meta.as_ref()?;
+    if meta.kind != Some(DocumentKind::Text) {
+        return None;
+    }
+    let hunk = meta.hunks.iter().position(|h| h.first_line == doc_line)?;
+    let path = entry.path.clone();
+    let label = format!("Indexer ce bloc de {}", display_label(&path));
+    Some(
+        el().h(LINE_HEIGHT).px(6.0).center_y().child(
+            stage_button(
+                s,
+                format!("hb{index}:{hunk}"),
+                label,
+                "Indexer ce bloc".to_owned(),
+                false,
+            )
+            .h(LINE_HEIGHT - 4.0)
+            .on_press(move |s: &mut State| s.stage_hunk(path.clone(), hunk)),
+        ),
+    )
+}
+
+fn line_row(p: &Palette, key: String, line: &DiffLine, action: Option<El>) -> El {
     let text_key = format!("t{}", &key[1..]);
     let content = String::from_utf8_lossy(&line.text).into_owned();
     match line.kind {
@@ -929,6 +964,7 @@ fn line_row(p: &Palette, key: String, line: &DiffLine) -> El {
             .center_y()
             .fill(p.panel)
             .child(gutter(p, None, None, " ", p.muted, p.panel))
+            .child(action.unwrap_or_else(|| el().w(0.0)))
             .child(text(content).font(theme::CODE).color(p.muted))
             .child(el().w(14.0)),
         DiffLineKind::NoNewlineAtEof => row()
@@ -991,7 +1027,12 @@ fn split_row(s: &State, index: usize, row_index: u64, split: &SplitIndex, key: S
     if let (true, Some(line)) = (cells.full_width, left)
         && line.kind == DiffLineKind::HunkHeader
     {
-        return line_row(&p, key, line);
+        return line_row(
+            &p,
+            key,
+            line,
+            cells.left.and_then(|l| hunk_action(s, index, l)),
+        );
     }
     row()
         .key(key)

@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use gitpoulpe_core::{
-    BuildState, ChangeEntry, DiffLine, DiffSide, DocumentKind, DocumentMeta, Generation, Refusal,
-    SplitIndex, StageOutcome, StageTarget, StatusSnapshot, WriteError, display_label,
+    BuildState, ChangeEntry, DiffLine, DiffSide, DocumentKind, DocumentMeta, Generation, HunkSpec,
+    Refusal, SplitIndex, StageOutcome, StageTarget, StatusSnapshot, WriteError, display_label,
 };
 use rune::prefs::Prefs;
 use rune::{Live, TextEdit, Tx, Waker};
@@ -1129,6 +1129,15 @@ impl State {
                     n => format!("{n} fichiers indexés."),
                 }
             }
+            Ok(StageOutcome::HunkApplied) => "Bloc indexé.".to_owned(),
+            Ok(StageOutcome::Refused {
+                reason: Refusal::NotPartial,
+                ..
+            }) => "Ce fichier ne peut pas être indexé bloc par bloc (non suivi, supprimé, renommé ou changement de mode) : indexe le fichier entier.".to_owned(),
+            Ok(StageOutcome::Refused {
+                reason: Refusal::FilterConfigured,
+                ..
+            }) => "Ce dépôt utilise des filtres Git : l'indexation par bloc est désactivée pour ne pas indexer un contenu différent de celui affiché. Indexe le fichier entier.".to_owned(),
             Ok(StageOutcome::Stale { paths }) => format!(
                 "Rien n'a été indexé : {} a changé depuis son affichage. L'état a été relu, vérifie puis recommence.",
                 paths.first().map_or_else(String::new, |p| display_label(p))
@@ -1212,6 +1221,49 @@ impl State {
         let mut paths: Vec<PathBuf> = self.marked.iter().cloned().collect();
         paths.sort();
         self.stage_paths(paths);
+    }
+
+    pub fn stage_hunk(&mut self, path: PathBuf, hunk_index: usize) {
+        if self.writing {
+            self.notice = Some("Une écriture est déjà en cours.".to_owned());
+            return;
+        }
+        let Some(repo) = self.repo.as_ref() else {
+            return;
+        };
+        let Some(position) = repo.snapshot.entries.iter().position(|e| e.path == path) else {
+            return;
+        };
+        let entry = repo.snapshot.entries[position].clone();
+        let Some(hunk) = self
+            .doc(position)
+            .and_then(|d| d.meta.as_ref())
+            .and_then(|m| m.hunks.get(hunk_index))
+            .map(|h| HunkSpec {
+                index: hunk_index,
+                old_start: h.old_start,
+                old_len: h.old_len,
+                new_start: h.new_start,
+                new_len: h.new_len,
+            })
+        else {
+            self.notice = Some("Ce bloc n'est plus affiché : l'état va être relu.".to_owned());
+            return;
+        };
+        let target = StageTarget {
+            stamp: repo.snapshot.stamps.get(&path).copied(),
+            entry,
+        };
+        self.stage_request += 1;
+        self.writing = true;
+        self.notice = Some("Indexation…".to_owned());
+        if let Some(engine) = &self.engine {
+            engine.send(Command::StageHunk {
+                request: self.stage_request,
+                target: Box::new(target),
+                hunk,
+            });
+        }
     }
 
     pub fn stage_paths(&mut self, paths: Vec<PathBuf>) {

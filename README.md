@@ -2,7 +2,7 @@
 
 A free, open-source native Git client written in Rust, with the [Rune](https://github.com/anomalyco/rune) UI toolkit (GPLv3). Linux first; Windows and macOS will follow.
 
-Status: milestone M1, "local inspection", is delivered. Milestone M2, "local work", is in progress: so far the app can stage whole files. Reading a repository never modifies it; the only writes are the explicit actions listed under "Writing".
+Status: milestone M1, "local inspection", is delivered. Milestone M2, "local work", is in progress: so far the app can stage whole files and single blocks. Reading a repository never modifies it; the only writes are the explicit actions listed under "Writing".
 
 The interface is currently in French only.
 
@@ -19,6 +19,7 @@ Git runs as an external program, without a shell, with the repository's filters,
 ## Writing
 
 - Stage files (unstaged view): "Indexer" button in a file header, `s` for the current file, or tick several files (checkbox or `x`) and use "Indexer la sélection" or `Shift+S`.
+- Stage a single block of a diff: "Indexer ce bloc" button on the block header (unified and split modes). Only for tracked text files with content changes; untracked, deleted, renamed and mode-changed files are staged whole, and block staging is disabled in repositories that configure Git filters.
 - Nothing is staged if a file changed after it was displayed, if the index changed, or if the file is in conflict; the state is re-read and a message says why.
 - Git runs as configured for these actions (clean filters, such as Git LFS, apply). An existing `index.lock` is reported, never removed.
 
