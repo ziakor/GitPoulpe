@@ -22,6 +22,7 @@ pub struct FileStamp {
 pub struct StageTarget {
     pub entry: ChangeEntry,
     pub stamp: Option<FileStamp>,
+    pub index_id: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,6 +50,9 @@ pub enum StageOutcome {
     Applied { staged: usize },
     HunkApplied,
     LinesApplied { lines: usize },
+    Unstaged { files: usize },
+    HunkUnstaged,
+    LinesUnstaged { lines: usize },
     Stale { paths: Vec<PathBuf> },
     Refused { path: PathBuf, reason: Refusal },
 }
@@ -61,6 +65,29 @@ pub enum Refusal {
     FilterConfigured,
     NothingSelected,
     Incompatible,
+    NothingToUnstage,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WriteJob {
+    Stage(Vec<StageTarget>),
+    StageHunk {
+        target: StageTarget,
+        hunk: HunkSpec,
+    },
+    StageLines {
+        target: StageTarget,
+        selection: LineSelection,
+    },
+    Unstage(Vec<StageTarget>),
+    UnstageHunk {
+        target: StageTarget,
+        hunk: HunkSpec,
+    },
+    UnstageLines {
+        target: StageTarget,
+        selection: LineSelection,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

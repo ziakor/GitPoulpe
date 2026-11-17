@@ -505,3 +505,182 @@ fn line_selection_works_in_split_mode_too() {
     let at = staged.iter().position(|l| l == "line 3").unwrap();
     assert_eq!(staged[at + 1], "line 3 CHANGED");
 }
+
+fn staged_view(rt: &mut rune::Runtime<State>) {
+    rt.state.set_view(ViewKind::Staged);
+    for _ in 0..8 {
+        step(rt);
+    }
+}
+
+#[test]
+fn the_u_key_unstages_the_current_file_and_keeps_it_on_disk() {
+    let (repo, mut rt) = keyboard_runtime(3);
+    staged_view(&mut rt);
+    assert_eq!(rt.state.count(ViewKind::Staged), 1);
+    let path = path_at(&rt.state, 0);
+    let worktree = std::fs::read(repo.path().join(&path)).unwrap();
+    rt.state.jump_to(0);
+
+    press(&mut rt, rune::Key::Text("u".to_owned()));
+    finish_writing(&mut rt);
+
+    assert!(staged(repo.path()).is_empty(), "nothing is staged any more");
+    assert_eq!(std::fs::read(repo.path().join(&path)).unwrap(), worktree);
+    assert_eq!(rt.state.notice.as_deref(), Some("1 fichier désindexé."));
+    assert_eq!(rt.state.count(ViewKind::Staged), 0);
+}
+
+#[test]
+fn the_header_button_and_the_marked_selection_unstage_files() {
+    let repo = tempfile::tempdir().unwrap();
+    let dir = repo.path();
+    super::git(dir, &["init", "-q", "-b", "main"]);
+    for name in ["a.txt", "b.txt", "c.txt"] {
+        std::fs::write(dir.join(name), "one\n").unwrap();
+    }
+    super::git(dir, &["add", "-A"]);
+    super::git(dir, &["commit", "-q", "-m", "base"]);
+    for name in ["a.txt", "b.txt", "c.txt"] {
+        std::fs::write(dir.join(name), "two\n").unwrap();
+    }
+    super::git(dir, &["add", "-A"]);
+    let mut rt = super::runtime(super::opened(dir));
+    rt.on_key = Some(crate::keys::on_key);
+    staged_view(&mut rt);
+    assert_eq!(rt.state.count(ViewKind::Staged), 3);
+
+    let (index, _) = rt.state.entry_at(0).unwrap();
+    let rect = rect_of(&rt, &format!("un{index}")).expect("the header offers Désindexer");
+    click_at(
+        &mut rt,
+        rect[0] + rect[2] / 2.0,
+        rect[1] + rect[3] / 2.0,
+        false,
+    );
+    finish_writing(&mut rt);
+    assert_eq!(staged(dir).len(), 2);
+
+    staged_view(&mut rt);
+    for position in [0, 1] {
+        rt.state.jump_to(position);
+        press(&mut rt, rune::Key::Text("x".to_owned()));
+    }
+    assert!(rect_of(&rt, "stage-marked").is_some());
+    press(&mut rt, rune::Key::Text("U".to_owned()));
+    finish_writing(&mut rt);
+    assert!(staged(dir).is_empty());
+    assert_eq!(rt.state.notice.as_deref(), Some("2 fichiers désindexés."));
+}
+
+#[test]
+fn unstaging_works_before_the_first_commit_from_the_interface() {
+    let repo = tempfile::tempdir().unwrap();
+    let dir = repo.path();
+    super::git(dir, &["init", "-q", "-b", "main"]);
+    std::fs::write(dir.join("first.txt"), "1\n").unwrap();
+    std::fs::write(dir.join("second.txt"), "2\n").unwrap();
+    super::git(dir, &["add", "-A"]);
+    let mut rt = super::runtime(super::opened(dir));
+    rt.on_key = Some(crate::keys::on_key);
+    staged_view(&mut rt);
+    let path = path_at(&rt.state, 0);
+    rt.state.jump_to(0);
+
+    press(&mut rt, rune::Key::Text("u".to_owned()));
+    finish_writing(&mut rt);
+
+    let left = staged(dir);
+    assert_eq!(left.len(), 1);
+    assert!(!left.contains(&path.to_string_lossy().into_owned()));
+}
+
+fn staged_three_blocks() -> tempfile::TempDir {
+    let repo = three_block_repo();
+    super::git(repo.path(), &["add", "f.txt"]);
+    repo
+}
+
+#[test]
+fn the_block_button_unstages_only_that_block() {
+    let repo = staged_three_blocks();
+    let mut rt = blocks_runtime(&repo);
+    staged_view(&mut rt);
+    for _ in 0..4 {
+        step(&mut rt);
+    }
+    let worktree = std::fs::read(repo.path().join("f.txt")).unwrap();
+
+    click_block_button(&mut rt, 1);
+    finish_writing(&mut rt);
+
+    let staged_text = index_text(repo.path());
+    assert!(
+        !staged_text.contains("line 20 CHANGED"),
+        "the middle block left the index"
+    );
+    assert!(staged_text.contains("line 3 CHANGED") && staged_text.contains("line 38 CHANGED"));
+    assert_eq!(rt.state.notice.as_deref(), Some("Bloc désindexé."));
+    assert_eq!(std::fs::read(repo.path().join("f.txt")).unwrap(), worktree);
+}
+
+#[test]
+fn selected_lines_are_unstaged_with_the_u_key() {
+    let repo = staged_three_blocks();
+    let mut rt = blocks_runtime(&repo);
+    staged_view(&mut rt);
+    for _ in 0..4 {
+        step(&mut rt);
+    }
+    let output = Command::new("git")
+        .current_dir(repo.path())
+        .args(["diff", "--cached", "--unified=3", "--", "f.txt"])
+        .output()
+        .unwrap();
+    let diff = String::from_utf8_lossy(&output.stdout).into_owned();
+    let lines: Vec<&str> = diff.lines().collect();
+    let first = lines.iter().position(|l| l.starts_with("@@")).unwrap();
+    let line = lines[first..]
+        .iter()
+        .position(|l| *l == "+line 3 CHANGED")
+        .expect("the staged diff has the line") as u64;
+
+    click_gutter(&mut rt, line, false);
+    press(&mut rt, rune::Key::Text("u".to_owned()));
+    finish_writing(&mut rt);
+
+    let staged = index_lines(repo.path());
+    let at = staged.iter().position(|l| l == "line 20 CHANGED");
+    assert!(at.is_some(), "the other blocks stay staged");
+    assert!(
+        !staged.contains(&"line 3 CHANGED".to_owned()),
+        "that added line left the index"
+    );
+    assert!(staged.contains(&"line 38 CHANGED".to_owned()));
+    assert_eq!(rt.state.notice.as_deref(), Some("1 ligne désindexée."));
+}
+
+#[test]
+fn an_index_that_changed_after_the_display_is_not_touched() {
+    let repo = tempfile::tempdir().unwrap();
+    let dir = repo.path();
+    super::git(dir, &["init", "-q", "-b", "main"]);
+    std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+    super::git(dir, &["add", "-A"]);
+    super::git(dir, &["commit", "-q", "-m", "base"]);
+    std::fs::write(dir.join("a.txt"), "two\n").unwrap();
+    super::git(dir, &["add", "-A"]);
+    let mut rt = super::runtime(super::opened(dir));
+    rt.on_key = Some(crate::keys::on_key);
+    staged_view(&mut rt);
+    rt.state.jump_to(0);
+
+    std::fs::write(dir.join("a.txt"), "two\nthree\n").unwrap();
+    super::git(dir, &["add", "-A"]);
+    press(&mut rt, rune::Key::Text("u".to_owned()));
+    finish_writing(&mut rt);
+
+    assert_eq!(staged(dir), vec!["a.txt".to_owned()], "still staged");
+    let notice = rt.state.notice.clone().unwrap_or_default();
+    assert!(notice.contains("a changé depuis son affichage"), "{notice}");
+}

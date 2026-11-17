@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fmt;
 use std::os::unix::ffi::OsStringExt;
@@ -32,6 +33,7 @@ pub struct StatusParser {
     branch: BranchInfo,
     entries: Vec<ChangeEntry>,
     awaiting_original: Option<ChangeEntry>,
+    index_ids: BTreeMap<PathBuf, String>,
 }
 
 impl StatusParser {
@@ -68,6 +70,7 @@ impl StatusParser {
             branch: self.branch,
             entries: self.entries,
             stamps: Default::default(),
+            index_ids: self.index_ids,
         })
     }
 
@@ -123,6 +126,14 @@ impl StatusParser {
     fn ordinary(&mut self, record: &[u8]) -> Result<(), ParseError> {
         let fields = Self::fields(record, 9)?;
         let (index, worktree) = Self::codes(fields[1])?;
+        self.index_ids.insert(
+            native_path(fields[8]),
+            format!(
+                "{}:{}",
+                String::from_utf8_lossy(fields[4]),
+                String::from_utf8_lossy(fields[7])
+            ),
+        );
         self.entries.push(ChangeEntry {
             path: native_path(fields[8]),
             original_path: None,
@@ -141,6 +152,14 @@ impl StatusParser {
             Some(b'C') => EntryKind::Copied,
             _ => return fail("unknown rename score"),
         };
+        self.index_ids.insert(
+            native_path(fields[9]),
+            format!(
+                "{}:{}",
+                String::from_utf8_lossy(fields[4]),
+                String::from_utf8_lossy(fields[7])
+            ),
+        );
         self.awaiting_original = Some(ChangeEntry {
             path: native_path(fields[9]),
             original_path: None,

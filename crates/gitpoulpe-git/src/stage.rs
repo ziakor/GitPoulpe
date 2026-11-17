@@ -264,12 +264,55 @@ impl Git {
 }
 
 struct SplitDiff<'a> {
-    header: Vec<&'a [u8]>,
+    header: Vec<std::borrow::Cow<'a, [u8]>>,
     hunks: Vec<Vec<&'a [u8]>>,
 }
 
 fn split_diff(diff: &[u8]) -> Option<SplitDiff<'_>> {
-    let mut header = Vec::new();
+    split_diff_with(diff, false)
+}
+
+fn as_modification(header: Vec<&[u8]>) -> Vec<std::borrow::Cow<'_, [u8]>> {
+    let is_new = header.iter().any(|l| l.starts_with(b"new file mode"));
+    if !is_new {
+        return header.into_iter().map(std::borrow::Cow::Borrowed).collect();
+    }
+    let old_name: Option<Vec<u8>> =
+        header
+            .iter()
+            .find_map(|l| l.strip_prefix(b"+++ "))
+            .map(|rest| {
+                let mut name = Vec::new();
+                if let Some(quoted) = rest.strip_prefix(b"\"b/") {
+                    name.extend_from_slice(b"\"a/");
+                    name.extend_from_slice(quoted);
+                } else if let Some(plain) = rest.strip_prefix(b"b/") {
+                    name.extend_from_slice(b"a/");
+                    name.extend_from_slice(plain);
+                } else {
+                    name.extend_from_slice(rest);
+                }
+                name
+            });
+    header
+        .into_iter()
+        .filter(|l| !l.starts_with(b"new file mode") && !l.starts_with(b"index "))
+        .map(|l| {
+            if l.starts_with(b"--- /dev/null")
+                && let Some(name) = &old_name
+            {
+                let mut line = b"--- ".to_vec();
+                line.extend_from_slice(name);
+                std::borrow::Cow::Owned(line)
+            } else {
+                std::borrow::Cow::Borrowed(l)
+            }
+        })
+        .collect()
+}
+
+fn split_diff_with(diff: &[u8], allow_new_file: bool) -> Option<SplitDiff<'_>> {
+    let mut header: Vec<&[u8]> = Vec::new();
     let mut hunks: Vec<Vec<&[u8]>> = Vec::new();
     for line in diff.split_inclusive(|byte| *byte == b'\n') {
         if line.starts_with(b"@@ ") {
@@ -284,7 +327,11 @@ fn split_diff(diff: &[u8]) -> Option<SplitDiff<'_>> {
                 b"rename ",
                 b"copy ",
                 b"deleted file",
-                b"new file",
+                if allow_new_file {
+                    &b"@@never"[..]
+                } else {
+                    &b"new file"[..]
+                },
                 b"Binary files",
                 b"GIT binary patch",
             ];
@@ -297,7 +344,10 @@ fn split_diff(diff: &[u8]) -> Option<SplitDiff<'_>> {
             header.push(line);
         }
     }
-    (!hunks.is_empty()).then_some(SplitDiff { header, hunks })
+    (!hunks.is_empty()).then_some(SplitDiff {
+        header: as_modification(header),
+        hunks,
+    })
 }
 
 fn parse_range(field: &[u8]) -> Option<(u32, u32)> {
@@ -332,7 +382,10 @@ fn single_hunk_patch(diff: &[u8], wanted: &HunkSpec) -> Option<Vec<u8>> {
         return None;
     }
     let mut patch = Vec::new();
-    for line in split.header.iter().chain(chosen.iter()) {
+    for line in &split.header {
+        patch.extend_from_slice(line);
+    }
+    for line in chosen {
         patch.extend_from_slice(line);
     }
     Some(patch)
@@ -377,8 +430,8 @@ impl Git {
         let Some(split) = split_diff(&diff) else {
             return Ok(refused(&entry.path, Refusal::NotPartial));
         };
-        let patch = match build_line_patch(&split, selection) {
-            LinePatch::Patch { bytes, lines } => (bytes, lines),
+        let patch = match build_line_patch(&split, selection, false) {
+            LinePatch::Patch { bytes, lines, .. } => (bytes, lines),
             LinePatch::Stale => return Ok(stale_outcome(&entry.path)),
             LinePatch::NothingSelected => {
                 return Ok(refused(&entry.path, Refusal::NothingSelected));
@@ -408,7 +461,11 @@ impl Git {
 }
 
 enum LinePatch {
-    Patch { bytes: Vec<u8>, lines: usize },
+    Patch {
+        bytes: Vec<u8>,
+        lines: usize,
+        complete: bool,
+    },
     Stale,
     NothingSelected,
     Incompatible,
@@ -420,7 +477,7 @@ fn in_ranges(ranges: &[(u32, u32)], offset: u32) -> bool {
         .any(|(from, to)| (*from..=*to).contains(&offset))
 }
 
-fn build_line_patch(split: &SplitDiff<'_>, selection: &LineSelection) -> LinePatch {
+fn build_line_patch(split: &SplitDiff<'_>, selection: &LineSelection, reverse: bool) -> LinePatch {
     let mut chosen: Vec<&HunkLines> = selection.hunks.iter().collect();
     chosen.sort_by_key(|h| h.hunk.index);
     chosen.dedup_by_key(|h| h.hunk.index);
@@ -431,6 +488,12 @@ fn build_line_patch(split: &SplitDiff<'_>, selection: &LineSelection) -> LinePat
         .collect();
     let mut total = 0usize;
     let mut delta: i64 = 0;
+    let everything: usize = split
+        .hunks
+        .iter()
+        .flat_map(|h| h.iter().skip(1))
+        .filter(|l| matches!(l.first(), Some(b'+' | b'-')))
+        .count();
     for wanted in chosen {
         let Some(hunk) = split.hunks.get(wanted.hunk.index) else {
             return LinePatch::Stale;
@@ -472,6 +535,7 @@ fn build_line_patch(split: &SplitDiff<'_>, selection: &LineSelection) -> LinePat
                     old_len += 1;
                     lines.push(line.to_vec());
                 }
+                Some(b'-') if reverse => {}
                 Some(b'-') => {
                     old_len += 1;
                     new_len += 1;
@@ -483,6 +547,13 @@ fn build_line_patch(split: &SplitDiff<'_>, selection: &LineSelection) -> LinePat
                     new_len += 1;
                     lines.push(line.to_vec());
                 }
+                Some(b'+') if reverse => {
+                    old_len += 1;
+                    new_len += 1;
+                    let mut converted = line.to_vec();
+                    converted[0] = b' ';
+                    lines.push(converted);
+                }
                 Some(b'+') => {}
                 _ => lines.push(line.to_vec()),
             }
@@ -493,13 +564,17 @@ fn build_line_patch(split: &SplitDiff<'_>, selection: &LineSelection) -> LinePat
             .rposition(|w| w == b"@@")
             .map(|at| &first[at + 2..])
             .unwrap_or(b"\n");
-        let new_start = i64::from(spec.old_start) + delta;
+        let (start_old, start_new) = if reverse {
+            (i64::from(spec.old_start), i64::from(spec.new_start))
+        } else {
+            (i64::from(spec.old_start), i64::from(spec.old_start) + delta)
+        };
         bytes.extend_from_slice(
             format!(
                 "@@ -{},{} +{},{} @@",
-                spec.old_start,
+                start_old.max(0),
                 old_len,
-                new_start.max(0),
+                start_new.max(0),
                 new_len
             )
             .as_bytes(),
@@ -516,6 +591,7 @@ fn build_line_patch(split: &SplitDiff<'_>, selection: &LineSelection) -> LinePat
     LinePatch::Patch {
         bytes,
         lines: total,
+        complete: total == everything,
     }
 }
 
@@ -578,5 +654,237 @@ impl Git {
             return refuse(Refusal::FilterConfigured);
         }
         Ok(None)
+    }
+}
+
+impl Git {
+    async fn check_unstage(
+        &self,
+        info: &SessionInfo,
+        target: &StageTarget,
+        cancel: &Cancel,
+    ) -> Result<Option<StageOutcome>, WriteError> {
+        let entry = &target.entry;
+        if entry.is_conflict() {
+            return Ok(Some(refused(&entry.path, Refusal::Conflict)));
+        }
+        if !entry.is_staged() {
+            return Ok(Some(refused(&entry.path, Refusal::NothingToUnstage)));
+        }
+        let Some(seen) = &target.index_id else {
+            return Ok(Some(stale_outcome(&entry.path)));
+        };
+        let current = self.current_status(info, cancel).await?;
+        let unchanged = current.entries.iter().any(|now| {
+            now.path == entry.path
+                && now.kind == entry.kind
+                && now.index == entry.index
+                && now.worktree == entry.worktree
+                && now.original_path == entry.original_path
+        });
+        if !unchanged || current.index_ids.get(&entry.path) != Some(seen) {
+            return Ok(Some(stale_outcome(&entry.path)));
+        }
+        Ok(None)
+    }
+
+    pub async fn unstage(
+        &self,
+        info: &SessionInfo,
+        targets: &[StageTarget],
+        cancel: &Cancel,
+    ) -> Result<StageOutcome, WriteError> {
+        let worktree = info.worktree.as_ref().ok_or(WriteError::NoWorktree)?;
+        if targets.is_empty() {
+            return Ok(StageOutcome::Unstaged { files: 0 });
+        }
+        for target in targets {
+            if let Some(outcome) = self.check_unstage(info, target, cancel).await? {
+                return Ok(outcome);
+            }
+        }
+        let mut paths: Vec<&Path> = Vec::new();
+        for target in targets {
+            paths.push(target.entry.path.as_path());
+            if let Some(original) = &target.entry.original_path {
+                paths.push(original.as_path());
+            }
+        }
+        let args: Vec<OsString> = [
+            "reset",
+            "-q",
+            "--pathspec-from-file=-",
+            "--pathspec-file-nul",
+        ]
+        .map(OsString::from)
+        .to_vec();
+        let refs: Vec<&OsStr> = args.iter().map(OsString::as_os_str).collect();
+        let env = [(OsString::from("GIT_LITERAL_PATHSPECS"), OsString::from("1"))];
+        let run = self
+            .run_input(
+                worktree,
+                &refs,
+                &env,
+                Some(nul_separated(&paths)),
+                cancel,
+                |_| Ok(()),
+            )
+            .await
+            .map_err(write_failure)?;
+        if !run.succeeded() {
+            let diagnostic = Diagnostic {
+                cause: None,
+                ..run.diagnostic()
+            };
+            return Err(match locked_index(&diagnostic) {
+                Some(path) => WriteError::IndexLocked(path),
+                None => WriteError::GitFailed(diagnostic),
+            });
+        }
+        Ok(StageOutcome::Unstaged {
+            files: targets.len(),
+        })
+    }
+
+    pub async fn unstage_lines(
+        &self,
+        info: &SessionInfo,
+        target: &StageTarget,
+        selection: &LineSelection,
+        cancel: &Cancel,
+    ) -> Result<StageOutcome, WriteError> {
+        let worktree = info.worktree.as_ref().ok_or(WriteError::NoWorktree)?;
+        let entry = &target.entry;
+        if let Some(outcome) = self.check_unstage(info, target, cancel).await? {
+            return Ok(outcome);
+        }
+        let added = entry.index == gitpoulpe_core::StatusCode::Added;
+        if entry.kind != gitpoulpe_core::EntryKind::Ordinary
+            || !(added || entry.index == gitpoulpe_core::StatusCode::Modified)
+        {
+            return Ok(refused(&entry.path, Refusal::NotPartial));
+        }
+        let mut spec = b":(literal)".to_vec();
+        spec.extend_from_slice(entry.path.as_os_str().as_bytes());
+        let args: Vec<OsString> = vec![
+            "diff".into(),
+            "--cached".into(),
+            "--no-ext-diff".into(),
+            "--no-textconv".into(),
+            "--no-color".into(),
+            "--unified=3".into(),
+            "--".into(),
+            OsString::from(std::ffi::OsStr::from_bytes(&spec)),
+        ];
+        let refs: Vec<&OsStr> = args.iter().map(OsString::as_os_str).collect();
+        let (run, diff) = self
+            .run_collect(worktree, &refs, cancel)
+            .await
+            .map_err(write_failure)?;
+        if !run.succeeded() {
+            return Err(WriteError::GitFailed(Diagnostic {
+                cause: None,
+                ..run.diagnostic()
+            }));
+        }
+        let Some(split) = split_diff_with(&diff, added) else {
+            return Ok(refused(&entry.path, Refusal::NotPartial));
+        };
+        let (bytes, lines, complete) = match build_line_patch(&split, selection, true) {
+            LinePatch::Patch {
+                bytes,
+                lines,
+                complete,
+            } => (bytes, lines, complete),
+            LinePatch::Stale => return Ok(stale_outcome(&entry.path)),
+            LinePatch::NothingSelected => {
+                return Ok(refused(&entry.path, Refusal::NothingSelected));
+            }
+            LinePatch::Incompatible => return Ok(refused(&entry.path, Refusal::Incompatible)),
+        };
+        if added && complete {
+            let whole = self
+                .unstage(info, std::slice::from_ref(target), cancel)
+                .await?;
+            return Ok(match whole {
+                StageOutcome::Unstaged { .. } => StageOutcome::LinesUnstaged { lines },
+                other => other,
+            });
+        }
+        let args: Vec<OsString> = [
+            "apply",
+            "--cached",
+            "-R",
+            "--recount",
+            "--whitespace=nowarn",
+            "-",
+        ]
+        .map(OsString::from)
+        .to_vec();
+        let refs: Vec<&OsStr> = args.iter().map(OsString::as_os_str).collect();
+        let run = self
+            .run_input(worktree, &refs, &[], Some(bytes), cancel, |_| Ok(()))
+            .await
+            .map_err(write_failure)?;
+        if !run.succeeded() {
+            let diagnostic = Diagnostic {
+                cause: None,
+                ..run.diagnostic()
+            };
+            return Err(match locked_index(&diagnostic) {
+                Some(path) => WriteError::IndexLocked(path),
+                None => WriteError::GitFailed(diagnostic),
+            });
+        }
+        Ok(StageOutcome::LinesUnstaged { lines })
+    }
+
+    pub async fn unstage_hunk(
+        &self,
+        info: &SessionInfo,
+        target: &StageTarget,
+        hunk: &HunkSpec,
+        cancel: &Cancel,
+    ) -> Result<StageOutcome, WriteError> {
+        let everything = LineSelection {
+            hunks: vec![HunkLines {
+                hunk: *hunk,
+                ranges: vec![(0, u32::MAX)],
+            }],
+        };
+        Ok(
+            match self
+                .unstage_lines(info, target, &everything, cancel)
+                .await?
+            {
+                StageOutcome::LinesUnstaged { .. } => StageOutcome::HunkUnstaged,
+                other => other,
+            },
+        )
+    }
+
+    pub async fn write(
+        &self,
+        info: &SessionInfo,
+        job: &gitpoulpe_core::WriteJob,
+        cancel: &Cancel,
+    ) -> Result<StageOutcome, WriteError> {
+        use gitpoulpe_core::WriteJob;
+        match job {
+            WriteJob::Stage(targets) => self.stage(info, targets, cancel).await,
+            WriteJob::StageHunk { target, hunk } => {
+                self.stage_hunk(info, target, hunk, cancel).await
+            }
+            WriteJob::StageLines { target, selection } => {
+                self.stage_lines(info, target, selection, cancel).await
+            }
+            WriteJob::Unstage(targets) => self.unstage(info, targets, cancel).await,
+            WriteJob::UnstageHunk { target, hunk } => {
+                self.unstage_hunk(info, target, hunk, cancel).await
+            }
+            WriteJob::UnstageLines { target, selection } => {
+                self.unstage_lines(info, target, selection, cancel).await
+            }
+        }
     }
 }

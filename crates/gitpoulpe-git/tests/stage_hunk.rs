@@ -28,6 +28,7 @@ fn target(snapshot: &StatusSnapshot, path: &str) -> StageTarget {
         .clone();
     StageTarget {
         stamp: snapshot.stamps.get(&entry.path).copied(),
+        index_id: snapshot.index_ids.get(&entry.path).cloned(),
         entry,
     }
 }

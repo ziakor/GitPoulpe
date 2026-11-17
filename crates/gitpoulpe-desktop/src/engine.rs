@@ -5,9 +5,8 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 use gitpoulpe_core::{
-    ChangeEntry, DiffLine, DiffSide, DocumentMeta, Generation, HunkSpec, LineSelection, OpenError,
-    RangeError, ReadError, SessionId, SessionInfo, StageOutcome, StageTarget, StatusSnapshot,
-    WriteError,
+    ChangeEntry, DiffLine, DiffSide, DocumentMeta, Generation, OpenError, RangeError, ReadError,
+    SessionId, SessionInfo, StageOutcome, StatusSnapshot, WriteError, WriteJob,
 };
 use gitpoulpe_git::{
     CacheConfig, Cancel, DiffCache, DiffReader, Git, MAX_WAIT, QUIET_PERIOD, RepoWatcher, Signal,
@@ -45,19 +44,9 @@ pub enum Command {
     Refresh {
         request: u64,
     },
-    Stage {
+    Write {
         request: u64,
-        targets: Vec<StageTarget>,
-    },
-    StageHunk {
-        request: u64,
-        target: Box<StageTarget>,
-        hunk: HunkSpec,
-    },
-    StageLines {
-        request: u64,
-        target: Box<StageTarget>,
-        selection: LineSelection,
+        job: Box<WriteJob>,
     },
     Shutdown(std::sync::mpsc::Sender<()>),
     Read {
@@ -284,37 +273,11 @@ async fn run(
                             start_refresh(&shared, current, request, false);
                         }
                     }
-                    Command::Stage { request, targets } => {
+                    Command::Write { request, job } => {
                         let Some(current) = session.clone() else {
                             continue;
                         };
-                        tokio::spawn(stage(shared.clone(), current, request, targets));
-                    }
-                    Command::StageHunk {
-                        request,
-                        target,
-                        hunk,
-                    } => {
-                        let Some(current) = session.clone() else {
-                            continue;
-                        };
-                        tokio::spawn(stage_hunk(shared.clone(), current, request, *target, hunk));
-                    }
-                    Command::StageLines {
-                        request,
-                        target,
-                        selection,
-                    } => {
-                        let Some(current) = session.clone() else {
-                            continue;
-                        };
-                        tokio::spawn(stage_lines(
-                            shared.clone(),
-                            current,
-                            request,
-                            *target,
-                            selection,
-                        ));
+                        tokio::spawn(write(shared.clone(), current, request, *job));
                     }
                     Command::Copy(request) => {
                         let Some(current) = session
@@ -444,54 +407,10 @@ async fn open(
     Ok((info, snapshot))
 }
 
-async fn stage(
-    shared: Arc<Shared>,
-    session: Arc<Session>,
-    request: u64,
-    targets: Vec<StageTarget>,
-) {
+async fn write(shared: Arc<Shared>, session: Arc<Session>, request: u64, job: WriteJob) {
     let result = {
         let _writer = session.writer.lock().await;
-        shared
-            .git
-            .stage(&session.info, &targets, &Cancel::new())
-            .await
-    };
-    shared.emit(Event::Staged { request, result });
-    start_refresh(&shared, &session, 0, false);
-}
-
-async fn stage_hunk(
-    shared: Arc<Shared>,
-    session: Arc<Session>,
-    request: u64,
-    target: StageTarget,
-    hunk: HunkSpec,
-) {
-    let result = {
-        let _writer = session.writer.lock().await;
-        shared
-            .git
-            .stage_hunk(&session.info, &target, &hunk, &Cancel::new())
-            .await
-    };
-    shared.emit(Event::Staged { request, result });
-    start_refresh(&shared, &session, 0, false);
-}
-
-async fn stage_lines(
-    shared: Arc<Shared>,
-    session: Arc<Session>,
-    request: u64,
-    target: StageTarget,
-    selection: LineSelection,
-) {
-    let result = {
-        let _writer = session.writer.lock().await;
-        shared
-            .git
-            .stage_lines(&session.info, &target, &selection, &Cancel::new())
-            .await
+        shared.git.write(&session.info, &job, &Cancel::new()).await
     };
     shared.emit(Event::Staged { request, result });
     start_refresh(&shared, &session, 0, false);

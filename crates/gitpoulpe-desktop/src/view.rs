@@ -73,7 +73,7 @@ fn footer(s: &State) -> El {
         .child(text(message).font(theme::SMALL).color(p.muted).truncate())
 }
 
-const HINTS: &str = "/ filtrer · j et k : fichier suivant ou précédent · 1 et 2 : changer de vue · m : unifié ou séparé · ↑ ↓ ← → PgUp PgDn : lire · r : actualiser · s : indexer le fichier · x : sélectionner · Maj+S : indexer la sélection · clic sur un numéro de ligne : sélectionner (Maj pour étendre) · Ctrl+O : ouvrir un dépôt";
+const HINTS: &str = "/ filtrer · j et k : fichier suivant ou précédent · 1 et 2 : changer de vue · m : unifié ou séparé · ↑ ↓ ← → PgUp PgDn : lire · r : actualiser · s : indexer · u : désindexer · x : sélectionner · Maj+S : appliquer à la sélection · clic sur un numéro de ligne : sélectionner (Maj pour étendre) · Ctrl+O : ouvrir un dépôt";
 
 fn open_button(p: &Palette, primary: bool) -> El {
     let (fill, ink) = if primary {
@@ -379,11 +379,16 @@ fn left_pane(s: &State) -> El {
 }
 
 fn marked_bar(s: &State) -> El {
-    if s.view != ViewKind::Unstaged || s.marked.is_empty() {
+    if s.marked.is_empty() {
         return el().h(0.0);
     }
     let p = s.palette;
     let count = s.marked.len();
+    let action = if s.view == ViewKind::Unstaged {
+        "Indexer la sélection"
+    } else {
+        "Désindexer la sélection"
+    };
     let caption = if count == 1 {
         "1 fichier sélectionné".to_owned()
     } else {
@@ -404,11 +409,11 @@ fn marked_bar(s: &State) -> El {
             stage_button(
                 s,
                 "stage-marked".to_owned(),
-                "Indexer la sélection".to_owned(),
-                "Indexer la sélection".to_owned(),
+                action.to_owned(),
+                action.to_owned(),
                 true,
             )
-            .on_press(|s: &mut State| s.stage_marked()),
+            .on_press(|s: &mut State| s.write_marked()),
         )
 }
 
@@ -776,7 +781,13 @@ fn header_row(s: &State, index: usize, entry: &ChangeEntry) -> El {
 }
 
 fn header_action(s: &State, index: usize, entry: &ChangeEntry, label: &str) -> El {
-    if s.view != ViewKind::Unstaged || !entry.is_unstaged() || entry.is_conflict() {
+    let staging = s.view == ViewKind::Unstaged;
+    let eligible = if staging {
+        entry.is_unstaged()
+    } else {
+        entry.is_staged()
+    };
+    if !eligible || entry.is_conflict() {
         return el().w(0.0);
     }
     let target = entry.path.clone();
@@ -785,23 +796,29 @@ fn header_action(s: &State, index: usize, entry: &ChangeEntry, label: &str) -> E
         .as_ref()
         .filter(|pick| pick.index == index)
         .map(|_| {
+            let verb = if staging { "Indexer" } else { "Désindexer" };
             stage_button(
                 s,
                 format!("sl{index}"),
-                format!("Indexer les lignes sélectionnées de {label}"),
-                "Indexer les lignes".to_owned(),
+                format!("{verb} les lignes sélectionnées de {label}"),
+                format!("{verb} les lignes"),
                 true,
             )
-            .on_press(|s: &mut State| s.stage_picked_lines())
+            .on_press(|s: &mut State| s.write_picked_lines())
         });
-    let file_button = stage_button(
-        s,
-        format!("st{index}"),
-        format!("Indexer {label}"),
-        "Indexer".to_owned(),
-        false,
-    )
-    .on_press(move |s: &mut State| s.stage_paths(vec![target.clone()]));
+    let (key, verb) = if staging {
+        (format!("st{index}"), "Indexer")
+    } else {
+        (format!("un{index}"), "Désindexer")
+    };
+    let file_button = stage_button(s, key, format!("{verb} {label}"), verb.to_owned(), false)
+        .on_press(move |s: &mut State| {
+            if s.view == ViewKind::Unstaged {
+                s.stage_paths(vec![target.clone()]);
+            } else {
+                s.unstage_paths(vec![target.clone()]);
+            }
+        });
     row()
         .gap(6.0)
         .center_y()
@@ -943,53 +960,48 @@ fn gutter(
         )
 }
 
+fn partial_entry(s: &State, index: usize) -> Option<&ChangeEntry> {
+    let entry = s.entries().get(index)?;
+    if entry.kind != EntryKind::Ordinary || entry.is_conflict() {
+        return None;
+    }
+    let allowed = match s.view {
+        ViewKind::Unstaged => entry.worktree == StatusCode::Modified,
+        ViewKind::Staged => matches!(entry.index, StatusCode::Modified | StatusCode::Added),
+    };
+    let text = s.doc(index)?.meta.as_ref()?.kind == Some(DocumentKind::Text);
+    (allowed && text).then_some(entry)
+}
+
 fn pick_ui(s: &State, index: usize, doc_line: u64, line: &DiffLine) -> Option<(usize, u64, bool)> {
     if !matches!(line.kind, DiffLineKind::Added | DiffLineKind::Removed) {
         return None;
     }
-    if s.view != ViewKind::Unstaged {
-        return None;
-    }
-    let entry = s.entries().get(index)?;
-    if entry.kind != EntryKind::Ordinary
-        || entry.worktree != StatusCode::Modified
-        || entry.is_conflict()
-    {
-        return None;
-    }
-    let meta = s.doc(index)?.meta.as_ref()?;
-    (meta.kind == Some(DocumentKind::Text)).then(|| (index, doc_line, s.is_picked(index, doc_line)))
+    partial_entry(s, index).map(|_| (index, doc_line, s.is_picked(index, doc_line)))
 }
 
 fn hunk_action(s: &State, index: usize, doc_line: u64) -> Option<El> {
-    if s.view != ViewKind::Unstaged {
-        return None;
-    }
-    let entry = s.entries().get(index)?;
-    if entry.kind != EntryKind::Ordinary
-        || entry.worktree != StatusCode::Modified
-        || entry.is_conflict()
-    {
-        return None;
-    }
+    let entry = partial_entry(s, index)?;
     let meta = s.doc(index)?.meta.as_ref()?;
-    if meta.kind != Some(DocumentKind::Text) {
-        return None;
-    }
     let hunk = meta.hunks.iter().position(|h| h.first_line == doc_line)?;
     let path = entry.path.clone();
-    let label = format!("Indexer ce bloc de {}", display_label(&path));
+    let verb = if s.view == ViewKind::Unstaged {
+        "Indexer"
+    } else {
+        "Désindexer"
+    };
+    let label = format!("{verb} ce bloc de {}", display_label(&path));
     Some(
         el().h(LINE_HEIGHT).px(6.0).center_y().child(
             stage_button(
                 s,
                 format!("hb{index}:{hunk}"),
                 label,
-                "Indexer ce bloc".to_owned(),
+                format!("{verb} ce bloc"),
                 false,
             )
             .h(LINE_HEIGHT - 4.0)
-            .on_press(move |s: &mut State| s.stage_hunk(path.clone(), hunk)),
+            .on_press(move |s: &mut State| s.write_hunk(path.clone(), hunk)),
         ),
     )
 }

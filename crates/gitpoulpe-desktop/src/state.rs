@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use gitpoulpe_core::{
     BuildState, ChangeEntry, DiffLine, DiffSide, DocumentKind, DocumentMeta, Generation, HunkLines,
     HunkSpec, LineSelection, Refusal, SplitIndex, StageOutcome, StageTarget, StatusSnapshot,
-    WriteError, display_label,
+    WriteError, WriteJob, display_label,
 };
 use rune::prefs::Prefs;
 use rune::{Live, TextEdit, Tx, Waker};
@@ -1145,57 +1145,62 @@ impl State {
                     n => format!("{n} fichiers indexés."),
                 }
             }
+            Ok(StageOutcome::Unstaged { files }) => {
+                self.clear_marks();
+                match files {
+                    0 => "Rien à désindexer.".to_owned(),
+                    1 => "1 fichier désindexé.".to_owned(),
+                    n => format!("{n} fichiers désindexés."),
+                }
+            }
             Ok(StageOutcome::HunkApplied) => "Bloc indexé.".to_owned(),
+            Ok(StageOutcome::HunkUnstaged) => "Bloc désindexé.".to_owned(),
             Ok(StageOutcome::LinesApplied { lines }) => match lines {
                 1 => "1 ligne indexée.".to_owned(),
                 n => format!("{n} lignes indexées."),
             },
-            Ok(StageOutcome::Refused {
-                reason: Refusal::NothingSelected,
-                ..
-            }) => "La sélection ne contient aucune ligne ajoutée ou supprimée.".to_owned(),
-            Ok(StageOutcome::Refused {
-                reason: Refusal::Incompatible,
-                ..
-            }) => "Cette sélection est impossible dans un bloc qui touche la fin d'un fichier sans saut de ligne : sélectionne tout le bloc.".to_owned(),
-            Ok(StageOutcome::Refused {
-                reason: Refusal::NotPartial,
-                ..
-            }) => "Ce fichier ne peut pas être indexé bloc par bloc (non suivi, supprimé, renommé ou changement de mode) : indexe le fichier entier.".to_owned(),
-            Ok(StageOutcome::Refused {
-                reason: Refusal::FilterConfigured,
-                ..
-            }) => "Ce dépôt utilise des filtres Git : l'indexation par bloc est désactivée pour ne pas indexer un contenu différent de celui affiché. Indexe le fichier entier.".to_owned(),
+            Ok(StageOutcome::LinesUnstaged { lines }) => match lines {
+                1 => "1 ligne désindexée.".to_owned(),
+                n => format!("{n} lignes désindexées."),
+            },
+            Ok(StageOutcome::Refused { reason, path }) => match reason {
+                Refusal::Conflict => format!(
+                    "{} est en conflit : la résolution n'est pas encore disponible, rien n'a été modifié.",
+                    display_label(&path)
+                ),
+                Refusal::NothingToStage => format!("{} n'a rien à indexer.", display_label(&path)),
+                Refusal::NothingToUnstage => {
+                    format!("{} n'a rien à désindexer.", display_label(&path))
+                }
+                Refusal::NotPartial => "Ce fichier ne peut pas être traité bloc par bloc ou ligne par ligne (non suivi, supprimé, renommé ou changement de mode) : traite le fichier entier.".to_owned(),
+                Refusal::FilterConfigured => "Ce dépôt utilise des filtres Git : l'indexation par bloc ou par ligne est désactivée pour ne pas indexer un contenu différent de celui affiché. Indexe le fichier entier.".to_owned(),
+                Refusal::NothingSelected => {
+                    "La sélection ne contient aucune ligne ajoutée ou supprimée.".to_owned()
+                }
+                Refusal::Incompatible => "Cette sélection est impossible dans un bloc qui touche la fin d'un fichier sans saut de ligne : sélectionne tout le bloc.".to_owned(),
+            },
             Ok(StageOutcome::Stale { paths }) => format!(
-                "Rien n'a été indexé : {} a changé depuis son affichage. L'état a été relu, vérifie puis recommence.",
+                "Rien n'a été modifié : {} a changé depuis son affichage. L'état a été relu, vérifie puis recommence.",
                 paths.first().map_or_else(String::new, |p| display_label(p))
             ),
-            Ok(StageOutcome::Refused {
-                path,
-                reason: Refusal::Conflict,
-            }) => format!(
-                "{} est en conflit : la résolution n'est pas encore disponible, rien n'a été indexé.",
-                display_label(&path)
-            ),
-            Ok(StageOutcome::Refused {
-                path,
-                reason: Refusal::NothingToStage,
-            }) => format!("{} n'a rien à indexer.", display_label(&path)),
             Err(WriteError::IndexLocked(path)) => format!(
                 "Git est occupé : le verrou {path} existe. Termine l'autre opération Git puis réessaie ; GitPoulpe ne supprime jamais ce verrou."
             ),
-            Err(WriteError::NoWorktree) => "Ce dépôt n'a pas de répertoire de travail.".to_owned(),
-            Err(WriteError::Cancelled) => "Indexation annulée.".to_owned(),
+            Err(WriteError::NoWorktree) => {
+                "Ce dépôt n'a pas de répertoire de travail.".to_owned()
+            }
+            Err(WriteError::Cancelled) => "Opération annulée.".to_owned(),
             Err(WriteError::GitUnavailable(d)) => format!("Git est introuvable : {d}"),
-            Err(WriteError::GitFailed(d)) => format!("L'indexation a échoué : {d}"),
+            Err(WriteError::GitFailed(d)) => format!("L'opération a échoué : {d}"),
         }
     }
 
     fn prune_marks(&mut self) {
+        let view = self.view;
         let still: HashSet<PathBuf> = self
             .entries()
             .iter()
-            .filter(|e| e.is_unstaged() && !e.is_conflict())
+            .filter(|e| Self::in_view(e, view) && !e.is_conflict())
             .map(|e| e.path.clone())
             .collect();
         let before = self.marked.len();
@@ -1213,10 +1218,8 @@ impl State {
     }
 
     pub fn can_mark(&self, position: usize) -> bool {
-        self.view == ViewKind::Unstaged
-            && self
-                .entry_at(position)
-                .is_some_and(|(_, entry)| entry.is_unstaged() && !entry.is_conflict())
+        self.entry_at(position)
+            .is_some_and(|(_, entry)| Self::in_view(entry, self.view) && !entry.is_conflict())
     }
 
     pub fn toggle_mark(&mut self, position: usize) {
@@ -1231,24 +1234,6 @@ impl State {
             self.marked.insert(path);
         }
         self.marks_version += 1;
-    }
-
-    pub fn stage_current(&mut self) {
-        if self.view != ViewKind::Unstaged {
-            return;
-        }
-        let Some(position) = self.current else { return };
-        let Some((_, entry)) = self.entry_at(position) else {
-            return;
-        };
-        let path = entry.path.clone();
-        self.stage_paths(vec![path]);
-    }
-
-    pub fn stage_marked(&mut self) {
-        let mut paths: Vec<PathBuf> = self.marked.iter().cloned().collect();
-        paths.sort();
-        self.stage_paths(paths);
     }
 
     pub fn clear_pick(&mut self) {
@@ -1290,20 +1275,117 @@ impl State {
         self.pick_version += 1;
     }
 
-    pub fn stage_picked_lines(&mut self) {
+    fn target_for(&self, path: &Path) -> Option<StageTarget> {
+        let repo = self.repo.as_ref()?;
+        let entry = repo.snapshot.entries.iter().find(|e| e.path == path)?;
+        Some(StageTarget {
+            stamp: repo.snapshot.stamps.get(path).copied(),
+            index_id: repo.snapshot.index_ids.get(path).cloned(),
+            entry: entry.clone(),
+        })
+    }
+
+    fn submit(&mut self, job: WriteJob) {
         if self.writing {
             self.notice = Some("Une écriture est déjà en cours.".to_owned());
             return;
         }
+        self.stage_request += 1;
+        self.writing = true;
+        self.notice = Some("Opération en cours…".to_owned());
+        if let Some(engine) = &self.engine {
+            engine.send(Command::Write {
+                request: self.stage_request,
+                job: Box::new(job),
+            });
+        }
+    }
+
+    fn hunk_spec(&self, entry_index: usize, hunk_index: usize) -> Option<HunkSpec> {
+        let hunk = self
+            .doc(entry_index)
+            .and_then(|d| d.meta.as_ref())
+            .and_then(|m| m.hunks.get(hunk_index))?;
+        Some(HunkSpec {
+            index: hunk_index,
+            old_start: hunk.old_start,
+            old_len: hunk.old_len,
+            new_start: hunk.new_start,
+            new_len: hunk.new_len,
+        })
+    }
+
+    pub fn stage_current(&mut self) {
+        if self.view != ViewKind::Unstaged {
+            return;
+        }
+        if let Some((_, entry)) = self.current.and_then(|p| self.entry_at(p)) {
+            let path = entry.path.clone();
+            self.stage_paths(vec![path]);
+        }
+    }
+
+    pub fn unstage_current(&mut self) {
+        if self.view != ViewKind::Staged {
+            return;
+        }
+        if let Some((_, entry)) = self.current.and_then(|p| self.entry_at(p)) {
+            let path = entry.path.clone();
+            self.unstage_paths(vec![path]);
+        }
+    }
+
+    pub fn write_marked(&mut self) {
+        let mut paths: Vec<PathBuf> = self.marked.iter().cloned().collect();
+        paths.sort();
+        match self.view {
+            ViewKind::Unstaged => self.stage_paths(paths),
+            ViewKind::Staged => self.unstage_paths(paths),
+        }
+    }
+
+    pub fn stage_paths(&mut self, paths: Vec<PathBuf>) {
+        let targets: Vec<StageTarget> = paths.iter().filter_map(|p| self.target_for(p)).collect();
+        if targets.is_empty() {
+            self.notice = Some("Rien à indexer.".to_owned());
+            return;
+        }
+        self.submit(WriteJob::Stage(targets));
+    }
+
+    pub fn unstage_paths(&mut self, paths: Vec<PathBuf>) {
+        let targets: Vec<StageTarget> = paths.iter().filter_map(|p| self.target_for(p)).collect();
+        if targets.is_empty() {
+            self.notice = Some("Rien à désindexer.".to_owned());
+            return;
+        }
+        self.submit(WriteJob::Unstage(targets));
+    }
+
+    pub fn write_hunk(&mut self, path: PathBuf, hunk_index: usize) {
+        let Some(position) = self.entries().iter().position(|e| e.path == path) else {
+            return;
+        };
+        let (Some(target), Some(hunk)) =
+            (self.target_for(&path), self.hunk_spec(position, hunk_index))
+        else {
+            self.notice = Some("Ce bloc n'est plus affiché : l'état va être relu.".to_owned());
+            return;
+        };
+        self.submit(match self.view {
+            ViewKind::Unstaged => WriteJob::StageHunk { target, hunk },
+            ViewKind::Staged => WriteJob::UnstageHunk { target, hunk },
+        });
+    }
+
+    pub fn write_picked_lines(&mut self) {
         let Some(pick) = self.line_pick.clone() else {
             return;
         };
-        let Some(repo) = self.repo.as_ref() else {
+        let Some(entry) = self.entries().get(pick.index) else {
             return;
         };
-        let Some(entry) = repo.snapshot.entries.get(pick.index).cloned() else {
-            return;
-        };
+        let path = entry.path.clone();
         let Some(meta) = self.doc(pick.index).and_then(|d| d.meta.as_ref()) else {
             return;
         };
@@ -1342,95 +1424,13 @@ impl State {
                 Some("La sélection ne contient aucune ligne ajoutée ou supprimée.".to_owned());
             return;
         }
-        let target = StageTarget {
-            stamp: repo.snapshot.stamps.get(&entry.path).copied(),
-            entry,
-        };
-        self.stage_request += 1;
-        self.writing = true;
-        self.notice = Some("Indexation…".to_owned());
-        if let Some(engine) = &self.engine {
-            engine.send(Command::StageLines {
-                request: self.stage_request,
-                target: Box::new(target),
-                selection: LineSelection { hunks },
-            });
-        }
-    }
-
-    pub fn stage_hunk(&mut self, path: PathBuf, hunk_index: usize) {
-        if self.writing {
-            self.notice = Some("Une écriture est déjà en cours.".to_owned());
-            return;
-        }
-        let Some(repo) = self.repo.as_ref() else {
+        let Some(target) = self.target_for(&path) else {
             return;
         };
-        let Some(position) = repo.snapshot.entries.iter().position(|e| e.path == path) else {
-            return;
-        };
-        let entry = repo.snapshot.entries[position].clone();
-        let Some(hunk) = self
-            .doc(position)
-            .and_then(|d| d.meta.as_ref())
-            .and_then(|m| m.hunks.get(hunk_index))
-            .map(|h| HunkSpec {
-                index: hunk_index,
-                old_start: h.old_start,
-                old_len: h.old_len,
-                new_start: h.new_start,
-                new_len: h.new_len,
-            })
-        else {
-            self.notice = Some("Ce bloc n'est plus affiché : l'état va être relu.".to_owned());
-            return;
-        };
-        let target = StageTarget {
-            stamp: repo.snapshot.stamps.get(&path).copied(),
-            entry,
-        };
-        self.stage_request += 1;
-        self.writing = true;
-        self.notice = Some("Indexation…".to_owned());
-        if let Some(engine) = &self.engine {
-            engine.send(Command::StageHunk {
-                request: self.stage_request,
-                target: Box::new(target),
-                hunk,
-            });
-        }
-    }
-
-    pub fn stage_paths(&mut self, paths: Vec<PathBuf>) {
-        if self.writing {
-            self.notice = Some("Une écriture est déjà en cours.".to_owned());
-            return;
-        }
-        let Some(repo) = self.repo.as_ref() else {
-            return;
-        };
-        let targets: Vec<StageTarget> = paths
-            .iter()
-            .filter_map(|path| {
-                let entry = repo.snapshot.entries.iter().find(|e| e.path == *path)?;
-                Some(StageTarget {
-                    stamp: repo.snapshot.stamps.get(path).copied(),
-                    entry: entry.clone(),
-                })
-            })
-            .collect();
-        if targets.is_empty() {
-            self.notice = Some("Rien à indexer.".to_owned());
-            return;
-        }
-        self.stage_request += 1;
-        self.writing = true;
-        self.notice = Some("Indexation…".to_owned());
-        if let Some(engine) = &self.engine {
-            engine.send(Command::Stage {
-                request: self.stage_request,
-                targets,
-            });
-        }
+        let selection = LineSelection { hunks };
+        self.submit(match self.view {
+            ViewKind::Unstaged => WriteJob::StageLines { target, selection },
+            ViewKind::Staged => WriteJob::UnstageLines { target, selection },
+        });
     }
 }

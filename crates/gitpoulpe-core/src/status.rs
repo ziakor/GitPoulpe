@@ -90,6 +90,7 @@ pub struct StatusSnapshot {
     pub branch: BranchInfo,
     pub entries: Vec<ChangeEntry>,
     pub stamps: BTreeMap<PathBuf, FileStamp>,
+    pub index_ids: BTreeMap<PathBuf, String>,
 }
 
 impl StatusSnapshot {

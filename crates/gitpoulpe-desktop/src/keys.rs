@@ -97,19 +97,27 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
     }
     let reading = matches!(s.screen, crate::state::Screen::Ready);
     let free = tx.focused().is_none() || tx.focused() == Some("viewport");
+    let typing = tx.focused() == Some("filter");
     match &event.key {
-        Key::Text(text) if reading && free => match text.as_str() {
+        Key::Text(text) if reading && !typing => match text.as_str() {
             "/" => tx.focus("filter", true),
             "m" => s.toggle_mode(tx),
             "r" => s.refresh(),
             "s" => {
                 if s.line_pick.is_some() {
-                    s.stage_picked_lines();
+                    s.write_picked_lines();
                 } else {
                     s.stage_current();
                 }
             }
-            "S" => s.stage_marked(),
+            "u" => {
+                if s.line_pick.is_some() {
+                    s.write_picked_lines();
+                } else {
+                    s.unstage_current();
+                }
+            }
+            "S" | "U" => s.write_marked(),
             "x" => {
                 if let Some(position) = s.current {
                     s.toggle_mark(position);

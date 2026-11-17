@@ -17,5 +17,5 @@ pub use split::{SplitCells, SplitIndex, SplitIndexBuilder, SplitRow, SplitUnit, 
 pub use status::{BranchInfo, ChangeEntry, EntryKind, StatusCode, StatusSnapshot, display_label};
 pub use write::{
     FileStamp, HunkLines, HunkSpec, LineSelection, Refusal, StageOutcome, StageTarget, StampKind,
-    WriteError,
+    WriteError, WriteJob,
 };

@@ -97,6 +97,7 @@ mod tests {
             branch: BranchInfo::default(),
             entries: Vec::new(),
             stamps: Default::default(),
+            index_ids: Default::default(),
         }
     }
 
