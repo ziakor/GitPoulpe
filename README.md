@@ -2,7 +2,7 @@
 
 A free, open-source native Git client written in Rust, with the [Rune](https://github.com/anomalyco/rune) UI toolkit (GPLv3). Linux first; Windows and macOS will follow.
 
-Status: milestone M1, "local inspection", is delivered. Milestone M2, "local work", is in progress: so far the app can stage whole files and single blocks. Reading a repository never modifies it; the only writes are the explicit actions listed under "Writing".
+Status: milestone M1, "local inspection", is delivered. Milestone M2, "local work", is in progress: so far the app can stage whole files, single blocks and selected lines. Reading a repository never modifies it; the only writes are the explicit actions listed under "Writing".
 
 The interface is currently in French only.
 
@@ -20,6 +20,7 @@ Git runs as an external program, without a shell, with the repository's filters,
 
 - Stage files (unstaged view): "Indexer" button in a file header, `s` for the current file, or tick several files (checkbox or `x`) and use "Indexer la sélection" or `Shift+S`.
 - Stage a single block of a diff: "Indexer ce bloc" button on the block header (unified and split modes). Only for tracked text files with content changes; untracked, deleted, renamed and mode-changed files are staged whole, and block staging is disabled in repositories that configure Git filters.
+- Stage selected lines: click a line number in the gutter to select an added or removed line, Shift+click another one to select everything in between (the selection can go far outside the visible area), then use the "Indexer les lignes" button in the file header or `s`. `Escape` clears the selection. An unselected removed line stays in the index and an unselected added line is left out, as with `git add -p`. A partial selection in a block that touches a file's missing final newline is refused; select the whole block instead.
 - Nothing is staged if a file changed after it was displayed, if the index changed, or if the file is in conflict; the state is re-read and a message says why.
 - Git runs as configured for these actions (clean filters, such as Git LFS, apply). An existing `index.lock` is reported, never removed.
 
@@ -32,7 +33,7 @@ Git runs as an external program, without a shell, with the repository's filters,
 | `1` / `2` | unstaged / staged view |
 | `m` | unified / split mode |
 | `r` | refresh |
-| `s` / `x` / `Shift+S` | stage the current file / tick it / stage the ticked files |
+| `s` / `x` / `Shift+S` | stage the selected lines, or else the current file / tick the file / stage the ticked files |
 | arrows, PgUp, PgDn, Home, End | read |
 | Ctrl+O | open a repository |
 

@@ -73,7 +73,7 @@ fn footer(s: &State) -> El {
         .child(text(message).font(theme::SMALL).color(p.muted).truncate())
 }
 
-const HINTS: &str = "/ filtrer · j et k : fichier suivant ou précédent · 1 et 2 : changer de vue · m : unifié ou séparé · ↑ ↓ ← → PgUp PgDn : lire · r : actualiser · s : indexer le fichier · x : sélectionner · Maj+S : indexer la sélection · Ctrl+O : ouvrir un dépôt";
+const HINTS: &str = "/ filtrer · j et k : fichier suivant ou précédent · 1 et 2 : changer de vue · m : unifié ou séparé · ↑ ↓ ← → PgUp PgDn : lire · r : actualiser · s : indexer le fichier · x : sélectionner · Maj+S : indexer la sélection · clic sur un numéro de ligne : sélectionner (Maj pour étendre) · Ctrl+O : ouvrir un dépôt";
 
 fn open_button(p: &Palette, primary: bool) -> El {
     let (fill, ink) = if primary {
@@ -576,7 +576,7 @@ fn right_pane(s: &State) -> El {
         .selection_group(true)
         .w_full()
         .growth(GrowthSpec::default())
-        .virtual_rows_version((s.layout_version, s.view, s.dark, s.mode))
+        .virtual_rows_version((s.layout_version, s.view, s.dark, s.mode, s.pick_version))
         .virtual_rows(
             s.layout.total as usize,
             LINE_HEIGHT,
@@ -780,14 +780,33 @@ fn header_action(s: &State, index: usize, entry: &ChangeEntry, label: &str) -> E
         return el().w(0.0);
     }
     let target = entry.path.clone();
-    stage_button(
+    let lines_button = s
+        .line_pick
+        .as_ref()
+        .filter(|pick| pick.index == index)
+        .map(|_| {
+            stage_button(
+                s,
+                format!("sl{index}"),
+                format!("Indexer les lignes sélectionnées de {label}"),
+                "Indexer les lignes".to_owned(),
+                true,
+            )
+            .on_press(|s: &mut State| s.stage_picked_lines())
+        });
+    let file_button = stage_button(
         s,
         format!("st{index}"),
         format!("Indexer {label}"),
         "Indexer".to_owned(),
         false,
     )
-    .on_press(move |s: &mut State| s.stage_paths(vec![target.clone()]))
+    .on_press(move |s: &mut State| s.stage_paths(vec![target.clone()]));
+    row()
+        .gap(6.0)
+        .center_y()
+        .child(lines_button.unwrap_or_else(|| el().w(0.0)))
+        .child(file_button)
 }
 
 fn notice(s: &State, index: usize, key: String, message: String, tone: Tone) -> El {
@@ -831,9 +850,13 @@ fn body_row(s: &State, index: usize, line: u64) -> El {
                 return split_row(s, index, line, split, key);
             }
             match s.line(index, line) {
-                Some(diff_line) => {
-                    line_row(&s.palette, key, diff_line, hunk_action(s, index, line))
-                }
+                Some(diff_line) => line_row(
+                    &s.palette,
+                    key,
+                    diff_line,
+                    hunk_action(s, index, line),
+                    pick_ui(s, index, line, diff_line),
+                ),
                 None => placeholder(s, key, "…"),
             }
         }
@@ -920,6 +943,24 @@ fn gutter(
         )
 }
 
+fn pick_ui(s: &State, index: usize, doc_line: u64, line: &DiffLine) -> Option<(usize, u64, bool)> {
+    if !matches!(line.kind, DiffLineKind::Added | DiffLineKind::Removed) {
+        return None;
+    }
+    if s.view != ViewKind::Unstaged {
+        return None;
+    }
+    let entry = s.entries().get(index)?;
+    if entry.kind != EntryKind::Ordinary
+        || entry.worktree != StatusCode::Modified
+        || entry.is_conflict()
+    {
+        return None;
+    }
+    let meta = s.doc(index)?.meta.as_ref()?;
+    (meta.kind == Some(DocumentKind::Text)).then(|| (index, doc_line, s.is_picked(index, doc_line)))
+}
+
 fn hunk_action(s: &State, index: usize, doc_line: u64) -> Option<El> {
     if s.view != ViewKind::Unstaged {
         return None;
@@ -953,7 +994,13 @@ fn hunk_action(s: &State, index: usize, doc_line: u64) -> Option<El> {
     )
 }
 
-fn line_row(p: &Palette, key: String, line: &DiffLine, action: Option<El>) -> El {
+fn line_row(
+    p: &Palette,
+    key: String,
+    line: &DiffLine,
+    action: Option<El>,
+    pick: Option<(usize, u64, bool)>,
+) -> El {
     let text_key = format!("t{}", &key[1..]);
     let content = String::from_utf8_lossy(&line.text).into_owned();
     match line.kind {
@@ -985,19 +1032,35 @@ fn line_row(p: &Palette, key: String, line: &DiffLine, action: Option<El>) -> El
                 DiffLineKind::Removed => (Some(p.removed), "−", p.red),
                 _ => (None, " ", p.muted),
             };
+            let picked = pick.is_some_and(|(_, _, selected)| selected);
+            let base_fill = fill.unwrap_or(p.bg);
+            let mut gutter_el = gutter(
+                p,
+                line.old_number,
+                line.new_number,
+                sign,
+                ink,
+                if picked { p.selected } else { base_fill },
+            );
+            if let Some((owner, doc_line, _)) = pick {
+                gutter_el = gutter_el
+                    .key(format!("gs{owner}:{doc_line}"))
+                    .role("checkbox")
+                    .label(format!(
+                        "Sélectionner la ligne {doc_line} pour l'indexation"
+                    ))
+                    .hover(p.hover)
+                    .on_press_tx(move |s: &mut State, tx: &mut Tx| {
+                        s.pick_line(owner, doc_line, tx.mods().shift);
+                    });
+            }
+            let fill = if picked { Some(p.selected) } else { fill };
             let mut line_el = row()
                 .key(key)
                 .w_full()
                 .h(LINE_HEIGHT)
                 .center_y()
-                .child(gutter(
-                    p,
-                    line.old_number,
-                    line.new_number,
-                    sign,
-                    ink,
-                    fill.unwrap_or(p.bg),
-                ))
+                .child(gutter_el)
                 .child(
                     text(content)
                         .key(text_key)
@@ -1032,6 +1095,7 @@ fn split_row(s: &State, index: usize, row_index: u64, split: &SplitIndex, key: S
             key,
             line,
             cells.left.and_then(|l| hunk_action(s, index, l)),
+            None,
         );
     }
     row()
@@ -1043,6 +1107,8 @@ fn split_row(s: &State, index: usize, row_index: u64, split: &SplitIndex, key: S
             left,
             true,
             format!("t{index}:{row_index}:L"),
+            left.zip(cells.left)
+                .and_then(|(line, at)| pick_ui(s, index, at, line)),
         ))
         .child(el().w(1.0).fill(p.line))
         .child(split_cell(
@@ -1050,10 +1116,19 @@ fn split_row(s: &State, index: usize, row_index: u64, split: &SplitIndex, key: S
             right,
             false,
             format!("t{index}:{row_index}:R"),
+            right
+                .zip(cells.right)
+                .and_then(|(line, at)| pick_ui(s, index, at, line)),
         ))
 }
 
-fn split_cell(p: &Palette, line: Option<&DiffLine>, old_side: bool, text_key: String) -> El {
+fn split_cell(
+    p: &Palette,
+    line: Option<&DiffLine>,
+    old_side: bool,
+    text_key: String,
+    pick: Option<(usize, u64, bool)>,
+) -> El {
     let cell = row().grow(1.0).min_w(0.0).px(8.0);
     let Some(line) = line else {
         return cell.fill(p.panel);
@@ -1085,25 +1160,37 @@ fn split_cell(p: &Palette, line: Option<&DiffLine>, old_side: bool, text_key: St
     } else {
         line.new_number
     };
-    let cell = cell
-        .child(number(numeral))
-        .child(
-            text(sign)
-                .font(theme::CODE)
-                .color(ink)
-                .w(22.0)
-                .align(Align::Center),
-        )
-        .child(
-            text(String::from_utf8_lossy(&line.text).into_owned())
-                .key(text_key)
-                .font(theme::CODE)
-                .color(p.text)
-                .selectable(true)
-                .wrap()
-                .grow(1.0)
-                .min_w(0.0),
-        );
+    let picked = pick.is_some_and(|(_, _, selected)| selected);
+    let fill = if picked { Some(p.selected) } else { fill };
+    let mut gutter_el = row().child(number(numeral)).child(
+        text(sign)
+            .font(theme::CODE)
+            .color(ink)
+            .w(22.0)
+            .align(Align::Center),
+    );
+    if let Some((owner, doc_line, _)) = pick {
+        gutter_el = gutter_el
+            .key(format!("gs{owner}:{doc_line}"))
+            .role("checkbox")
+            .label(format!(
+                "Sélectionner la ligne {doc_line} pour l'indexation"
+            ))
+            .hover(p.hover)
+            .on_press_tx(move |s: &mut State, tx: &mut Tx| {
+                s.pick_line(owner, doc_line, tx.mods().shift);
+            });
+    }
+    let cell = cell.child(gutter_el).child(
+        text(String::from_utf8_lossy(&line.text).into_owned())
+            .key(text_key)
+            .font(theme::CODE)
+            .color(p.text)
+            .selectable(true)
+            .wrap()
+            .grow(1.0)
+            .min_w(0.0),
+    );
     match fill {
         Some(fill) => cell.fill(fill),
         None => cell,

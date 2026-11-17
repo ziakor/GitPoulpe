@@ -304,3 +304,204 @@ fn block_buttons_exist_only_for_tracked_text_files_in_the_unstaged_view() {
             .any(|e| e.key.as_deref().is_some_and(|k| k.starts_with("hb")))
     );
 }
+
+fn doc_line(dir: &Path, prefix: char, text: &str) -> u64 {
+    let output = Command::new("git")
+        .current_dir(dir)
+        .args(["diff", "--unified=3", "--", "f.txt"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .unwrap();
+    let diff = String::from_utf8_lossy(&output.stdout).into_owned();
+    let lines: Vec<&str> = diff.lines().collect();
+    let first = lines.iter().position(|l| l.starts_with("@@")).unwrap();
+    let wanted = format!("{prefix}{text}");
+    let at = lines[first..]
+        .iter()
+        .position(|l| *l == wanted)
+        .unwrap_or_else(|| panic!("{wanted:?} is not in the diff"));
+    at as u64
+}
+
+fn click_gutter(rt: &mut rune::Runtime<State>, line: u64, shift: bool) {
+    let index = rt.state.entry_at(0).unwrap().0;
+    let key = format!("gs{index}:{line}");
+    let rect = rect_of(rt, &key).unwrap_or_else(|| panic!("{key} is not mounted"));
+    let (x, y) = (rect[0] + 10.0, rect[1] + rect[3] / 2.0);
+    if shift {
+        rt.physical_input(rune::PhysicalInput::Modifiers(rune::Mods {
+            shift: true,
+            ..Default::default()
+        }));
+        rt.frame(0.0);
+    }
+    rt.pointer_move(x, y);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    rt.frame(0.0);
+    if shift {
+        rt.physical_input(rune::PhysicalInput::Modifiers(rune::Mods::default()));
+        rt.frame(0.0);
+    }
+    for _ in 0..3 {
+        step(rt);
+    }
+}
+
+fn index_lines(dir: &Path) -> Vec<String> {
+    index_text(dir).lines().map(str::to_owned).collect()
+}
+
+#[test]
+fn clicking_an_added_line_and_pressing_s_stages_only_that_line() {
+    let repo = three_block_repo();
+    let mut rt = blocks_runtime(&repo);
+    let line = doc_line(repo.path(), '+', "line 3 CHANGED");
+
+    click_gutter(&mut rt, line, false);
+    assert!(rt.state.line_pick.is_some());
+    press(&mut rt, rune::Key::Text("s".to_owned()));
+    finish_writing(&mut rt);
+
+    let staged = index_lines(repo.path());
+    let at = staged
+        .iter()
+        .position(|l| l == "line 3")
+        .expect("the old line stays");
+    assert_eq!(staged[at + 1], "line 3 CHANGED", "{:?}", &staged[..6]);
+    assert!(!staged.contains(&"line 20 CHANGED".to_owned()));
+    assert_eq!(rt.state.notice.as_deref(), Some("1 ligne indexée."));
+    assert!(rt.state.line_pick.is_none(), "the selection is cleared");
+}
+
+#[test]
+fn shift_click_extends_the_selection_over_the_lines_in_between() {
+    let repo = three_block_repo();
+    let mut rt = blocks_runtime(&repo);
+    let removed = doc_line(repo.path(), '-', "line 20");
+    let added = doc_line(repo.path(), '+', "line 20 CHANGED");
+
+    click_gutter(&mut rt, removed, false);
+    click_gutter(&mut rt, added, true);
+    let index = rt.state.entry_at(0).unwrap().0;
+    assert!(rt.state.is_picked(index, removed) && rt.state.is_picked(index, added));
+    assert_eq!(
+        rt.state.line_pick.as_ref().map(|p| p.spans.clone()),
+        Some(vec![
+            (removed, removed),
+            (removed.min(added), removed.max(added))
+        ]),
+        "the second click extended the first one's range"
+    );
+    let button = rect_of(&rt, &format!("sl{index}")).expect("the header offers the selection");
+    click_at(
+        &mut rt,
+        button[0] + 10.0,
+        button[1] + button[3] / 2.0,
+        false,
+    );
+    finish_writing(&mut rt);
+
+    let staged = index_lines(repo.path());
+    assert!(staged.contains(&"line 20 CHANGED".to_owned()));
+    assert!(
+        !staged.contains(&"line 20".to_owned()),
+        "the removal was staged too"
+    );
+    assert!(!staged.contains(&"line 3 CHANGED".to_owned()));
+    assert_eq!(rt.state.notice.as_deref(), Some("2 lignes indexées."));
+}
+
+#[test]
+fn a_selection_extended_far_beyond_the_viewport_is_staged_exactly() {
+    let repo = tempfile::tempdir().unwrap();
+    let dir = repo.path();
+    super::git(dir, &["init", "-q", "-b", "main"]);
+    let base: Vec<String> = (1..=3200).map(|n| format!("line {n}")).collect();
+    let text = |lines: &[String]| lines.iter().map(|l| format!("{l}\n")).collect::<String>();
+    std::fs::write(dir.join("f.txt"), text(&base)).unwrap();
+    super::git(dir, &["add", "-A"]);
+    super::git(dir, &["commit", "-q", "-m", "base"]);
+    let mut edited = base.clone();
+    for n in 5..=3000 {
+        edited[n - 1] = format!("line {n} EDIT");
+    }
+    std::fs::write(dir.join("f.txt"), text(&edited)).unwrap();
+    let mut rt = blocks_runtime(&repo);
+    let first = doc_line(dir, '-', "line 10");
+    let last = doc_line(dir, '+', "line 2990 EDIT");
+    assert!(
+        last - first > 5000,
+        "the two ends are {} rows apart",
+        last - first
+    );
+    let index = rt.state.entry_at(0).unwrap().0;
+
+    rt.update(move |_, tx| tx.scroll_key_to(format!("l{index}:{first}"), 0.0));
+    for _ in 0..10 {
+        step(&mut rt);
+    }
+    click_gutter(&mut rt, first, false);
+    rt.update(move |_, tx| tx.scroll_key_to(format!("l{index}:{last}"), 0.0));
+    for _ in 0..16 {
+        step(&mut rt);
+    }
+    assert!(
+        rect_of(&rt, &format!("gs{index}:{first}")).is_none(),
+        "the first selected line is far out of view"
+    );
+    assert!(super::mounted(&rt, "l") < 200, "rendering stays bounded");
+    click_gutter(&mut rt, last, true);
+    press(&mut rt, rune::Key::Text("s".to_owned()));
+    finish_writing(&mut rt);
+
+    let mut expected: Vec<String> = base[..9].to_vec();
+    expected.extend((5..=2990).map(|n| format!("line {n} EDIT")));
+    expected.extend(base[3000..].iter().cloned());
+    assert_eq!(index_lines(dir), expected);
+    assert_eq!(rt.state.notice.as_deref(), Some("5977 lignes indexées."));
+}
+
+#[test]
+fn a_selection_on_a_file_edited_since_is_refused_and_escape_clears_a_selection() {
+    let repo = three_block_repo();
+    let mut rt = blocks_runtime(&repo);
+    let before = index_text(repo.path());
+    let line = doc_line(repo.path(), '+', "line 38 CHANGED");
+
+    click_gutter(&mut rt, line, false);
+    press(&mut rt, rune::Key::Escape);
+    assert!(rt.state.line_pick.is_none(), "Escape clears the selection");
+
+    click_gutter(&mut rt, line, false);
+    let edited = std::fs::read_to_string(repo.path().join("f.txt"))
+        .unwrap()
+        .replace("line 20 CHANGED", "line 20 CHANGED LATER");
+    std::fs::write(repo.path().join("f.txt"), edited).unwrap();
+    press(&mut rt, rune::Key::Text("s".to_owned()));
+    finish_writing(&mut rt);
+
+    assert_eq!(index_text(repo.path()), before);
+    let notice = rt.state.notice.clone().unwrap_or_default();
+    assert!(notice.contains("a changé depuis son affichage"), "{notice}");
+}
+
+#[test]
+fn line_selection_works_in_split_mode_too() {
+    let repo = three_block_repo();
+    let mut rt = blocks_runtime(&repo);
+    rt.update(|s, tx| s.toggle_mode(tx));
+    for _ in 0..8 {
+        step(&mut rt);
+    }
+    let line = doc_line(repo.path(), '+', "line 3 CHANGED");
+
+    click_gutter(&mut rt, line, false);
+    press(&mut rt, rune::Key::Text("s".to_owned()));
+    finish_writing(&mut rt);
+
+    let staged = index_lines(repo.path());
+    let at = staged.iter().position(|l| l == "line 3").unwrap();
+    assert_eq!(staged[at + 1], "line 3 CHANGED");
+}

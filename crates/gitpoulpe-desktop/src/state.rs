@@ -6,8 +6,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use gitpoulpe_core::{
-    BuildState, ChangeEntry, DiffLine, DiffSide, DocumentKind, DocumentMeta, Generation, HunkSpec,
-    Refusal, SplitIndex, StageOutcome, StageTarget, StatusSnapshot, WriteError, display_label,
+    BuildState, ChangeEntry, DiffLine, DiffSide, DocumentKind, DocumentMeta, Generation, HunkLines,
+    HunkSpec, LineSelection, Refusal, SplitIndex, StageOutcome, StageTarget, StatusSnapshot,
+    WriteError, display_label,
 };
 use rune::prefs::Prefs;
 use rune::{Live, TextEdit, Tx, Waker};
@@ -47,6 +48,13 @@ impl ViewKind {
             Self::Staged => DiffSide::Staged,
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinePick {
+    pub index: usize,
+    pub anchor: u64,
+    pub spans: Vec<(u64, u64)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -137,6 +145,8 @@ pub struct State {
     pub notice: Option<String>,
     pub marked: HashSet<PathBuf>,
     pub marks_version: u32,
+    pub line_pick: Option<LinePick>,
+    pub pick_version: u32,
     pub writing: bool,
     stage_request: u64,
     pub watch: WatchStatus,
@@ -225,6 +235,8 @@ impl State {
             copy_request: 0,
             marked: HashSet::new(),
             marks_version: 0,
+            line_pick: None,
+            pick_version: 0,
             writing: false,
             stage_request: 0,
             copy_limit: crate::engine::MAX_COPY_BYTES,
@@ -337,6 +349,7 @@ impl State {
                 self.positions.insert(self.view, anchor);
             }
             self.view = view;
+            self.clear_pick();
             self.current = None;
             self.pinned = None;
             self.stick_end = false;
@@ -461,6 +474,7 @@ impl State {
                 });
                 self.docs.clear();
                 self.marked.clear();
+                self.clear_pick();
                 self.writing = false;
                 self.positions.clear();
                 self.pending_anchor = None;
@@ -496,6 +510,7 @@ impl State {
                     return false;
                 }
                 self.writing = false;
+                self.clear_pick();
                 self.notice = Some(self.describe_stage(result));
                 true
             }
@@ -1039,6 +1054,7 @@ impl State {
         self.pinned = None;
         self.stick_end = false;
         self.prune_marks();
+        self.clear_pick();
         self.refilter();
         if self.notice.as_deref() == Some(REFRESHING_NOTICE) {
             self.notice = None;
@@ -1130,6 +1146,18 @@ impl State {
                 }
             }
             Ok(StageOutcome::HunkApplied) => "Bloc indexé.".to_owned(),
+            Ok(StageOutcome::LinesApplied { lines }) => match lines {
+                1 => "1 ligne indexée.".to_owned(),
+                n => format!("{n} lignes indexées."),
+            },
+            Ok(StageOutcome::Refused {
+                reason: Refusal::NothingSelected,
+                ..
+            }) => "La sélection ne contient aucune ligne ajoutée ou supprimée.".to_owned(),
+            Ok(StageOutcome::Refused {
+                reason: Refusal::Incompatible,
+                ..
+            }) => "Cette sélection est impossible dans un bloc qui touche la fin d'un fichier sans saut de ligne : sélectionne tout le bloc.".to_owned(),
             Ok(StageOutcome::Refused {
                 reason: Refusal::NotPartial,
                 ..
@@ -1221,6 +1249,113 @@ impl State {
         let mut paths: Vec<PathBuf> = self.marked.iter().cloned().collect();
         paths.sort();
         self.stage_paths(paths);
+    }
+
+    pub fn clear_pick(&mut self) {
+        if self.line_pick.take().is_some() {
+            self.pick_version += 1;
+        }
+    }
+
+    pub fn is_picked(&self, index: usize, doc_line: u64) -> bool {
+        self.line_pick.as_ref().is_some_and(|pick| {
+            pick.index == index
+                && pick
+                    .spans
+                    .iter()
+                    .any(|(from, to)| (*from..=*to).contains(&doc_line))
+        })
+    }
+
+    pub fn pick_line(&mut self, index: usize, doc_line: u64, extend: bool) {
+        let mut pick = match self.line_pick.take() {
+            Some(pick) if pick.index == index => pick,
+            _ => LinePick {
+                index,
+                anchor: doc_line,
+                spans: Vec::new(),
+            },
+        };
+        if extend && !pick.spans.is_empty() {
+            let (from, to) = (pick.anchor.min(doc_line), pick.anchor.max(doc_line));
+            pick.spans.push((from, to));
+        } else if let Some(at) = pick.spans.iter().position(|s| *s == (doc_line, doc_line)) {
+            pick.spans.remove(at);
+            pick.anchor = doc_line;
+        } else {
+            pick.spans.push((doc_line, doc_line));
+            pick.anchor = doc_line;
+        }
+        self.line_pick = (!pick.spans.is_empty()).then_some(pick);
+        self.pick_version += 1;
+    }
+
+    pub fn stage_picked_lines(&mut self) {
+        if self.writing {
+            self.notice = Some("Une écriture est déjà en cours.".to_owned());
+            return;
+        }
+        let Some(pick) = self.line_pick.clone() else {
+            return;
+        };
+        let Some(repo) = self.repo.as_ref() else {
+            return;
+        };
+        let Some(entry) = repo.snapshot.entries.get(pick.index).cloned() else {
+            return;
+        };
+        let Some(meta) = self.doc(pick.index).and_then(|d| d.meta.as_ref()) else {
+            return;
+        };
+        let mut hunks = Vec::new();
+        for (rank, hunk) in meta.hunks.iter().enumerate() {
+            let body_from = hunk.first_line + 1;
+            let body_to = hunk.first_line + hunk.line_count.saturating_sub(1);
+            let ranges: Vec<(u32, u32)> = pick
+                .spans
+                .iter()
+                .filter_map(|(from, to)| {
+                    let (from, to) = ((*from).max(body_from), (*to).min(body_to));
+                    (from <= to).then(|| {
+                        (
+                            u32::try_from(from - body_from).unwrap_or(u32::MAX),
+                            u32::try_from(to - body_from).unwrap_or(u32::MAX),
+                        )
+                    })
+                })
+                .collect();
+            if !ranges.is_empty() {
+                hunks.push(HunkLines {
+                    hunk: HunkSpec {
+                        index: rank,
+                        old_start: hunk.old_start,
+                        old_len: hunk.old_len,
+                        new_start: hunk.new_start,
+                        new_len: hunk.new_len,
+                    },
+                    ranges,
+                });
+            }
+        }
+        if hunks.is_empty() {
+            self.notice =
+                Some("La sélection ne contient aucune ligne ajoutée ou supprimée.".to_owned());
+            return;
+        }
+        let target = StageTarget {
+            stamp: repo.snapshot.stamps.get(&entry.path).copied(),
+            entry,
+        };
+        self.stage_request += 1;
+        self.writing = true;
+        self.notice = Some("Indexation…".to_owned());
+        if let Some(engine) = &self.engine {
+            engine.send(Command::StageLines {
+                request: self.stage_request,
+                target: Box::new(target),
+                selection: LineSelection { hunks },
+            });
+        }
     }
 
     pub fn stage_hunk(&mut self, path: PathBuf, hunk_index: usize) {

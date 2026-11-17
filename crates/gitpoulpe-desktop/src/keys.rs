@@ -102,7 +102,13 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
             "/" => tx.focus("filter", true),
             "m" => s.toggle_mode(tx),
             "r" => s.refresh(),
-            "s" => s.stage_current(),
+            "s" => {
+                if s.line_pick.is_some() {
+                    s.stage_picked_lines();
+                } else {
+                    s.stage_current();
+                }
+            }
             "S" => s.stage_marked(),
             "x" => {
                 if let Some(position) = s.current {
@@ -124,6 +130,7 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
             };
             tx.scroll_to_x("viewport", (offset + step).clamp(0.0, max.max(0.0)));
         }
+        Key::Escape if reading && free && s.line_pick.is_some() => s.clear_pick(),
         Key::Down if reading && free => scroll_lines(s, tx, true),
         Key::Up if reading && free => scroll_lines(s, tx, false),
         Key::PageDown if reading && tx.focused().is_none() => tx.scroll_page("viewport", 1),

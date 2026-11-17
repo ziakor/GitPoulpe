@@ -34,9 +34,21 @@ pub struct HunkSpec {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HunkLines {
+    pub hunk: HunkSpec,
+    pub ranges: Vec<(u32, u32)>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LineSelection {
+    pub hunks: Vec<HunkLines>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StageOutcome {
     Applied { staged: usize },
     HunkApplied,
+    LinesApplied { lines: usize },
     Stale { paths: Vec<PathBuf> },
     Refused { path: PathBuf, reason: Refusal },
 }
@@ -47,6 +59,8 @@ pub enum Refusal {
     NothingToStage,
     NotPartial,
     FilterConfigured,
+    NothingSelected,
+    Incompatible,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -4,8 +4,8 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use gitpoulpe_core::{
-    Diagnostic, FileStamp, Generation, HunkSpec, Refusal, SessionInfo, StageOutcome, StageTarget,
-    StampKind, WriteError,
+    Diagnostic, FileStamp, Generation, HunkLines, HunkSpec, LineSelection, Refusal, SessionInfo,
+    StageOutcome, StageTarget, StampKind, WriteError,
 };
 
 use crate::process::RunError;
@@ -60,6 +60,19 @@ fn locked_index(diagnostic: &Diagnostic) -> Option<String> {
     rest[end..]
         .starts_with("': File exists")
         .then(|| rest[..end].to_owned())
+}
+
+fn refused(path: &Path, reason: Refusal) -> StageOutcome {
+    StageOutcome::Refused {
+        path: path.to_path_buf(),
+        reason,
+    }
+}
+
+fn stale_outcome(path: &Path) -> StageOutcome {
+    StageOutcome::Stale {
+        paths: vec![path.to_path_buf()],
+    }
 }
 
 fn nul_separated(paths: &[&Path]) -> Vec<u8> {
@@ -196,54 +209,8 @@ impl Git {
     ) -> Result<StageOutcome, WriteError> {
         let worktree = info.worktree.as_ref().ok_or(WriteError::NoWorktree)?;
         let entry = &target.entry;
-        let refuse = |reason| {
-            Ok(StageOutcome::Refused {
-                path: entry.path.clone(),
-                reason,
-            })
-        };
-        if entry.is_conflict() {
-            return refuse(Refusal::Conflict);
-        }
-        if entry.kind != gitpoulpe_core::EntryKind::Ordinary
-            || entry.worktree != gitpoulpe_core::StatusCode::Modified
-        {
-            return refuse(Refusal::NotPartial);
-        }
-        let stale = || {
-            Ok(StageOutcome::Stale {
-                paths: vec![entry.path.clone()],
-            })
-        };
-        let Some(seen) = target.stamp else {
-            return stale();
-        };
-        let current = self.current_status(info, cancel).await?;
-        let unchanged = current.entries.iter().any(|now| {
-            now.path == entry.path
-                && now.kind == entry.kind
-                && now.index == entry.index
-                && now.worktree == entry.worktree
-                && now.original_path == entry.original_path
-        });
-        if !unchanged || current.stamps.get(&entry.path) != Some(&seen) {
-            return stale();
-        }
-        let filters = self
-            .filter_overrides(worktree, cancel)
-            .await
-            .map_err(|e| match e {
-                gitpoulpe_core::ReadError::Cancelled => WriteError::Cancelled,
-                gitpoulpe_core::ReadError::GitUnavailable(d) => WriteError::GitUnavailable(d),
-                other => WriteError::GitFailed(Diagnostic {
-                    exit_code: None,
-                    signal: None,
-                    message: other.to_string(),
-                    cause: None,
-                }),
-            })?;
-        if !filters.is_empty() {
-            return refuse(Refusal::FilterConfigured);
+        if let Some(outcome) = self.check_partial(info, target, cancel).await? {
+            return Ok(outcome);
         }
 
         let mut spec = b":(literal)".to_vec();
@@ -270,8 +237,8 @@ impl Git {
         }
         let Some(patch) = single_hunk_patch(&diff, hunk) else {
             return match split_diff(&diff) {
-                Some(_) => stale(),
-                None => refuse(Refusal::NotPartial),
+                Some(_) => Ok(stale_outcome(&entry.path)),
+                None => Ok(refused(&entry.path, Refusal::NotPartial)),
             };
         };
         let args: Vec<OsString> = ["apply", "--cached", "--recount", "--whitespace=nowarn", "-"]
@@ -369,4 +336,247 @@ fn single_hunk_patch(diff: &[u8], wanted: &HunkSpec) -> Option<Vec<u8>> {
         patch.extend_from_slice(line);
     }
     Some(patch)
+}
+
+impl Git {
+    pub async fn stage_lines(
+        &self,
+        info: &SessionInfo,
+        target: &StageTarget,
+        selection: &LineSelection,
+        cancel: &Cancel,
+    ) -> Result<StageOutcome, WriteError> {
+        let worktree = info.worktree.as_ref().ok_or(WriteError::NoWorktree)?;
+        let entry = &target.entry;
+        if let Some(outcome) = self.check_partial(info, target, cancel).await? {
+            return Ok(outcome);
+        }
+
+        let mut spec = b":(literal)".to_vec();
+        spec.extend_from_slice(entry.path.as_os_str().as_bytes());
+        let args: Vec<OsString> = vec![
+            "diff".into(),
+            "--no-ext-diff".into(),
+            "--no-textconv".into(),
+            "--no-color".into(),
+            "--unified=3".into(),
+            "--".into(),
+            OsString::from(std::ffi::OsStr::from_bytes(&spec)),
+        ];
+        let refs: Vec<&OsStr> = args.iter().map(OsString::as_os_str).collect();
+        let (run, diff) = self
+            .run_collect(worktree, &refs, cancel)
+            .await
+            .map_err(write_failure)?;
+        if !run.succeeded() {
+            return Err(WriteError::GitFailed(Diagnostic {
+                cause: None,
+                ..run.diagnostic()
+            }));
+        }
+        let Some(split) = split_diff(&diff) else {
+            return Ok(refused(&entry.path, Refusal::NotPartial));
+        };
+        let patch = match build_line_patch(&split, selection) {
+            LinePatch::Patch { bytes, lines } => (bytes, lines),
+            LinePatch::Stale => return Ok(stale_outcome(&entry.path)),
+            LinePatch::NothingSelected => {
+                return Ok(refused(&entry.path, Refusal::NothingSelected));
+            }
+            LinePatch::Incompatible => return Ok(refused(&entry.path, Refusal::Incompatible)),
+        };
+        let args: Vec<OsString> = ["apply", "--cached", "--recount", "--whitespace=nowarn", "-"]
+            .map(OsString::from)
+            .to_vec();
+        let refs: Vec<&OsStr> = args.iter().map(OsString::as_os_str).collect();
+        let run = self
+            .run_input(worktree, &refs, &[], Some(patch.0), cancel, |_| Ok(()))
+            .await
+            .map_err(write_failure)?;
+        if !run.succeeded() {
+            let diagnostic = Diagnostic {
+                cause: None,
+                ..run.diagnostic()
+            };
+            return Err(match locked_index(&diagnostic) {
+                Some(path) => WriteError::IndexLocked(path),
+                None => WriteError::GitFailed(diagnostic),
+            });
+        }
+        Ok(StageOutcome::LinesApplied { lines: patch.1 })
+    }
+}
+
+enum LinePatch {
+    Patch { bytes: Vec<u8>, lines: usize },
+    Stale,
+    NothingSelected,
+    Incompatible,
+}
+
+fn in_ranges(ranges: &[(u32, u32)], offset: u32) -> bool {
+    ranges
+        .iter()
+        .any(|(from, to)| (*from..=*to).contains(&offset))
+}
+
+fn build_line_patch(split: &SplitDiff<'_>, selection: &LineSelection) -> LinePatch {
+    let mut chosen: Vec<&HunkLines> = selection.hunks.iter().collect();
+    chosen.sort_by_key(|h| h.hunk.index);
+    chosen.dedup_by_key(|h| h.hunk.index);
+    let mut bytes: Vec<u8> = split
+        .header
+        .iter()
+        .flat_map(|l| l.iter().copied())
+        .collect();
+    let mut total = 0usize;
+    let mut delta: i64 = 0;
+    for wanted in chosen {
+        let Some(hunk) = split.hunks.get(wanted.hunk.index) else {
+            return LinePatch::Stale;
+        };
+        let Some(first) = hunk.first() else {
+            return LinePatch::Stale;
+        };
+        let Some(numbers) = hunk_numbers(first) else {
+            return LinePatch::Stale;
+        };
+        let spec = wanted.hunk;
+        if numbers != (spec.old_start, spec.old_len, spec.new_start, spec.new_len) {
+            return LinePatch::Stale;
+        }
+        let body = &hunk[1..];
+        let changed = |i: usize| matches!(body[i].first(), Some(b'+' | b'-'));
+        let selected: Vec<bool> = (0..body.len())
+            .map(|i| changed(i) && in_ranges(&wanted.ranges, u32::try_from(i).unwrap_or(u32::MAX)))
+            .collect();
+        let picked = selected.iter().filter(|s| **s).count();
+        if picked == 0 {
+            continue;
+        }
+        let all_changed = (0..body.len()).filter(|i| changed(*i)).count();
+        let has_marker = body.iter().any(|l| l.first() == Some(&b'\\'));
+        if has_marker && picked != all_changed {
+            return LinePatch::Incompatible;
+        }
+        let mut lines: Vec<Vec<u8>> = Vec::new();
+        let (mut old_len, mut new_len) = (0u32, 0u32);
+        for (i, line) in body.iter().enumerate() {
+            match line.first() {
+                Some(b' ') => {
+                    old_len += 1;
+                    new_len += 1;
+                    lines.push(line.to_vec());
+                }
+                Some(b'-') if selected[i] => {
+                    old_len += 1;
+                    lines.push(line.to_vec());
+                }
+                Some(b'-') => {
+                    old_len += 1;
+                    new_len += 1;
+                    let mut converted = line.to_vec();
+                    converted[0] = b' ';
+                    lines.push(converted);
+                }
+                Some(b'+') if selected[i] => {
+                    new_len += 1;
+                    lines.push(line.to_vec());
+                }
+                Some(b'+') => {}
+                _ => lines.push(line.to_vec()),
+            }
+        }
+        total += picked;
+        let suffix = first
+            .windows(2)
+            .rposition(|w| w == b"@@")
+            .map(|at| &first[at + 2..])
+            .unwrap_or(b"\n");
+        let new_start = i64::from(spec.old_start) + delta;
+        bytes.extend_from_slice(
+            format!(
+                "@@ -{},{} +{},{} @@",
+                spec.old_start,
+                old_len,
+                new_start.max(0),
+                new_len
+            )
+            .as_bytes(),
+        );
+        bytes.extend_from_slice(suffix);
+        for line in lines {
+            bytes.extend_from_slice(&line);
+        }
+        delta += i64::from(new_len) - i64::from(old_len);
+    }
+    if total == 0 {
+        return LinePatch::NothingSelected;
+    }
+    LinePatch::Patch {
+        bytes,
+        lines: total,
+    }
+}
+
+impl Git {
+    async fn check_partial(
+        &self,
+        info: &SessionInfo,
+        target: &StageTarget,
+        cancel: &Cancel,
+    ) -> Result<Option<StageOutcome>, WriteError> {
+        let worktree = info.worktree.as_ref().ok_or(WriteError::NoWorktree)?;
+        let entry = &target.entry;
+        let refuse = |reason| {
+            Ok(Some(StageOutcome::Refused {
+                path: entry.path.clone(),
+                reason,
+            }))
+        };
+        if entry.is_conflict() {
+            return refuse(Refusal::Conflict);
+        }
+        if entry.kind != gitpoulpe_core::EntryKind::Ordinary
+            || entry.worktree != gitpoulpe_core::StatusCode::Modified
+        {
+            return refuse(Refusal::NotPartial);
+        }
+        let stale = || {
+            Ok(Some(StageOutcome::Stale {
+                paths: vec![entry.path.clone()],
+            }))
+        };
+        let Some(seen) = target.stamp else {
+            return stale();
+        };
+        let current = self.current_status(info, cancel).await?;
+        let unchanged = current.entries.iter().any(|now| {
+            now.path == entry.path
+                && now.kind == entry.kind
+                && now.index == entry.index
+                && now.worktree == entry.worktree
+                && now.original_path == entry.original_path
+        });
+        if !unchanged || current.stamps.get(&entry.path) != Some(&seen) {
+            return stale();
+        }
+        let filters = self
+            .filter_overrides(worktree, cancel)
+            .await
+            .map_err(|e| match e {
+                gitpoulpe_core::ReadError::Cancelled => WriteError::Cancelled,
+                gitpoulpe_core::ReadError::GitUnavailable(d) => WriteError::GitUnavailable(d),
+                other => WriteError::GitFailed(Diagnostic {
+                    exit_code: None,
+                    signal: None,
+                    message: other.to_string(),
+                    cause: None,
+                }),
+            })?;
+        if !filters.is_empty() {
+            return refuse(Refusal::FilterConfigured);
+        }
+        Ok(None)
+    }
 }
