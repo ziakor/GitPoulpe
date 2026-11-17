@@ -184,6 +184,10 @@ fn ignored_among(worktree: &Path, paths: &[PathBuf]) -> HashSet<PathBuf> {
         .collect()
 }
 
+fn is_real_directory(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_dir())
+}
+
 fn is_nested_repository(dir: &Path, worktree: &Path) -> bool {
     dir != worktree && dir.join(".git").exists()
 }
@@ -350,7 +354,7 @@ impl RepoWatcher {
                     if live.is_empty() {
                         continue;
                     }
-                    for dir in live.iter().filter(|path| path.is_dir()) {
+                    for dir in live.iter().filter(|path| is_real_directory(path)) {
                         let _ = add_tree(&shared, &worktree, dir, &ignored.read().unwrap(), true);
                     }
                     let _ = raw.send(Signal::Changed);

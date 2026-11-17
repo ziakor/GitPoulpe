@@ -295,3 +295,21 @@ async fn measure_watching_a_real_repository() {
         started.elapsed()
     );
 }
+
+#[tokio::test]
+async fn a_symlink_to_a_directory_is_never_followed() {
+    let repo = ignoring_repo();
+    let outside = tempfile::tempdir().unwrap();
+    for i in 0..300 {
+        std::fs::create_dir_all(outside.path().join(format!("d{i}/sub"))).unwrap();
+    }
+    let (watcher, mut rx) = start(&session(repo.path()).await);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let before = watcher.watched_directories();
+    std::os::unix::fs::symlink(outside.path(), repo.path().join("link")).unwrap();
+    assert!(next(&mut rx, Duration::from_secs(5)).await.is_some());
+    drain(&mut rx, Duration::from_millis(700)).await;
+    assert_eq!(watcher.watched_directories(), before);
+    write(outside.path(), "d1/sub/file.txt", "x\n");
+    assert_eq!(drain(&mut rx, Duration::from_millis(900)).await, 0);
+}
