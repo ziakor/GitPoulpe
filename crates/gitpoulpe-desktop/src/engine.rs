@@ -5,8 +5,8 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 use gitpoulpe_core::{
-    ChangeEntry, DiffLine, DiffSide, DocumentMeta, Generation, OpenError, RangeError, SessionInfo,
-    StatusSnapshot,
+    ChangeEntry, DiffLine, DiffSide, DocumentMeta, Generation, OpenError, RangeError, ReadError,
+    SessionInfo, StatusSnapshot,
 };
 use gitpoulpe_git::{
     CacheConfig, Cancel, DiffCache, DiffReader, Git, MAX_WAIT, QUIET_PERIOD, RepoWatcher, Signal,
@@ -345,7 +345,7 @@ fn start_refresh(shared: &Arc<Shared>, session: &Arc<Session>, request: u64, eve
             }),
             Err(error) => shared.emit(Event::RefreshFailed {
                 request,
-                message: error.to_string(),
+                message: describe_read_error(error),
             }),
         }
     });
@@ -365,8 +365,21 @@ async fn open(
         .git
         .read_status(&info, Generation::default().next(), &cancel)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(describe_read_error)?;
     Ok((info, snapshot))
+}
+
+fn describe_read_error(error: ReadError) -> String {
+    match error {
+        ReadError::NoWorktree => {
+            "Ce dépôt n'a pas de répertoire de travail (dépôt bare) : il n'y a aucune modification à inspecter."
+                .to_owned()
+        }
+        ReadError::Cancelled => "Lecture annulée.".to_owned(),
+        ReadError::GitUnavailable(d) => format!("Git est introuvable : {d}"),
+        ReadError::GitFailed(d) => format!("Git a échoué : {d}"),
+        ReadError::Parse(m) => format!("Réponse de Git inattendue : {m}"),
+    }
 }
 
 fn describe_open_error(error: OpenError) -> String {
