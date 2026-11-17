@@ -204,3 +204,94 @@ fn only_paths_that_change_what_git_reports_are_relevant() {
         assert!(!is_relevant(Path::new(ignored), &info), "{ignored}");
     }
 }
+
+fn ignoring_repo() -> tempfile::TempDir {
+    let repo = init_repo();
+    write(repo.path(), ".gitignore", "node_modules/\n*.log\ntarget/\n");
+    write(repo.path(), "a.txt", "a\n");
+    commit_all(repo.path(), "base");
+    repo
+}
+
+#[tokio::test]
+async fn ignored_directories_are_not_watched_and_ignored_files_stay_silent() {
+    let repo = ignoring_repo();
+    for i in 0..200 {
+        write(
+            repo.path(),
+            &format!("node_modules/pkg{i}/deep/index.js"),
+            "x\n",
+        );
+    }
+    std::fs::create_dir_all(repo.path().join("src/inner")).unwrap();
+    let (watcher, mut rx) = start(&session(repo.path()).await);
+    assert!(
+        watcher.watched_directories() < 20,
+        "only the directories git cares about: {}",
+        watcher.watched_directories()
+    );
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    write(repo.path(), "debug.log", "noise\n");
+    write(repo.path(), "node_modules/pkg1/deep/index.js", "changed\n");
+    assert_eq!(drain(&mut rx, Duration::from_millis(900)).await, 0);
+
+    write(repo.path(), "src/inner/real.rs", "fn main() {}\n");
+    assert_eq!(
+        next(&mut rx, Duration::from_secs(5)).await,
+        Some(Signal::Changed)
+    );
+}
+
+#[tokio::test]
+async fn a_directory_created_after_start_is_watched_unless_git_ignores_it() {
+    let repo = ignoring_repo();
+    let (_watcher, mut rx) = start(&session(repo.path()).await);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    write(repo.path(), "feature/sub/one.rs", "1\n");
+    assert!(next(&mut rx, Duration::from_secs(5)).await.is_some());
+    drain(&mut rx, Duration::from_millis(700)).await;
+
+    write(repo.path(), "feature/sub/two.rs", "2\n");
+    assert!(
+        next(&mut rx, Duration::from_secs(5)).await.is_some(),
+        "the new directory is watched"
+    );
+    drain(&mut rx, Duration::from_millis(700)).await;
+
+    write(repo.path(), "target/debug/out.o", "x\n");
+    write(repo.path(), "target/debug/more.o", "y\n");
+    assert_eq!(
+        drain(&mut rx, Duration::from_millis(900)).await,
+        0,
+        "a new ignored directory stays silent"
+    );
+}
+
+#[tokio::test]
+async fn a_nested_repository_is_left_alone() {
+    let repo = ignoring_repo();
+    let nested = repo.path().join("vendor/inner");
+    std::fs::create_dir_all(&nested).unwrap();
+    git(&nested, &["init", "-q", "-b", "main"]);
+    let (watcher, mut rx) = start(&session(repo.path()).await);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    write(&nested, "inside.txt", "x\n");
+    assert_eq!(drain(&mut rx, Duration::from_millis(900)).await, 0);
+    assert!(watcher.watched_directories() < 10);
+}
+
+#[tokio::test]
+#[ignore = "measures a real repository: GITPOULPE_WATCH_REPO=/path cargo test -- --ignored --nocapture"]
+async fn measure_watching_a_real_repository() {
+    let path = std::env::var_os("GITPOULPE_WATCH_REPO").expect("GITPOULPE_WATCH_REPO");
+    let info = session(Path::new(&path)).await;
+    let started = std::time::Instant::now();
+    let (watcher, _rx) = start(&info);
+    println!(
+        "watching {} directories, started in {:?}",
+        watcher.watched_directories(),
+        started.elapsed()
+    );
+}
