@@ -6,7 +6,7 @@ const MAX_INTERVALS: usize = 400_000;
 const IDLE_GAP_MS: f64 = 100.0;
 const WRITE_EVERY_SECONDS: f64 = 2.0;
 const WARMUP_SECONDS: f64 = 1.0;
-const DEFAULT_SPEED: f32 = 3000.0;
+const SCROLL_SPEED: f32 = 3000.0;
 const MAX_EVENTS: usize = 200;
 const EVENT_FRAME_MS: f64 = 25.0;
 const NOMINAL_FRAME_MS: f64 = 1000.0 / 60.0;
@@ -74,10 +74,7 @@ impl Perf {
             .filter(|seconds| *seconds > 0.0)
             .map(|duration| Autoscroll {
                 duration,
-                speed: std::env::var("GITPOULPE_SCROLL_SPEED")
-                    .ok()
-                    .and_then(|speed| speed.parse().ok())
-                    .unwrap_or(DEFAULT_SPEED),
+                speed: SCROLL_SPEED,
                 ready_at: None,
                 started_at: None,
                 offset: 0.0,

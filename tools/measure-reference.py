@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Measure frame pacing in the real window on the reference repository.
 
-Usage: tools/measure-reference.py [--repo PATH] [--runs N] [--seconds S] [--speed PX_PER_S]
+Usage: tools/measure-reference.py [--repo PATH] [--runs N] [--seconds S]
 
 Needs the release binary (cargo build --release -p gitpoulpe-desktop). Opens the window, scrolls it
-at a constant speed for S seconds, records the interval between frames and writes a report. The
+at a constant 3,000 px/s for S seconds, records the interval between frames and writes a report. The
 window must stay visible and focused: a hidden window is not asked for frames and the run is
 reported as invalid.
 """
@@ -19,13 +19,13 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def run_once(binary: str, repo: str, mode: str, seconds: int, speed: int) -> dict:
+def run_once(binary: str, repo: str, mode: str, seconds: int) -> dict:
     with tempfile.TemporaryDirectory() as prefs, tempfile.TemporaryDirectory() as out:
         with open(os.path.join(prefs, "prefs.json"), "w") as handle:
             json.dump({"diff_mode": mode}, handle)
         report = os.path.join(out, "report.json")
         env = dict(os.environ, GITPOULPE_PERF_LOG=report, GITPOULPE_AUTOSCROLL=str(seconds),
-                   GITPOULPE_SCROLL_SPEED=str(speed), RUNE_PREFS_DIR=prefs, RUNE_PERF_WARN="0")
+                   RUNE_PREFS_DIR=prefs, RUNE_PERF_WARN="0")
         try:
             subprocess.run([binary, repo], env=env, timeout=seconds + 60, check=False,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -47,7 +47,6 @@ def main() -> int:
     parser.add_argument("--binary", default=os.path.join(ROOT, "target/release/gitpoulpe"))
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--seconds", type=int, default=20)
-    parser.add_argument("--speed", type=int, default=3000)
     parser.add_argument("--results", default=os.path.expanduser("~/bench/results"))
     args = parser.parse_args()
     if not os.path.exists(args.binary):
@@ -60,7 +59,7 @@ def main() -> int:
     try:
         for mode in ("unified", "split"):
             for run in range(1, args.runs + 1):
-                report = run_once(args.binary, args.repo, mode, args.seconds, args.speed)
+                report = run_once(args.binary, args.repo, mode, args.seconds)
                 with open(log_path, "a") as log:
                     log.write(json.dumps({"mode": mode, "run": run, "report": report}) + "\n")
                 validity = report.get("validity", "invalid")
