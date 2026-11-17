@@ -1530,3 +1530,13 @@ fn shutdown_stops_the_engine_and_is_safe_to_repeat() {
     state.shutdown();
     state.refresh();
 }
+
+#[test]
+fn returning_to_the_window_refreshes_once_and_not_in_a_burst() {
+    let repo = repo_with_files(3);
+    let mut state = opened(repo.path());
+    let before = state.refresh_request;
+    state.refresh_on_focus();
+    state.refresh_on_focus();
+    assert_eq!(state.refresh_request, before + 1);
+}

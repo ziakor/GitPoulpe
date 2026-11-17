@@ -136,7 +136,7 @@ pub struct State {
     pub visible: Range<usize>,
     pub notice: Option<String>,
     pub watch: WatchStatus,
-    refresh_request: u64,
+    pub refresh_request: u64,
     last_refresh: Option<Instant>,
     positions: HashMap<ViewKind, ReadingAnchor>,
     pending_anchor: Option<PendingAnchor>,
