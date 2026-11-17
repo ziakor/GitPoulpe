@@ -385,6 +385,7 @@ fn step(rt: &mut Runtime<State>) {
         rt.update(|s, tx| {
             s.apply_follow(tx);
             s.apply_copy(tx);
+            s.apply_anchor(tx);
         });
         rt.frame(1.0 / 60.0);
         std::thread::sleep(Duration::from_millis(3));
@@ -1394,4 +1395,138 @@ fn every_control_stays_inside_the_window_at_the_smallest_supported_size() {
             "{key} leaves the window vertically: {rect:?}"
         );
     }
+}
+
+fn scroll_to_file(rt: &mut Runtime<State>, position: usize) {
+    rt.update(move |s, tx| {
+        s.jump_to(position);
+        let index = s.files[position];
+        crate::keys::align_file(tx, index);
+    });
+    for _ in 0..4 {
+        step(rt);
+    }
+}
+
+fn reading_path(rt: &Runtime<State>) -> Option<std::path::PathBuf> {
+    rt.state.capture_anchor().map(|a| a.path)
+}
+
+fn refresh_and_settle(rt: &mut Runtime<State>) {
+    let before = rt.state.repo.as_ref().unwrap().generation;
+    rt.update(|s, _| s.refresh());
+    for _ in 0..200 {
+        step(rt);
+        if rt.state.repo.as_ref().unwrap().generation != before {
+            break;
+        }
+    }
+    for _ in 0..6 {
+        step(rt);
+    }
+}
+
+#[test]
+fn a_manual_refresh_shows_an_external_change_and_keeps_the_file_being_read() {
+    let (repo, mut rt) = keyboard_runtime(30);
+    scroll_to_file(&mut rt, 12);
+    for _ in 0..4 {
+        step(&mut rt);
+    }
+    let reading = reading_path(&rt).unwrap();
+    let total = rt.state.count(ViewKind::Unstaged);
+
+    std::fs::write(repo.path().join("brand_new.txt"), "x\n").unwrap();
+    refresh_and_settle(&mut rt);
+    for _ in 0..4 {
+        step(&mut rt);
+    }
+
+    assert_eq!(rt.state.count(ViewKind::Unstaged), total + 1);
+    assert_eq!(reading_path(&rt), Some(reading));
+}
+
+#[test]
+fn when_the_read_file_disappears_reading_resumes_on_the_next_one_with_a_notice() {
+    let (repo, mut rt) = keyboard_runtime(30);
+    scroll_to_file(&mut rt, 12);
+    let reading = reading_path(&rt).unwrap();
+    let paths: Vec<_> = rt
+        .state
+        .files
+        .iter()
+        .map(|&i| rt.state.entries()[i].path.clone())
+        .collect();
+    let at = paths.iter().position(|p| *p == reading).unwrap();
+    let next = paths[at + 1].clone();
+
+    git(repo.path(), &["checkout", "--", reading.to_str().unwrap()]);
+    refresh_and_settle(&mut rt);
+
+    assert!(
+        !rt.state
+            .files
+            .iter()
+            .any(|&i| rt.state.entries()[i].path == reading)
+    );
+    assert_eq!(reading_path(&rt), Some(next));
+    assert!(
+        rt.state
+            .notice
+            .as_deref()
+            .is_some_and(|n| n.contains("lecture reprise")),
+        "{:?}",
+        rt.state.notice
+    );
+}
+
+#[test]
+fn the_reading_position_of_each_view_is_remembered_across_switches() {
+    let (_repo, mut rt) = keyboard_runtime(30);
+    scroll_to_file(&mut rt, 15);
+    let unstaged = reading_path(&rt).unwrap();
+    press(&mut rt, rune::Key::Text("2".to_owned()));
+    for _ in 0..4 {
+        step(&mut rt);
+    }
+    assert_eq!(rt.state.view, ViewKind::Staged);
+    press(&mut rt, rune::Key::Text("1".to_owned()));
+    for _ in 0..8 {
+        step(&mut rt);
+    }
+    assert_eq!(reading_path(&rt), Some(unstaged));
+}
+
+#[test]
+fn a_refresh_that_is_not_newer_than_what_is_shown_is_ignored() {
+    let repo = repo_with_files(5);
+    let mut state = opened(repo.path());
+    let shown = state.repo.as_ref().unwrap().snapshot.clone();
+    let mut stale = (*shown).clone();
+    stale.generation = state.repo.as_ref().unwrap().generation;
+    state.notice = None;
+    assert!(!state.apply_refresh(1, stale, false));
+    assert!(state.notice.is_none());
+}
+
+#[test]
+fn the_watcher_reports_an_external_edit_without_any_manual_action() {
+    let repo = repo_with_files(5);
+    let mut state = opened(repo.path());
+    pump(&mut state, |s| s.watch == crate::state::WatchStatus::Active);
+    let total = state.count(ViewKind::Unstaged);
+    std::fs::write(repo.path().join("watched.txt"), "x\n").unwrap();
+    pump(&mut state, |s| s.count(ViewKind::Unstaged) == total + 1);
+}
+
+#[test]
+fn shutdown_stops_the_engine_and_is_safe_to_repeat() {
+    let repo = repo_with_files(3);
+    let mut state = opened(repo.path());
+    pump(&mut state, |s| s.watch == crate::state::WatchStatus::Active);
+    let started = std::time::Instant::now();
+    state.shutdown();
+    assert!(started.elapsed() < Duration::from_secs(5));
+    state.shutdown();
+    state.refresh();
 }

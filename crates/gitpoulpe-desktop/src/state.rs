@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use gitpoulpe_core::{
     BuildState, ChangeEntry, DiffLine, DiffSide, DocumentKind, DocumentMeta, Generation,
-    SplitIndex, StatusSnapshot,
+    SplitIndex, StatusSnapshot, display_label,
 };
 use rune::prefs::Prefs;
 use rune::{Live, TextEdit, Tx, Waker};
@@ -24,6 +24,10 @@ const LIST_WIDTH_KEY: &str = "list_width";
 const MODE_KEY: &str = "diff_mode";
 pub const READING_LINE_PERCENT: usize = 35;
 const STICK_GRACE_CALLS: u8 = 2;
+const REFRESHING_NOTICE: &str = "Actualisation…";
+const ANCHOR_FRAMES: u16 = 90;
+const ANCHOR_STABLE_FRAMES: u8 = 3;
+const FOCUS_REFRESH_MIN_INTERVAL: Duration = Duration::from_secs(1);
 pub const MAX_LOADED_LINES: usize = 30_000;
 const KEEP_FILES: usize = 40;
 const KEEP_CHUNKS: u64 = 6;
@@ -43,6 +47,25 @@ impl ViewKind {
             Self::Staged => DiffSide::Staged,
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WatchStatus {
+    Unknown,
+    Active,
+    Unavailable(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReadingAnchor {
+    pub path: PathBuf,
+    pub line: Option<u64>,
+}
+
+struct PendingAnchor {
+    anchor: ReadingAnchor,
+    stable_frames: u8,
+    frames_left: u16,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -112,6 +135,11 @@ pub struct State {
     pub pinned: Option<usize>,
     pub visible: Range<usize>,
     pub notice: Option<String>,
+    pub watch: WatchStatus,
+    refresh_request: u64,
+    last_refresh: Option<Instant>,
+    positions: HashMap<ViewKind, ReadingAnchor>,
+    pending_anchor: Option<PendingAnchor>,
     perf: Option<crate::perf::Perf>,
     pub max_loaded_lines: usize,
     visible_chunks: HashMap<usize, (u64, u64)>,
@@ -182,6 +210,11 @@ impl State {
             pinned: None,
             visible: 0..0,
             notice: None,
+            watch: WatchStatus::Unknown,
+            refresh_request: 0,
+            last_refresh: None,
+            positions: HashMap::new(),
+            pending_anchor: None,
             perf: crate::perf::Perf::from_env(),
             max_loaded_lines: MAX_LOADED_LINES,
             visible_chunks: HashMap::new(),
@@ -292,11 +325,17 @@ impl State {
 
     pub fn set_view(&mut self, view: ViewKind) {
         if self.view != view {
+            if let Some(anchor) = self.capture_anchor() {
+                self.positions.insert(self.view, anchor);
+            }
             self.view = view;
             self.current = None;
             self.pinned = None;
             self.stick_end = false;
             self.refilter();
+            if let Some(anchor) = self.positions.get(&view).cloned() {
+                self.relocate(Some(anchor), &[], false);
+            }
         }
     }
 
@@ -413,11 +452,33 @@ impl State {
                     name,
                 });
                 self.docs.clear();
+                self.positions.clear();
+                self.pending_anchor = None;
                 self.current = None;
                 self.pinned = None;
                 self.stick_end = false;
                 self.screen = Screen::Ready;
                 self.refilter();
+                true
+            }
+            Event::Refreshed {
+                request,
+                snapshot,
+                events_lost,
+            } => self.apply_refresh(request, *snapshot, events_lost),
+            Event::RefreshFailed { request, message } => {
+                if request != self.refresh_request {
+                    return false;
+                }
+                self.notice = Some(format!("Actualisation impossible : {message}"));
+                true
+            }
+            Event::WatchState { available, reason } => {
+                self.watch = if available {
+                    WatchStatus::Active
+                } else {
+                    WatchStatus::Unavailable(reason)
+                };
                 true
             }
             Event::Copied {
@@ -830,6 +891,209 @@ impl State {
         {
             std::thread::sleep(Duration::from_millis(20));
             self.drain();
+        }
+    }
+}
+
+impl State {
+    pub fn capture_anchor(&self) -> Option<ReadingAnchor> {
+        if let Some(pending) = &self.pending_anchor {
+            return Some(pending.anchor.clone());
+        }
+        let (position, line) = self.reading_anchor()?;
+        let (_, entry) = self.entry_at(position)?;
+        Some(ReadingAnchor {
+            path: entry.path.clone(),
+            line,
+        })
+    }
+
+    fn current_paths(&self) -> Vec<PathBuf> {
+        self.files
+            .iter()
+            .filter_map(|&i| self.entries().get(i).map(|e| e.path.clone()))
+            .collect()
+    }
+
+    fn set_pending(&mut self, anchor: ReadingAnchor) {
+        self.pending_anchor = Some(PendingAnchor {
+            anchor,
+            stable_frames: 0,
+            frames_left: ANCHOR_FRAMES,
+        });
+    }
+
+    fn relocate(&mut self, anchor: Option<ReadingAnchor>, old_paths: &[PathBuf], announce: bool) {
+        let Some(anchor) = anchor else { return };
+        let new_paths = self.current_paths();
+        if new_paths.contains(&anchor.path) {
+            self.set_pending(anchor);
+            return;
+        }
+        let fallback = old_paths
+            .iter()
+            .position(|p| *p == anchor.path)
+            .and_then(|at| {
+                old_paths[at + 1..]
+                    .iter()
+                    .chain(old_paths[..at].iter().rev())
+                    .find(|p| new_paths.contains(p))
+                    .cloned()
+            });
+        match fallback {
+            Some(path) => {
+                if announce {
+                    self.notice = Some(format!(
+                        "{} n'a plus de changement dans cette vue : lecture reprise sur {}.",
+                        display_label(&anchor.path),
+                        display_label(&path)
+                    ));
+                }
+                self.set_pending(ReadingAnchor { path, line: None });
+            }
+            None => {
+                if announce && !new_paths.is_empty() {
+                    self.notice = Some(format!(
+                        "{} n'a plus de changement dans cette vue.",
+                        display_label(&anchor.path)
+                    ));
+                }
+            }
+        }
+    }
+
+    pub fn filter_changed(&mut self) {
+        let anchor = self.capture_anchor();
+        let old_paths = self.current_paths();
+        self.refilter();
+        self.relocate(anchor, &old_paths, false);
+    }
+
+    fn request_refresh(&mut self, announce: bool) {
+        if self.repo.is_none() {
+            return;
+        }
+        self.refresh_request += 1;
+        self.last_refresh = Some(Instant::now());
+        if announce {
+            self.notice = Some(REFRESHING_NOTICE.to_owned());
+        }
+        if let Some(engine) = &self.engine {
+            engine.send(Command::Refresh {
+                request: self.refresh_request,
+            });
+        }
+    }
+
+    pub fn refresh(&mut self) {
+        self.request_refresh(true);
+    }
+
+    pub fn refresh_on_focus(&mut self) {
+        if self
+            .last_refresh
+            .is_none_or(|at| at.elapsed() >= FOCUS_REFRESH_MIN_INTERVAL)
+        {
+            self.request_refresh(false);
+        }
+    }
+
+    pub fn apply_refresh(
+        &mut self,
+        request: u64,
+        snapshot: StatusSnapshot,
+        events_lost: bool,
+    ) -> bool {
+        let Some(current_generation) = self.repo.as_ref().map(|r| r.generation) else {
+            return false;
+        };
+        if snapshot.generation <= current_generation {
+            return false;
+        }
+        let anchor = self.capture_anchor();
+        let old_paths = self.current_paths();
+        if let Some(repo) = self.repo.as_mut() {
+            repo.generation = snapshot.generation;
+            repo.snapshot = Arc::new(snapshot);
+        }
+        self.docs.clear();
+        self.current = None;
+        self.pinned = None;
+        self.stick_end = false;
+        self.refilter();
+        if self.notice.as_deref() == Some(REFRESHING_NOTICE) {
+            self.notice = None;
+        }
+        self.relocate(anchor, &old_paths, true);
+        if self.notice.is_none() && (request != 0 || events_lost) {
+            self.notice = Some(if events_lost {
+                "Des événements ont été perdus : le dépôt a été relu en entier.".to_owned()
+            } else {
+                "Dépôt actualisé.".to_owned()
+            });
+        }
+        true
+    }
+
+    pub fn apply_anchor(&mut self, tx: &mut Tx) {
+        let Some(pending) = self.pending_anchor.take() else {
+            return;
+        };
+        if pending.frames_left == 0 {
+            return;
+        }
+        let Some(position) = self.files.iter().position(|&i| {
+            self.entries()
+                .get(i)
+                .is_some_and(|e| e.path == pending.anchor.path)
+        }) else {
+            return;
+        };
+        let Some((index, _)) = self.entry_at(position) else {
+            return;
+        };
+        let mut pending = PendingAnchor {
+            frames_left: pending.frames_left - 1,
+            ..pending
+        };
+        let (key, target_row) = match pending.anchor.line {
+            None => (format!("h{index}"), self.layout.offsets[position]),
+            Some(line) => {
+                if self.doc(index).and_then(|d| d.meta.as_ref()).is_none() {
+                    self.pending_anchor = Some(pending);
+                    return;
+                }
+                let row = self
+                    .split_index(index)
+                    .and_then(|split| split.row_of_line(line))
+                    .unwrap_or(line);
+                (
+                    format!("l{index}:{row}"),
+                    self.layout.offsets[position] + 1 + row,
+                )
+            }
+        };
+        let reading_rows = self.visible.len() * READING_LINE_PERCENT / 100;
+        let expected_start = target_row.saturating_sub(reading_rows as u64);
+        let at_target =
+            !self.layout_dirty && (self.visible.start as u64).abs_diff(expected_start) <= 1;
+        pending.stable_frames = if at_target {
+            pending.stable_frames + 1
+        } else {
+            0
+        };
+        if pending.stable_frames >= ANCHOR_STABLE_FRAMES {
+            return;
+        }
+        if !at_target {
+            tx.scroll_key_to(key, reading_rows as f32 * crate::view::LINE_HEIGHT);
+        }
+        self.pending_anchor = Some(pending);
+    }
+
+    pub fn shutdown(&mut self) {
+        if let Some(engine) = self.engine.take() {
+            engine.shutdown();
         }
     }
 }

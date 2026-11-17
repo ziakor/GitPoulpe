@@ -8,12 +8,18 @@ use gitpoulpe_core::{
     ChangeEntry, DiffLine, DiffSide, DocumentMeta, Generation, OpenError, RangeError, SessionInfo,
     StatusSnapshot,
 };
-use gitpoulpe_git::{CacheConfig, Cancel, DiffCache, DiffReader, Git};
+use gitpoulpe_git::{
+    CacheConfig, Cancel, DiffCache, DiffReader, Git, MAX_WAIT, QUIET_PERIOD, RepoWatcher, Signal,
+    coalesce,
+};
 use rune::Waker;
+use std::time::Duration;
+
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 pub const MAX_COPY_BYTES: usize = 32 * 1024 * 1024;
 const COPY_SPAN_LINES: u64 = 4096;
+const SHUTDOWN_WAIT: Duration = Duration::from_secs(3);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CopyRequest {
@@ -35,6 +41,10 @@ pub enum Command {
         path: PathBuf,
     },
     Copy(Box<CopyRequest>),
+    Refresh {
+        request: u64,
+    },
+    Shutdown(std::sync::mpsc::Sender<()>),
     Read {
         generation: Generation,
         side: DiffSide,
@@ -45,6 +55,19 @@ pub enum Command {
 }
 
 pub enum Event {
+    Refreshed {
+        request: u64,
+        snapshot: Box<StatusSnapshot>,
+        events_lost: bool,
+    },
+    RefreshFailed {
+        request: u64,
+        message: String,
+    },
+    WatchState {
+        available: bool,
+        reason: String,
+    },
     Copied {
         request: u64,
         text: String,
@@ -99,7 +122,11 @@ impl Engine {
         std::thread::Builder::new()
             .name("gitpoulpe-engine-main".to_owned())
             .spawn(move || {
-                runtime.block_on(run(receiver, events, waker));
+                let acknowledge = runtime.block_on(run(receiver, events, waker));
+                runtime.shutdown_timeout(SHUTDOWN_WAIT);
+                if let Some(acknowledge) = acknowledge {
+                    let _ = acknowledge.send(());
+                }
             })?;
         Ok(Self { commands })
     }
@@ -107,11 +134,37 @@ impl Engine {
     pub fn send(&self, command: Command) {
         let _ = self.commands.send(command);
     }
+
+    pub fn shutdown(&self) {
+        let (acknowledge, done) = std::sync::mpsc::channel();
+        if self.commands.send(Command::Shutdown(acknowledge)).is_ok() {
+            let _ = done.recv_timeout(SHUTDOWN_WAIT + Duration::from_secs(1));
+        }
+    }
 }
 
 struct Session {
     info: SessionInfo,
-    generation: Generation,
+    generation: Mutex<Generation>,
+}
+
+impl Session {
+    fn new(info: SessionInfo, generation: Generation) -> Self {
+        Self {
+            info,
+            generation: Mutex::new(generation),
+        }
+    }
+
+    fn generation(&self) -> Generation {
+        *self.generation.lock().unwrap()
+    }
+
+    fn bump(&self) -> Generation {
+        let mut generation = self.generation.lock().unwrap();
+        *generation = generation.next();
+        *generation
+    }
 }
 
 struct Shared {
@@ -142,7 +195,11 @@ fn open_cache() -> std::io::Result<DiffCache> {
     })
 }
 
-async fn run(mut receiver: UnboundedReceiver<Command>, events: Sender<Event>, waker: WakerSlot) {
+async fn run(
+    mut receiver: UnboundedReceiver<Command>,
+    events: Sender<Event>,
+    waker: WakerSlot,
+) -> Option<std::sync::mpsc::Sender<()>> {
     let git = Git::new();
     let cache = match open_cache() {
         Ok(cache) => cache,
@@ -154,7 +211,7 @@ async fn run(mut receiver: UnboundedReceiver<Command>, events: Sender<Event>, wa
             if let Some(wake) = waker.lock().unwrap().as_ref() {
                 wake();
             }
-            return;
+            return None;
         }
     };
     let shared = Arc::new(Shared {
@@ -164,60 +221,134 @@ async fn run(mut receiver: UnboundedReceiver<Command>, events: Sender<Event>, wa
         waker,
     });
     let mut session: Option<Arc<Session>> = None;
+    let mut watcher: Option<RepoWatcher> = None;
+    let mut signals: Option<UnboundedReceiver<Signal>> = None;
     let watched = Arc::new(std::sync::Mutex::new(HashSet::new()));
-    while let Some(command) = receiver.recv().await {
-        match command {
-            Command::Open { request, path } => {
-                if let Some(previous) = session.take() {
-                    shared.reader.close_session(previous.info.id);
-                    watched.lock().unwrap().clear();
-                }
-                match open(&shared, &path).await {
-                    Ok((info, snapshot)) => {
-                        session = Some(Arc::new(Session {
-                            info: info.clone(),
-                            generation: snapshot.generation,
-                        }));
-                        shared.emit(Event::Opened {
-                            request,
-                            info: Box::new(info),
-                            snapshot: Box::new(snapshot),
-                        });
+    let mut shutdown = None;
+    loop {
+        let signal = async {
+            match signals.as_mut() {
+                Some(receiver) => receiver.recv().await,
+                None => std::future::pending().await,
+            }
+        };
+        tokio::select! {
+            command = receiver.recv() => {
+                let Some(command) = command else { break };
+                match command {
+                    Command::Open { request, path } => {
+                        watcher = None;
+                        signals = None;
+                        if let Some(previous) = session.take() {
+                            shared.reader.close_session(previous.info.id);
+                            watched.lock().unwrap().clear();
+                        }
+                        match open(&shared, &path).await {
+                            Ok((info, snapshot)) => {
+                                session = Some(Arc::new(Session::new(info.clone(), snapshot.generation)));
+                                (watcher, signals) = start_watching(&shared, &info);
+                                shared.emit(Event::Opened {
+                                    request,
+                                    info: Box::new(info),
+                                    snapshot: Box::new(snapshot),
+                                });
+                            }
+                            Err(message) => shared.emit(Event::OpenFailed { request, message }),
+                        }
                     }
-                    Err(message) => shared.emit(Event::OpenFailed { request, message }),
+                    Command::Refresh { request } => {
+                        if let Some(current) = &session {
+                            start_refresh(&shared, current, request, false);
+                        }
+                    }
+                    Command::Copy(request) => {
+                        let Some(current) = session
+                            .clone()
+                            .filter(|s| s.generation() == request.generation)
+                        else {
+                            continue;
+                        };
+                        tokio::spawn(copy(shared.clone(), current, *request));
+                    }
+                    Command::Read { generation, side, index, entry, range } => {
+                        let Some(current) = session.clone().filter(|s| s.generation() == generation) else {
+                            continue;
+                        };
+                        tokio::spawn(read(shared.clone(), current, watched.clone(), side, index, *entry, range));
+                    }
+                    Command::Shutdown(ack) => {
+                        shutdown = Some(ack);
+                        break;
+                    }
                 }
             }
-            Command::Copy(request) => {
-                let Some(current) = session
-                    .clone()
-                    .filter(|s| s.generation == request.generation)
-                else {
-                    continue;
-                };
-                tokio::spawn(copy(shared.clone(), current, *request));
-            }
-            Command::Read {
-                generation,
-                side,
-                index,
-                entry,
-                range,
-            } => {
-                let Some(current) = session.clone().filter(|s| s.generation == generation) else {
-                    continue;
-                };
-                tokio::spawn(read(
-                    shared.clone(),
-                    current,
-                    watched.clone(),
-                    side,
-                    index,
-                    *entry,
-                    range,
-                ));
-            }
+            signal = signal => match signal {
+                Some(signal) => {
+                    if let Some(current) = &session {
+                        start_refresh(&shared, current, 0, signal == Signal::EventsLost);
+                    }
+                }
+                None => signals = None,
+            },
         }
     }
+    drop(watcher);
+    drop(signals);
+    if let Some(current) = session.take() {
+        shared.reader.close_session(current.info.id);
+    }
+    shutdown
+}
+
+fn start_watching(
+    shared: &Shared,
+    info: &SessionInfo,
+) -> (Option<RepoWatcher>, Option<UnboundedReceiver<Signal>>) {
+    let (raw_sender, raw_receiver) = unbounded_channel();
+    let (out_sender, out_receiver) = unbounded_channel();
+    match RepoWatcher::start(info, raw_sender) {
+        Ok(watcher) => {
+            tokio::spawn(coalesce(raw_receiver, out_sender, QUIET_PERIOD, MAX_WAIT));
+            shared.emit(Event::WatchState {
+                available: true,
+                reason: String::new(),
+            });
+            (Some(watcher), Some(out_receiver))
+        }
+        Err(error) => {
+            shared.emit(Event::WatchState {
+                available: false,
+                reason: error.to_string(),
+            });
+            (None, None)
+        }
+    }
+}
+
+fn start_refresh(shared: &Arc<Shared>, session: &Arc<Session>, request: u64, events_lost: bool) {
+    let generation = session.bump();
+    shared.reader.retire_before(session.info.id, generation);
+    let (shared, session) = (shared.clone(), session.clone());
+    tokio::spawn(async move {
+        let result = shared
+            .git
+            .read_status(&session.info, generation, &Cancel::new())
+            .await;
+        if session.generation() != generation {
+            return;
+        }
+        match result {
+            Ok(snapshot) => shared.emit(Event::Refreshed {
+                request,
+                snapshot: Box::new(snapshot),
+                events_lost,
+            }),
+            Err(error) => shared.emit(Event::RefreshFailed {
+                request,
+                message: error.to_string(),
+            }),
+        }
+    });
 }
 
 async fn open(
@@ -261,7 +392,7 @@ async fn read(
     entry: ChangeEntry,
     range: Range<u64>,
 ) {
-    let generation = session.generation;
+    let generation = session.generation();
     let document = match shared
         .reader
         .open_document(&session.info, generation, side, &entry)

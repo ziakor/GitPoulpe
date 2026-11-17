@@ -38,7 +38,7 @@ fn demo_light(state: &mut State) {
 }
 
 fn main() {
-    rune::run(AppSpec::<State> {
+    rune::App::new(AppSpec::<State> {
         fonts: theme::FONTS,
         families: theme::FAMILIES,
         min_size: Some((720.0, 480.0)),
@@ -49,6 +49,7 @@ fn main() {
             let changed = state.drain();
             state.apply_follow(tx);
             state.apply_copy(tx);
+            state.apply_anchor(tx);
             changed
         }),
         scenes: &[
@@ -57,5 +58,7 @@ fn main() {
             ("demo-split", demo_split),
         ],
         ..AppSpec::new("GitPoulpe", (1280.0, 800.0), State::default, view::view)
-    });
+    })
+    .on_close(|state, _| state.shutdown())
+    .run();
 }

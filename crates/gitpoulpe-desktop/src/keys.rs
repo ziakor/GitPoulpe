@@ -86,6 +86,10 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
             open_dialog(tx);
             return true;
         }
+        if event.is_command('r') {
+            s.refresh();
+            return true;
+        }
         return false;
     }
     if event.mods.alt || event.mods.ctrl {
@@ -97,6 +101,7 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         Key::Text(text) if reading && free => match text.as_str() {
             "/" => tx.focus("filter", true),
             "m" => s.toggle_mode(tx),
+            "r" => s.refresh(),
             "j" => reveal_file(s, tx, 1),
             "k" => reveal_file(s, tx, -1),
             "1" => s.set_view(ViewKind::Unstaged),

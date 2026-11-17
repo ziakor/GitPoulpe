@@ -10,11 +10,11 @@ use rune::{
     text_input,
 };
 
-use crate::state::{DiffMode, LIST_WIDTH_DEFAULT, Screen, State, ViewKind};
+use crate::state::{DiffMode, LIST_WIDTH_DEFAULT, Screen, State, ViewKind, WatchStatus};
 use crate::theme::{self, Palette};
 
 const LIST_ROW_HEIGHT: f32 = 56.0;
-const LINE_HEIGHT: f32 = 25.0;
+pub const LINE_HEIGHT: f32 = 25.0;
 const GUTTER_WIDTH: f32 = 128.0;
 
 pub fn view(s: &State, _: &mut Cx<State>) -> El {
@@ -42,6 +42,11 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
         .h_full()
         .fill(p.bg)
         .on_layout(|s: &mut State, rect| s.window_width = rect[2])
+        .on_window_focus(|s: &mut State, focused, _| {
+            if focused {
+                s.refresh_on_focus();
+            }
+        })
         .child(top_bar(s))
         .child(body)
         .child(footer(s))
@@ -52,6 +57,12 @@ fn footer(s: &State) -> El {
     if s.screen != Screen::Ready {
         return el().h(0.0);
     }
+    let message = s.notice.clone().unwrap_or_else(|| match &s.watch {
+        WatchStatus::Unavailable(reason) => format!(
+            "Surveillance indisponible ({reason}) : utilisez Actualiser ou revenez sur la fenêtre."
+        ),
+        _ => HINTS.to_owned(),
+    });
     row()
         .w_full()
         .h(28.0)
@@ -59,15 +70,10 @@ fn footer(s: &State) -> El {
         .center_y()
         .fill(p.panel)
         .border(1.0, p.line)
-        .child(
-            text(s.notice.clone().unwrap_or_else(|| HINTS.to_owned()))
-                .font(theme::SMALL)
-                .color(p.muted)
-                .truncate(),
-        )
+        .child(text(message).font(theme::SMALL).color(p.muted).truncate())
 }
 
-const HINTS: &str = "/ filtrer · j et k : fichier suivant ou précédent · 1 et 2 : changer de vue · m : unifié ou séparé · ↑ ↓ ← → PgUp PgDn : lire · Ctrl+O : ouvrir un dépôt";
+const HINTS: &str = "/ filtrer · j et k : fichier suivant ou précédent · 1 et 2 : changer de vue · m : unifié ou séparé · ↑ ↓ ← → PgUp PgDn : lire · r : actualiser · Ctrl+O : ouvrir un dépôt";
 
 fn open_button(p: &Palette, primary: bool) -> El {
     let (fill, ink) = if primary {
@@ -142,7 +148,24 @@ fn top_bar(s: &State) -> El {
         )
         .child(context)
         .child(open_button(&p, false))
+        .child(refresh_button(s))
         .child(theme_toggle)
+}
+
+fn refresh_button(s: &State) -> El {
+    let p = s.palette;
+    el().key("refresh")
+        .role("button")
+        .label("Actualiser")
+        .focusable(true)
+        .focus_ring(2.0, 2.0, p.accent)
+        .h(32.0)
+        .px(10.0)
+        .center()
+        .radius(3.0)
+        .hover(p.hover)
+        .on_press(|s: &mut State| s.refresh())
+        .child(text("Actualiser").font(theme::BODY).color(p.muted))
 }
 
 fn message_screen(p: &Palette, title: &str, detail: &str, with_open: bool) -> El {
@@ -268,7 +291,7 @@ fn left_pane(s: &State) -> El {
         .placeholder(format!("Nom ou chemin parmi {total} fichiers"), p.muted)
         .focus_ring(2.0, 2.0, p.accent)
         .on_edit(|s: &mut State| &mut s.filter)
-        .on_input_change(|s: &mut State, _| s.refilter())
+        .on_input_change(|s: &mut State, _| s.filter_changed())
         .on_input_key(|s: &mut State, event, tx| {
             if event.key != Key::Escape {
                 return false;
@@ -277,7 +300,7 @@ fn left_pane(s: &State) -> El {
                 tx.blur();
             } else {
                 s.filter.text.clear();
-                s.refilter();
+                s.filter_changed();
             }
             true
         })
