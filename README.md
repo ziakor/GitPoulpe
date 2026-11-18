@@ -121,6 +121,13 @@ Git runs as an external program, without a shell, with the repository's filters,
 - An application that conflicts keeps the stash and opens the resolution screen ("application du stash"), where the files can be resolved; nothing is aborted or deleted for you.
 - Deleting a stash is explicit: it names the stash and shows the `git stash store -m <message> <id>` command that brings it back, which works as long as Git has not cleaned its unreachable objects.
 
+## Publishing a branch
+
+- "Publier…" on the branch screen opens a panel for the selected branch: the remote (a choice when there are several), the exact destination (`refs/heads/<branch>` on that remote, always given as an explicit refspec) and what will happen, from the last fetch: new branch, N commits to send, already up to date, behind, or diverged. Nothing is sent without that preview.
+- A normal publication never overwrites anything: if the remote moved or the histories diverged, Git refuses, your work stays untouched and the message says to fetch and integrate, or, if you rewrote the history yourself, to use the protected publication. A refusal by a remote hook is reported as the remote's decision. The branch can be set to track the remote branch (on by default for a new branch).
+- A rewritten history can only be published through `--force-with-lease` with the exact remote commit known at the time (the remote-tracking branch of the last fetch), after a confirmation that names that commit and lists the remote commits that would stop being reachable. If somebody pushed since, the push is refused and nothing is overwritten. There is no plain force.
+- After a successful push the remote branch is read back (`ls-remote`) and compared with what was sent; a remote that did not keep the value (a server hook, for instance) is reported. The transfer shows its progress and can be cancelled; SSH, HTTPS and local remotes behave as described above, and a `pre-push` hook runs as configured. Pushes are recorded in the per-repository journal.
+
 ## Committing
 
 - Write a message in the box at the bottom of the file list, then "Créer le commit" or Ctrl+Enter. The commit contains exactly the staged content shown, with the effective identity of the repository's profile (or your Git configuration when it has none). The box also shows who will be the author and whether the profile's signing key is usable.

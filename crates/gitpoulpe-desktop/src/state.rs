@@ -189,6 +189,7 @@ pub struct State {
     pub init: crate::initialize::InitState,
     pub conflicts: crate::conflicts::ConflictsState,
     pub stashes: crate::stashes::StashesState,
+    pub publishing: crate::publishing::PublishSlot,
     pub operation_kind: Option<gitpoulpe_core::OperationKind>,
     pub(crate) probe_request: u64,
     pub clone: crate::cloning::CloneState,
@@ -313,6 +314,7 @@ impl State {
             init: crate::initialize::InitState::default(),
             conflicts: crate::conflicts::ConflictsState::default(),
             stashes: crate::stashes::StashesState::default(),
+            publishing: crate::publishing::PublishSlot::default(),
             operation_kind: None,
             probe_request: 0,
             clone: crate::cloning::CloneState::default(),
@@ -595,6 +597,7 @@ impl State {
                 self.remotes = crate::remotes::RemotesState::default();
                 self.conflicts = crate::conflicts::ConflictsState::default();
                 self.stashes = crate::stashes::StashesState::default();
+                self.publishing = crate::publishing::PublishSlot::default();
                 self.operation_kind = None;
                 self.writing = false;
                 self.positions.clear();
@@ -784,6 +787,18 @@ impl State {
                 result,
             } => self.apply_stash_detailed(request, &oid, result),
             Event::StashFinished { request, result } => self.apply_stash_finished(request, result),
+            Event::PublishPrepared {
+                request,
+                remotes,
+                preview,
+            } => self.apply_publish_prepared(request, remotes, preview),
+            Event::PushPreviewed { request, result } => self.apply_push_previewed(request, result),
+            Event::PushProgress {
+                request,
+                phase,
+                percent,
+            } => self.apply_push_progress(request, phase, percent),
+            Event::PushFinished { request, result } => self.apply_push_finished(request, result),
             Event::SshScanned { request, result } => self.apply_ssh_scanned(request, result),
             Event::SshTrusted { request, result } => self.apply_ssh_trusted(request, result),
             Event::TagsListed { request, result } => self.apply_tags_listed(request, result),

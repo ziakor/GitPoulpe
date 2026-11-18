@@ -19,6 +19,7 @@ mod initializing;
 mod inspecting;
 mod merging;
 mod profiles;
+mod publishing;
 mod remoting;
 mod staging;
 mod stashing;

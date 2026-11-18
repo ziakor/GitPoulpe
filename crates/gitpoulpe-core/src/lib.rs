@@ -8,6 +8,7 @@ mod ignore;
 mod merge;
 mod operation;
 mod profile;
+mod push;
 mod remote;
 mod session;
 mod split;
@@ -36,6 +37,7 @@ pub use operation::{
     ConflictFile, ConflictKind, ConflictVersions, Operation, OperationKind, Resolution, Version,
 };
 pub use profile::{Profile, ProfileBook, ProfileError, SigningPreference};
+pub use push::{LostRemoteCommit, PushKind, PushMode, PushOutcome, PushPreview};
 pub use remote::{Remote, RemoteImpact, mask_url, url_has_secret};
 pub use session::{RepoKind, SessionInfo, SessionState, StaleSnapshot};
 pub use split::{SplitCells, SplitIndex, SplitIndexBuilder, SplitRow, SplitUnit, split_rows};

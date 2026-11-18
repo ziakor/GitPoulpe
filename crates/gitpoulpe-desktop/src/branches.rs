@@ -86,6 +86,10 @@ impl State {
         self.branches.confirm = None;
     }
 
+    pub fn reload_branches_public(&mut self) {
+        self.reload_branches();
+    }
+
     fn reload_branches(&mut self) {
         self.branches.request += 1;
         self.branches.loading = true;
@@ -263,6 +267,8 @@ impl State {
 
     pub fn select_branch(&mut self, name: &str) {
         self.branches.merge = None;
+        self.publishing.state = None;
+        self.publishing.request += 1;
         self.branches.selected = Some(name.to_owned());
         self.branches.rename_to = TextEdit::new(name);
         self.branches.confirm = None;

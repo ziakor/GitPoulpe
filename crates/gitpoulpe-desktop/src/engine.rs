@@ -8,16 +8,16 @@ use gitpoulpe_core::{
     AmendInfo, AmendRequest, Branch, BranchLoss, ChangeEntry, Commit, CommitDetail, CommitOutcome,
     CommitRange, CommitRequest, ConflictFile, ConflictVersions, DiffLine, DiffSide, DocumentMeta,
     Generation, IgnoreReason, IgnoreScope, MergeMode, MergeOutcome, MergePreview, OpenError,
-    Operation, OperationKind, Profile, RangeError, ReadError, Remote, RemoteImpact, Resolution,
-    SessionId, SessionInfo, StageOutcome, Stash, StashApplied, StashDetail, StashScope,
-    StatusSnapshot, Tag, WriteError, WriteJob, mask_url,
+    Operation, OperationKind, Profile, PushMode, PushOutcome, PushPreview, RangeError, ReadError,
+    Remote, RemoteImpact, Resolution, SessionId, SessionInfo, StageOutcome, Stash, StashApplied,
+    StashDetail, StashScope, StatusSnapshot, Tag, WriteError, WriteJob, mask_url,
 };
 use gitpoulpe_git::{
     BranchError, CacheConfig, Cancel, CloneError, ConflictError, ConflictSide, DeleteMode,
     DiffCache, DiffError, DiffReader, FetchOutcome, Git, HistoryError, HistoryStream, HostKey,
     Identity, IdentityError, IgnoreError, IgnoredList, InspectError, MAX_WAIT, NetError,
-    QUIET_PERIOD, RemoteCheck, RepoWatcher, Signal, SigningCheck, StashError, check_signing,
-    coalesce,
+    PushRequest, QUIET_PERIOD, RemoteCheck, RepoWatcher, Signal, SigningCheck, StashError,
+    check_signing, coalesce,
 };
 use rune::Waker;
 use std::time::Duration;
@@ -298,6 +298,23 @@ pub enum Command {
         request: u64,
         op: StashOp,
     },
+    PublishOpen {
+        request: u64,
+        branch: String,
+    },
+    PushPreview {
+        request: u64,
+        branch: String,
+        remote: String,
+    },
+    Push {
+        request: u64,
+        branch: String,
+        remote: String,
+        mode: PushMode,
+        expected: Option<String>,
+        set_upstream: bool,
+    },
     NetCancel,
     InitPrepare {
         request: u64,
@@ -509,6 +526,24 @@ pub enum Event {
     StashFinished {
         request: u64,
         result: Result<StashDone, String>,
+    },
+    PublishPrepared {
+        request: u64,
+        remotes: Vec<String>,
+        preview: Result<Box<PushPreview>, String>,
+    },
+    PushPreviewed {
+        request: u64,
+        result: Result<Box<PushPreview>, String>,
+    },
+    PushProgress {
+        request: u64,
+        phase: String,
+        percent: u8,
+    },
+    PushFinished {
+        request: u64,
+        result: Result<PushOutcome, String>,
     },
     CloneProgress {
         request: u64,
@@ -1090,6 +1125,106 @@ async fn run(
                             continue;
                         };
                         tokio::spawn(stash_op(shared.clone(), current, request, op));
+                    }
+                    Command::PublishOpen { request, branch } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let remotes: Vec<String> = shared
+                                .git
+                                .list_remotes(&current.info)
+                                .await
+                                .map(|all| all.into_iter().map(|r| r.name).collect())
+                                .unwrap_or_default();
+                            let chosen = remotes
+                                .iter()
+                                .find(|r| r.as_str() == "origin")
+                                .or_else(|| remotes.first())
+                                .cloned();
+                            let preview = match chosen {
+                                Some(remote) => shared
+                                    .git
+                                    .push_preview(&current.info, &branch, &remote)
+                                    .await
+                                    .map(Box::new)
+                                    .map_err(|e| e.to_string()),
+                                None => Err(
+                                    "Aucun remote n'est configuré : ajoutez-en un depuis l'écran Remotes."
+                                        .to_owned(),
+                                ),
+                            };
+                            shared.emit(Event::PublishPrepared {
+                                request,
+                                remotes,
+                                preview,
+                            });
+                        });
+                    }
+                    Command::PushPreview {
+                        request,
+                        branch,
+                        remote,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .push_preview(&current.info, &branch, &remote)
+                                .await
+                                .map(Box::new)
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::PushPreviewed { request, result });
+                        });
+                    }
+                    Command::Push {
+                        request,
+                        branch,
+                        remote,
+                        mode,
+                        expected,
+                        set_upstream,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let cancel = Cancel::new();
+                        net_cancel = Some(cancel.clone());
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let mut last = (String::new(), 101u8);
+                            let result = shared
+                                .git
+                                .push_branch(
+                                    &current.info,
+                                    &PushRequest {
+                                        branch: &branch,
+                                        remote: &remote,
+                                        mode,
+                                        expected_remote_oid: expected.as_deref(),
+                                        set_upstream,
+                                    },
+                                    &cancel,
+                                    |progress| {
+                                        let key = (progress.phase.clone(), progress.percent);
+                                        if key != last {
+                                            shared.emit(Event::PushProgress {
+                                                request,
+                                                phase: progress.phase,
+                                                percent: progress.percent,
+                                            });
+                                            last = key;
+                                        }
+                                    },
+                                )
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::PushFinished { request, result });
+                        });
                     }
                     Command::NetCancel => {
                         if let Some(cancel) = net_cancel.take() {

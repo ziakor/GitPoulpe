@@ -15,6 +15,7 @@ mod keys;
 mod perf;
 mod profiles;
 mod profiles_view;
+mod publishing;
 mod remotes;
 mod remotes_view;
 mod shell;

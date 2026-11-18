@@ -330,6 +330,190 @@ fn merge_panel(s: &State) -> Option<El> {
     Some(card)
 }
 
+fn publish_panel(s: &State) -> Option<El> {
+    use gitpoulpe_core::PushKind;
+    let p = s.palette;
+    let state = s.publishing.state.as_ref()?;
+    let mut card = col()
+        .key("publish-panel")
+        .w_full()
+        .gap(6.0)
+        .px(12.0)
+        .py(10.0)
+        .radius(3.0)
+        .border(1.0, p.line)
+        .child(
+            text(format!("Publier « {} »", state.branch))
+                .key("publish-title")
+                .font(theme::BODY_STRONG)
+                .color(p.text)
+                .wrap(),
+        );
+    if state.remotes.len() > 1 {
+        let mut choices = row().gap(6.0);
+        for (index, remote) in state.remotes.iter().enumerate() {
+            let chosen = state.remote.as_deref() == Some(remote.as_str());
+            let name = remote.clone();
+            choices = choices.child(
+                action(s, &format!("publish-remote{index}"), remote, chosen)
+                    .on_press(move |s: &mut State| s.publish_choose_remote(&name)),
+            );
+        }
+        card = card.child(choices);
+    }
+    if let Some((phase, percent)) = &state.running {
+        return Some(
+            card.child(
+                text(format!("Envoi · {phase} {percent} %"))
+                    .key("publish-running")
+                    .font(theme::SMALL)
+                    .color(p.muted),
+            )
+            .child(
+                action(s, "publish-stop", "Annuler l'envoi", false)
+                    .on_press(|s: &mut State| s.publish_cancel_running()),
+            ),
+        );
+    }
+    if let Some(done) = &state.done {
+        card = card.child(
+            text(done.clone())
+                .key("publish-done")
+                .font(theme::SMALL)
+                .color(p.text)
+                .wrap(),
+        );
+    }
+    if let Some(error) = &state.error {
+        card = card.child(
+            text(error.clone())
+                .key("publish-error")
+                .font(theme::SMALL)
+                .color(p.red)
+                .wrap(),
+        );
+    }
+    if let Some(preview) = &state.preview {
+        let status = match preview.kind {
+            PushKind::NewBranch => format!(
+                "Nouvelle branche sur {} : {} sera créée avec votre historique.",
+                preview.remote, preview.destination
+            ),
+            PushKind::FastForward => format!(
+                "{} commit(s) à envoyer vers {} ({}), sans rien écraser.",
+                preview.ahead, preview.remote, preview.destination
+            ),
+            PushKind::UpToDate => format!(
+                "Déjà à jour sur {} ({}).",
+                preview.remote, preview.destination
+            ),
+            PushKind::Behind => format!(
+                "Le distant a {} commit(s) de plus que votre branche : récupérez et intégrez-les ; rien à envoyer.",
+                preview.behind
+            ),
+            PushKind::Diverged => format!(
+                "Votre branche et {} ont divergé ({} commit(s) chez vous, {} chez le distant). Un envoi simple serait refusé.",
+                preview.remote, preview.ahead, preview.behind
+            ),
+        };
+        card = card
+            .child(
+                text(format!(
+                    "Destination : {} → {}  (d'après la dernière récupération)",
+                    preview.remote, preview.destination
+                ))
+                .key("publish-destination")
+                .font(theme::SMALL)
+                .color(p.muted)
+                .wrap(),
+            )
+            .child(
+                text(status)
+                    .key("publish-status")
+                    .font(theme::SMALL)
+                    .color(p.text)
+                    .wrap(),
+            );
+        if preview.upstream.is_none() && preview.kind != PushKind::UpToDate {
+            card = card.child(
+                toggle(
+                    s,
+                    "publish-upstream",
+                    "Suivre cette branche distante (upstream)",
+                    state.set_upstream,
+                )
+                .on_press(|s: &mut State| s.publish_toggle_upstream()),
+            );
+        }
+        if matches!(preview.kind, PushKind::NewBranch | PushKind::FastForward) {
+            card = card.child(
+                action(s, "publish-confirm", "Publier", true)
+                    .on_press(|s: &mut State| s.publish_run(false)),
+            );
+        }
+        if preview.kind == PushKind::Diverged && preview.known_remote_oid.is_some() {
+            if state.confirm_force {
+                let expected = preview
+                    .known_remote_oid
+                    .as_deref()
+                    .map(|o| o.chars().take(10).collect::<String>())
+                    .unwrap_or_default();
+                let lost = preview
+                    .would_discard
+                    .iter()
+                    .take(8)
+                    .map(|c| {
+                        format!(
+                            "{} {}",
+                            c.oid.chars().take(8).collect::<String>(),
+                            c.subject
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                card = card
+                    .child(
+                        text(format!(
+                            "Publication protégée : le distant sera remplacé seulement s'il est toujours à {expected} ; sinon l'envoi est refusé. Ces commits distants ne seront plus atteignables depuis la branche :\n{lost}"
+                        ))
+                        .key("publish-force-warning")
+                        .font(theme::SMALL)
+                        .color(p.red)
+                        .wrap(),
+                    )
+                    .child(
+                        row()
+                            .gap(8.0)
+                            .child(
+                                action(s, "publish-force-confirm", "Remplacer le distant", true)
+                                    .on_press(|s: &mut State| s.publish_run(true)),
+                            )
+                            .child(
+                                action(s, "publish-force-cancel", "Annuler", false)
+                                    .on_press(|s: &mut State| s.publish_cancel_force()),
+                            ),
+                    );
+            } else {
+                card = card.child(
+                    action(s, "publish-force", "Publier l'historique réécrit…", false)
+                        .on_press(|s: &mut State| s.publish_ask_force()),
+                );
+            }
+        }
+    } else if state.error.is_none() {
+        card = card.child(
+            text("Lecture de l'état distant connu…".to_owned())
+                .key("publish-wait")
+                .font(theme::SMALL)
+                .color(p.muted),
+        );
+    }
+    card = card.child(
+        action(s, "publish-close", "Fermer", false).on_press(|s: &mut State| s.publish_close()),
+    );
+    Some(card)
+}
+
 fn detail(s: &State) -> El {
     let p = s.palette;
     let mut panel = col()
@@ -381,6 +565,12 @@ fn detail(s: &State) -> El {
             .wrap()
             .selectable(true),
     );
+    panel = panel.child(
+        action(s, "branch-publish", "Publier…", false).on_press(|s: &mut State| s.publish_ask()),
+    );
+    if let Some(card) = publish_panel(s) {
+        panel = panel.child(card);
+    }
     if let Some(path) = &branch.other_worktree {
         panel = panel.child(
             text(format!(
