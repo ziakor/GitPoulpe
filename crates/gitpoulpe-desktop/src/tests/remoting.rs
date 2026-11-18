@@ -541,4 +541,62 @@ mod access {
         assert!(!alive);
         let _ = &net.repo;
     }
+
+    fn fetch_finished(s: &State) -> bool {
+        s.remotes
+            .fetch
+            .as_ref()
+            .is_some_and(|f| !matches!(f.status, crate::remotes::FetchStatus::Running { .. }))
+    }
+
+    #[test]
+    fn a_fetch_updates_the_remote_references_and_leaves_the_work_alone() {
+        let (net, mut rt) = setup();
+        std::fs::write(net.repo.path().join("b.txt"), "edited\n").unwrap();
+        let before = git(net.repo.path(), &["status", "--porcelain=v2", "--branch"]);
+        click(&mut rt, "rm-fetch");
+        settle(&mut rt, fetch_finished);
+        assert!(shows(&rt, "Récupération terminée"));
+        assert!(shows(&rt, "Votre travail local n'a pas été touché"));
+        assert_eq!(
+            git(net.repo.path(), &["status", "--porcelain=v2", "--branch"]),
+            before
+        );
+        assert!(
+            git(net.repo.path(), &["for-each-ref", "refs/remotes/origin"]).contains("origin/main")
+        );
+        assert_eq!(
+            std::fs::read_to_string(net.repo.path().join("b.txt")).unwrap(),
+            "edited\n"
+        );
+    }
+
+    #[test]
+    fn a_cancelled_fetch_says_so_and_can_be_launched_again() {
+        let (net, mut rt) = setup();
+        net.mode("hang");
+        click(&mut rt, "rm-fetch");
+        for _ in 0..30 {
+            step(&mut rt);
+            if net.path("sleeper").exists() {
+                break;
+            }
+        }
+        assert!(shows(&rt, "Récupération ·"));
+        click(&mut rt, "rm-check-cancel");
+        settle(&mut rt, fetch_finished);
+        assert!(shows(&rt, "Récupération impossible : opération annulée"));
+        assert!(shows(&rt, "intactes"));
+        assert!(git(net.repo.path(), &["for-each-ref", "refs/remotes"]).is_empty());
+        net.mode("ok");
+        click(&mut rt, "rm-fetch");
+        settle(&mut rt, |s| {
+            fetch_finished(s)
+                && matches!(
+                    s.remotes.fetch.as_ref().map(|f| &f.status),
+                    Some(crate::remotes::FetchStatus::Done(_))
+                )
+        });
+        assert!(!git(net.repo.path(), &["for-each-ref", "refs/remotes"]).is_empty());
+    }
 }

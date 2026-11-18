@@ -11,8 +11,8 @@ use gitpoulpe_core::{
     SessionInfo, StageOutcome, StatusSnapshot, Tag, WriteError, WriteJob, mask_url,
 };
 use gitpoulpe_git::{
-    BranchError, CacheConfig, Cancel, DeleteMode, DiffCache, DiffError, DiffReader, Git,
-    HistoryError, HistoryStream, HostKey, Identity, IdentityError, IgnoreError, IgnoredList,
+    BranchError, CacheConfig, Cancel, DeleteMode, DiffCache, DiffError, DiffReader, FetchOutcome,
+    Git, HistoryError, HistoryStream, HostKey, Identity, IdentityError, IgnoreError, IgnoredList,
     InspectError, MAX_WAIT, NetError, QUIET_PERIOD, RemoteCheck, RepoWatcher, Signal, SigningCheck,
     check_signing, coalesce,
 };
@@ -189,6 +189,10 @@ pub enum Command {
         port: Option<u16>,
         fingerprint: String,
     },
+    Fetch {
+        request: u64,
+        remote: String,
+    },
     NetCancel,
     InitPrepare {
         request: u64,
@@ -354,6 +358,15 @@ pub enum Event {
         request: u64,
         name: String,
         result: Result<RemoteCheck, NetError>,
+    },
+    FetchProgress {
+        request: u64,
+        phase: String,
+        percent: u8,
+    },
+    FetchDone {
+        request: u64,
+        result: Result<FetchOutcome, NetError>,
     },
     SshScanned {
         request: u64,
@@ -717,6 +730,32 @@ async fn run(
                         tokio::spawn(async move {
                             let result = shared.git.trust_ssh_host(&host, port, &fingerprint).await;
                             shared.emit(Event::SshTrusted { request, result });
+                        });
+                    }
+                    Command::Fetch { request, remote } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let cancel = Cancel::new();
+                        net_cancel = Some(cancel.clone());
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let mut last = (String::new(), 101u8);
+                            let result = shared
+                                .git
+                                .fetch_remote(&current.info, &remote, &cancel, |progress| {
+                                    let key = (progress.phase.clone(), progress.percent);
+                                    if key != last {
+                                        shared.emit(Event::FetchProgress {
+                                            request,
+                                            phase: progress.phase,
+                                            percent: progress.percent,
+                                        });
+                                        last = key;
+                                    }
+                                })
+                                .await;
+                            shared.emit(Event::FetchDone { request, result });
                         });
                     }
                     Command::NetCancel => {

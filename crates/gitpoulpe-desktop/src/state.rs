@@ -737,6 +737,12 @@ impl State {
                 name,
                 result,
             } => self.apply_remote_checked(request, name, result),
+            Event::FetchProgress {
+                request,
+                phase,
+                percent,
+            } => self.apply_fetch_progress(request, phase, percent),
+            Event::FetchDone { request, result } => self.apply_fetch_done(request, result),
             Event::SshScanned { request, result } => self.apply_ssh_scanned(request, result),
             Event::SshTrusted { request, result } => self.apply_ssh_trusted(request, result),
             Event::TagsListed { request, result } => self.apply_tags_listed(request, result),

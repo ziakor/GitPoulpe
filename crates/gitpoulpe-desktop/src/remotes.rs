@@ -1,5 +1,5 @@
 use gitpoulpe_core::{Remote, RemoteImpact};
-use gitpoulpe_git::{HostKey, NetError, RemoteCheck};
+use gitpoulpe_git::{FetchOutcome, HostKey, NetError, RemoteCheck};
 use rune::TextEdit;
 
 use crate::engine::{BranchDone, Command, RemoteOp};
@@ -15,6 +15,17 @@ pub enum ScanStatus {
     Scanning,
     Keys(Vec<HostKey>),
     Failed(NetError),
+}
+
+pub enum FetchStatus {
+    Running { phase: String, percent: u8 },
+    Done(FetchOutcome),
+    Failed(NetError),
+}
+
+pub struct FetchState {
+    pub remote: String,
+    pub status: FetchStatus,
 }
 
 pub struct CheckState {
@@ -40,6 +51,8 @@ pub struct RemotesState {
     pub rename: TextEdit,
     pub confirm_remove: Option<(String, Option<RemoteImpact>)>,
     pub check: Option<CheckState>,
+    pub fetch: Option<FetchState>,
+    pub fetch_request: u64,
     pub check_request: u64,
     pub scan_request: u64,
     pub version: u32,
@@ -64,6 +77,8 @@ impl Default for RemotesState {
             rename: TextEdit::new(""),
             confirm_remove: None,
             check: None,
+            fetch: None,
+            fetch_request: 0,
             check_request: 0,
             scan_request: 0,
             version: 0,
@@ -72,6 +87,16 @@ impl Default for RemotesState {
 }
 
 impl RemotesState {
+    pub fn net_busy(&self) -> bool {
+        matches!(
+            self.check.as_ref().map(|c| &c.status),
+            Some(CheckStatus::Running)
+        ) || matches!(
+            self.fetch.as_ref().map(|f| &f.status),
+            Some(FetchStatus::Running { .. })
+        )
+    }
+
     pub fn selected_remote(&self) -> Option<&Remote> {
         let name = self.selected.as_deref()?;
         self.remotes.iter().find(|r| r.name == name)
@@ -120,6 +145,7 @@ impl State {
     pub fn select_remote(&mut self, name: &str) {
         self.cancel_remote_check();
         self.remotes.check = None;
+        self.remotes.fetch = None;
         self.remotes.selected = Some(name.to_owned());
         self.remotes.clear_forms();
         self.remotes.version += 1;
@@ -310,10 +336,7 @@ impl State {
             return;
         };
         let name = remote.name.clone();
-        if matches!(
-            self.remotes.check.as_ref().map(|c| &c.status),
-            Some(CheckStatus::Running)
-        ) {
+        if self.remotes.net_busy() {
             return;
         }
         self.remotes.check_request += 1;
@@ -332,10 +355,8 @@ impl State {
     }
 
     pub fn cancel_remote_check(&mut self) {
-        if matches!(
-            self.remotes.check.as_ref().map(|c| &c.status),
-            Some(CheckStatus::Running)
-        ) && let Some(engine) = &self.engine
+        if self.remotes.net_busy()
+            && let Some(engine) = &self.engine
         {
             engine.send(Command::NetCancel);
         }
@@ -447,6 +468,76 @@ impl State {
                     check.scan = Some(ScanStatus::Failed(error));
                 }
             }
+        }
+        self.remotes.version += 1;
+        true
+    }
+
+    pub fn remote_fetch(&mut self) {
+        let Some(remote) = self.remotes.selected_remote() else {
+            return;
+        };
+        if self.remotes.net_busy() {
+            return;
+        }
+        let name = remote.name.clone();
+        self.remotes.fetch_request += 1;
+        self.remotes.check = None;
+        self.remotes.fetch = Some(FetchState {
+            remote: name.clone(),
+            status: FetchStatus::Running {
+                phase: "Connexion".to_owned(),
+                percent: 0,
+            },
+        });
+        self.remotes.version += 1;
+        if let Some(engine) = &self.engine {
+            engine.send(Command::Fetch {
+                request: self.remotes.fetch_request,
+                remote: name,
+            });
+        }
+    }
+
+    pub fn apply_fetch_progress(&mut self, request: u64, phase: String, percent: u8) -> bool {
+        if request != self.remotes.fetch_request {
+            return false;
+        }
+        match &mut self.remotes.fetch {
+            Some(FetchState {
+                status:
+                    FetchStatus::Running {
+                        phase: p,
+                        percent: c,
+                    },
+                ..
+            }) => {
+                *p = phase;
+                *c = percent;
+            }
+            _ => return false,
+        }
+        self.remotes.version += 1;
+        true
+    }
+
+    pub fn apply_fetch_done(
+        &mut self,
+        request: u64,
+        result: Result<FetchOutcome, NetError>,
+    ) -> bool {
+        if request != self.remotes.fetch_request {
+            return false;
+        }
+        let Some(state) = self.remotes.fetch.as_mut() else {
+            return false;
+        };
+        match result {
+            Ok(outcome) => {
+                state.status = FetchStatus::Done(outcome);
+                self.request_refresh(false);
+            }
+            Err(error) => state.status = FetchStatus::Failed(error),
         }
         self.remotes.version += 1;
         true

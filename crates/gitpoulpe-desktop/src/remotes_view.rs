@@ -4,7 +4,7 @@ use gitpoulpe_core::mask_url;
 use gitpoulpe_git::NetError;
 use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text};
 
-use crate::remotes::{CheckState, CheckStatus, ScanStatus};
+use crate::remotes::{CheckState, CheckStatus, FetchStatus, ScanStatus};
 use crate::state::State;
 use crate::theme;
 use crate::widgets::{action, field};
@@ -69,6 +69,63 @@ fn check_section(s: &State, mut panel: El, remote_name: &str) -> El {
     let state: Option<&CheckState> = s.remotes.check.as_ref().filter(|c| c.name == remote_name);
     let running = matches!(state.map(|c| &c.status), Some(CheckStatus::Running));
     panel = panel.child(el().h(1.0).w_full().fill(p.line));
+    if let Some(fetch) = s.remotes.fetch.as_ref().filter(|f| f.remote == remote_name) {
+        match &fetch.status {
+            FetchStatus::Running { phase, percent } => {
+                return panel
+                    .child(
+                        text(format!("Récupération · {phase} {percent} %"))
+                            .key("rm-fetch-running")
+                            .font(theme::SMALL)
+                            .color(p.muted),
+                    )
+                    .child(
+                        action(s, "rm-check-cancel", "Annuler la récupération", false)
+                            .on_press(|s: &mut State| s.cancel_remote_check()),
+                    );
+            }
+            FetchStatus::Done(outcome) => {
+                let news = outcome.updates.iter().filter(|u| u.is_new()).count();
+                panel = panel.child(
+                    text(if outcome.updates.is_empty() {
+                        "Récupération terminée : rien de nouveau. Votre travail local n'a pas été touché."
+                            .to_owned()
+                    } else {
+                        format!(
+                            "Récupération terminée : {} référence(s) mise(s) à jour dont {news} nouvelle(s). Votre travail local n'a pas été touché.",
+                            outcome.updates.len()
+                        )
+                    })
+                    .key("rm-fetch-ok")
+                    .font(theme::SMALL)
+                    .color(p.text)
+                    .wrap(),
+                );
+            }
+            FetchStatus::Failed(error) => {
+                panel = panel
+                    .child(
+                        text(format!("Récupération impossible : {error}"))
+                            .key("rm-fetch-error")
+                            .font(theme::SMALL)
+                            .color(p.red)
+                            .wrap(),
+                    )
+                    .child(
+                        text(
+                            "Les références déjà connues sont intactes ; vous pouvez relancer."
+                                .to_owned(),
+                        )
+                        .font(theme::SMALL)
+                        .color(p.muted)
+                        .wrap(),
+                    );
+            }
+        }
+    }
+    panel = panel.child(
+        action(s, "rm-fetch", "Récupérer (fetch)", true).on_press(|s: &mut State| s.remote_fetch()),
+    );
     if running {
         return panel
             .child(
@@ -208,7 +265,7 @@ fn selected_detail(s: &State, mut panel: El) -> El {
         )
         .child(
             text(urls_line("Lecture", &remote.fetch_urls))
-                .key("rm-fetch")
+                .key("rm-urls-read")
                 .font(theme::PATH_SMALL)
                 .color(p.muted)
                 .wrap()

@@ -87,6 +87,11 @@ Git runs as an external program, without a shell, with the repository's filters,
 - Certificate checks are always on: `http.sslVerify=false` (in any configuration) and `GIT_SSL_NO_VERIFY` are overridden. An untrusted certificate is reported as a TLS error; to accept a private authority, point `http.sslCAInfo` at its certificate in your global configuration.
 - Network and name-resolution failures, authentication refusals and missing repositories are reported separately, with any credential embedded in a URL hidden from the message.
 
+## Fetching
+
+- "Récupérer (fetch)" on a remote updates its remote-tracking branches and tags (`git fetch`), with the progress of the transfer, a cancel button and a summary of what changed. It works over SSH and HTTPS as described above, and the remote-tracking branches then show in the history graph.
+- Fetching never touches your working tree, your index or your local branches. An interrupted, cancelled or failed fetch leaves the known references as they were (Git updates them only once the objects have arrived) and can simply be launched again. Submodules are not fetched and Git's automatic maintenance is not started.
+
 ## Committing
 
 - Write a message in the box at the bottom of the file list, then "Créer le commit" or Ctrl+Enter. The commit contains exactly the staged content shown, with the effective identity of the repository's profile (or your Git configuration when it has none). The box also shows who will be the author and whether the profile's signing key is usable.
