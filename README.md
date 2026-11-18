@@ -25,6 +25,12 @@ Git runs as an external program, without a shell, with the repository's filters,
 - Nothing is staged if a file changed after it was displayed, if the index changed, or if the file is in conflict; the state is re-read and a message says why.
 - Git runs as configured for these actions (clean filters, such as Git LFS, apply). An existing `index.lock` is reported, never removed.
 
+## History
+
+- "Historique" button in the top bar: the commits of all branches, tags and remote-tracking branches plus HEAD, in Git's topological order, with a lane graph (branches, merges, octopus merges), references, author and UTC date. Only the first 200 commits are read; scrolling near the end reads the next page, so a very long history is never loaded at once and rendering stays bounded to what is on screen.
+- Click a commit to see its details; selecting never blocks scrolling. `Escape` closes the history. The list reloads when the repository's current commit changes (for example after you commit).
+- A repository without any commit and a Git failure are different states, so a failure never looks like an empty history.
+
 ## Committing
 
 - Write a message in the box at the bottom of the file list, then "Créer le commit" or Ctrl+Enter. The commit contains exactly the staged content shown, with the effective identity of the repository's profile (or your Git configuration when it has none). The box also shows who will be the author and whether the profile's signing key is usable.

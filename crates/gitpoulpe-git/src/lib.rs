@@ -4,6 +4,7 @@ mod commit;
 mod diagnostics;
 mod diff;
 mod diff_parse;
+mod history;
 mod identity;
 mod open;
 mod parse;
@@ -17,6 +18,7 @@ pub use cancel::Cancel;
 pub use diagnostics::filter_diagnostic;
 pub use diff::{DiffDocument, DiffError, DiffReader};
 pub use diff_parse::{DiffParseError, DiffParser, DiffSummary};
+pub use history::{HistoryError, HistoryStream};
 pub use identity::{
     Identity, IdentityError, SigningCheck, check_signing, check_signing_with_env, profile_env,
     signing_config,

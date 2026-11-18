@@ -5,13 +5,14 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 use gitpoulpe_core::{
-    AmendInfo, AmendRequest, ChangeEntry, CommitOutcome, CommitRequest, DiffLine, DiffSide,
+    AmendInfo, AmendRequest, ChangeEntry, Commit, CommitOutcome, CommitRequest, DiffLine, DiffSide,
     DocumentMeta, Generation, OpenError, Profile, RangeError, ReadError, SessionId, SessionInfo,
     StageOutcome, StatusSnapshot, WriteError, WriteJob,
 };
 use gitpoulpe_git::{
-    CacheConfig, Cancel, DiffCache, DiffReader, Git, Identity, IdentityError, MAX_WAIT,
-    QUIET_PERIOD, RepoWatcher, Signal, SigningCheck, check_signing, coalesce,
+    CacheConfig, Cancel, DiffCache, DiffReader, Git, HistoryError, HistoryStream, Identity,
+    IdentityError, MAX_WAIT, QUIET_PERIOD, RepoWatcher, Signal, SigningCheck, check_signing,
+    coalesce,
 };
 use rune::Waker;
 use std::time::Duration;
@@ -53,6 +54,13 @@ pub enum Command {
         request: u64,
         job: Box<CommitRequest>,
     },
+    HistoryOpen {
+        request: u64,
+    },
+    HistoryMore {
+        request: u64,
+    },
+    HistoryClose,
     Amend {
         request: u64,
         job: Box<AmendRequest>,
@@ -99,6 +107,16 @@ pub enum Event {
     AmendInfo {
         request: u64,
         info: Option<AmendInfo>,
+    },
+    HistoryPage {
+        request: u64,
+        commits: Vec<Commit>,
+        done: bool,
+    },
+    HistoryFailed {
+        request: u64,
+        no_commits: bool,
+        message: String,
     },
     Identity {
         request: u64,
@@ -268,6 +286,7 @@ async fn run(
         waker,
     });
     let mut session: Option<Arc<Session>> = None;
+    let mut history: Option<HistoryHandle> = None;
     let mut watcher: Option<RepoWatcher> = None;
     let mut signals: Option<UnboundedReceiver<Signal>> = None;
     let watched = Arc::new(std::sync::Mutex::new(HashSet::new()));
@@ -285,6 +304,7 @@ async fn run(
                 let Some(command) = command else { break };
                 match command {
                     Command::Open { request, path } => {
+                        history = None;
                         watcher = None;
                         signals = None;
                         if let Some(previous) = session.take() {
@@ -316,6 +336,20 @@ async fn run(
                         };
                         tokio::spawn(commit(shared.clone(), current, request, *job));
                     }
+                    Command::HistoryOpen { request } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let handle = HistoryHandle::default();
+                        history = Some(handle.clone());
+                        tokio::spawn(history_open(shared.clone(), current, request, handle));
+                    }
+                    Command::HistoryMore { request } => {
+                        if let Some(handle) = history.clone() {
+                            tokio::spawn(history_page(shared.clone(), request, handle));
+                        }
+                    }
+                    Command::HistoryClose => history = None,
                     Command::Amend { request, job } => {
                         let Some(current) = session.clone() else {
                             continue;
@@ -502,6 +536,51 @@ async fn identity(
         result,
         signing,
     });
+}
+
+type HistoryHandle = Arc<tokio::sync::Mutex<Option<HistoryStream>>>;
+
+const HISTORY_PAGE: usize = 200;
+
+async fn history_open(
+    shared: Arc<Shared>,
+    session: Arc<Session>,
+    request: u64,
+    handle: HistoryHandle,
+) {
+    match shared.git.history(&session.info).await {
+        Ok(stream) => {
+            *handle.lock().await = Some(stream);
+            history_page(shared, request, handle).await;
+        }
+        Err(error) => emit_history_error(&shared, request, error),
+    }
+}
+
+fn emit_history_error(shared: &Shared, request: u64, error: HistoryError) {
+    shared.emit(Event::HistoryFailed {
+        request,
+        no_commits: error == HistoryError::NoCommits,
+        message: error.to_string(),
+    });
+}
+
+async fn history_page(shared: Arc<Shared>, request: u64, handle: HistoryHandle) {
+    let mut guard = handle.lock().await;
+    let Some(stream) = guard.as_mut() else {
+        return;
+    };
+    match stream.next_page(HISTORY_PAGE).await {
+        Ok(commits) => {
+            let done = commits.len() < HISTORY_PAGE || stream.is_exhausted();
+            shared.emit(Event::HistoryPage {
+                request,
+                commits,
+                done,
+            });
+        }
+        Err(error) => emit_history_error(&shared, request, error),
+    }
 }
 
 async fn amend(shared: Arc<Shared>, session: Arc<Session>, request: u64, job: AmendRequest) {

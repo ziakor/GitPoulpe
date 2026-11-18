@@ -1,6 +1,7 @@
 mod commit;
 mod diff;
 mod error;
+mod history;
 mod identity;
 mod profile;
 mod session;
@@ -17,6 +18,7 @@ pub use diff::{
     Hunk, RangeData, RangeError,
 };
 pub use error::{Diagnostic, OpenError, ReadError};
+pub use history::{Commit, GraphLayout, GraphRow, glyphs};
 pub use identity::{Generation, RepoId, RequestId, SessionId};
 pub use profile::{Profile, ProfileBook, ProfileError, SigningPreference};
 pub use session::{RepoKind, SessionInfo, SessionState, StaleSnapshot};

@@ -110,6 +110,42 @@ async fn drain_stderr(mut stream: impl AsyncRead + Unpin) -> Vec<u8> {
 pub(crate) type EnvPairs = [(OsString, OsString)];
 
 impl Git {
+    pub(crate) fn command(
+        &self,
+        dir: &Path,
+        args: &[&OsStr],
+        env: &EnvPairs,
+        piped_stdin: bool,
+    ) -> Command {
+        let mut command = Command::new(&self.program);
+        command
+            .current_dir(dir)
+            .arg("--no-optional-locks")
+            .arg("--no-lazy-fetch")
+            .args(["-c", "core.fsmonitor=false"])
+            .args(["-c", "protocol.allow=never"])
+            .args(args)
+            .env("GIT_OPTIONAL_LOCKS", "0")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("LC_ALL", "C")
+            .stdin(if piped_stdin {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        for name in SCRUBBED_ENV {
+            command.env_remove(name);
+        }
+        command.envs(self.extra_env().iter().map(|(k, v)| (k, v)));
+        command.envs(env.iter().map(|(k, v)| (k, v)));
+        command
+    }
+}
+
+impl Git {
     pub(crate) async fn run<F>(
         &self,
         dir: &Path,
@@ -152,30 +188,7 @@ impl Git {
         if cancel.is_cancelled() {
             return Err(RunError::Cancelled);
         }
-        let mut command = Command::new(&self.program);
-        command
-            .current_dir(dir)
-            .arg("--no-optional-locks")
-            .arg("--no-lazy-fetch")
-            .args(["-c", "core.fsmonitor=false"])
-            .args(["-c", "protocol.allow=never"])
-            .args(args)
-            .env("GIT_OPTIONAL_LOCKS", "0")
-            .env("GIT_TERMINAL_PROMPT", "0")
-            .env("LC_ALL", "C")
-            .stdin(if input.is_some() {
-                Stdio::piped()
-            } else {
-                Stdio::null()
-            })
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-        for name in SCRUBBED_ENV {
-            command.env_remove(name);
-        }
-        command.envs(self.extra_env().iter().map(|(k, v)| (k, v)));
-        command.envs(env.iter().map(|(k, v)| (k, v)));
+        let mut command = self.command(dir, args, env, input.is_some());
         let mut child = spawn_with_retry(&mut command, cancel).await?;
         let writer = input.and_then(|bytes| {
             child.stdin.take().map(|mut stdin| {

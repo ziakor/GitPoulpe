@@ -39,6 +39,8 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
     };
     let body = if s.profiles_open {
         crate::profiles_view::profiles_screen(s)
+    } else if s.history_open {
+        crate::history_view::history_screen(s)
     } else {
         body
     };
@@ -140,8 +142,8 @@ fn top_bar(s: &State) -> El {
     row()
         .w_full()
         .h(60.0)
-        .px(20.0)
-        .gap(20.0)
+        .px(if s.window_width < 900.0 { 12.0 } else { 20.0 })
+        .gap(if s.window_width < 900.0 { 8.0 } else { 20.0 })
         .center_y()
         .fill(p.panel)
         .border(1.0, p.line)
@@ -153,9 +155,36 @@ fn top_bar(s: &State) -> El {
         )
         .child(context)
         .child(open_button(&p, false))
+        .child(history_button(s))
         .child(profile_button(s))
         .child(refresh_button(s))
         .child(theme_toggle)
+}
+
+fn history_button(s: &State) -> El {
+    let p = s.palette;
+    el().key("history")
+        .role("button")
+        .label("Historique")
+        .focusable(true)
+        .focus_ring(2.0, 2.0, p.accent)
+        .h(32.0)
+        .px(10.0)
+        .center()
+        .radius(3.0)
+        .hover(p.hover)
+        .on_press(|s: &mut State| {
+            if s.history_open {
+                s.close_history();
+            } else {
+                s.open_history();
+            }
+        })
+        .child(
+            text("Historique".to_owned())
+                .font(theme::BODY)
+                .color(p.muted),
+        )
 }
 
 fn profile_button(s: &State) -> El {

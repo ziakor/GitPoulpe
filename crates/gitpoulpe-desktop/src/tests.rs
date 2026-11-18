@@ -10,6 +10,7 @@ use tempfile::TempDir;
 mod acceptance;
 mod amending;
 mod committing;
+mod history;
 mod profiles;
 mod staging;
 
@@ -1382,6 +1383,7 @@ fn every_control_stays_inside_the_window_at_the_smallest_supported_size() {
     let (_repo, rt) = sized_runtime(6, 720.0, 480.0);
     for key in [
         "open",
+        "history",
         "profiles",
         "refresh",
         "theme",

@@ -5,6 +5,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::history_state::HistoryState;
 use crate::profiles::{IdentityShown, PROFILES_KEY, ProfileForm, SigningKind};
 use gitpoulpe_core::{
     AmendInfo, AmendRequest, CommitFailureKind, CommitOutcome, CommitRefusal, CommitRequest,
@@ -152,6 +153,9 @@ pub struct State {
     pub marked: HashSet<PathBuf>,
     pub marks_version: u32,
     pub line_pick: Option<LinePick>,
+    pub history_open: bool,
+    pub history: HistoryState,
+    history_request: u64,
     pub book: ProfileBook,
     pub commit_message: TextEdit,
     pub commit_report: Option<String>,
@@ -256,6 +260,9 @@ impl State {
             marked: HashSet::new(),
             marks_version: 0,
             line_pick: None,
+            history_open: false,
+            history: HistoryState::default(),
+            history_request: 0,
             book: prefs.get::<ProfileBook>(PROFILES_KEY).unwrap_or_default(),
             commit_message: TextEdit::new(""),
             commit_report: None,
@@ -509,6 +516,8 @@ impl State {
                 self.docs.clear();
                 self.marked.clear();
                 self.clear_pick();
+                self.history_open = false;
+                self.history = HistoryState::default();
                 self.writing = false;
                 self.positions.clear();
                 self.pending_anchor = None;
@@ -538,6 +547,28 @@ impl State {
                 } else {
                     WatchStatus::Unavailable(reason)
                 };
+                true
+            }
+            Event::HistoryPage {
+                request,
+                commits,
+                done,
+            } => {
+                if request != self.history.request {
+                    return false;
+                }
+                self.history.push_page(commits, done);
+                true
+            }
+            Event::HistoryFailed {
+                request,
+                no_commits,
+                message,
+            } => {
+                if request != self.history.request {
+                    return false;
+                }
+                self.history.fail(no_commits, message);
                 true
             }
             Event::AmendInfo { request, info } => {
@@ -1142,6 +1173,7 @@ impl State {
         }
         let announce = self.notice.is_none();
         self.relocate(anchor, &old_paths, announce);
+        self.reload_history_if_head_moved();
         if self.notice.is_none() && (request != 0 || events_lost) {
             self.notice = Some(if events_lost {
                 "Des événements ont été perdus : le dépôt a été relu en entier.".to_owned()
@@ -1891,6 +1923,71 @@ impl State {
             Err(error) => {
                 self.notice = Some(self.describe_stage(Err(error)));
             }
+        }
+    }
+}
+
+impl State {
+    fn head_oid(&self) -> Option<String> {
+        self.repo
+            .as_ref()
+            .and_then(|r| r.snapshot.branch.oid.clone())
+    }
+
+    pub fn open_history(&mut self) {
+        if self.repo.is_none() {
+            return;
+        }
+        self.history_open = true;
+        self.profiles_open = false;
+        self.start_history();
+    }
+
+    fn start_history(&mut self) {
+        self.history_request += 1;
+        let head = self.head_oid();
+        self.history.restart(self.history_request, head);
+        if let Some(engine) = &self.engine {
+            engine.send(Command::HistoryOpen {
+                request: self.history_request,
+            });
+        }
+    }
+
+    pub fn close_history(&mut self) {
+        if !self.history_open {
+            return;
+        }
+        self.history_open = false;
+        self.history = HistoryState::default();
+        if let Some(engine) = &self.engine {
+            engine.send(Command::HistoryClose);
+        }
+    }
+
+    pub fn history_visible(&mut self, rows: std::ops::Range<usize>) -> bool {
+        if !self.history.needs_more(rows.end) {
+            return false;
+        }
+        self.history.loading = true;
+        if let Some(engine) = &self.engine {
+            engine.send(Command::HistoryMore {
+                request: self.history.request,
+            });
+        }
+        false
+    }
+
+    pub fn select_commit(&mut self, index: usize) {
+        if index < self.history.commits.len() {
+            self.history.selected = Some(index);
+            self.history.version += 1;
+        }
+    }
+
+    pub fn reload_history_if_head_moved(&mut self) {
+        if self.history_open && self.history.head != self.head_oid() {
+            self.start_history();
         }
     }
 }
