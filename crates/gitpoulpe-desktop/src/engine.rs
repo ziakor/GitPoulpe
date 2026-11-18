@@ -794,12 +794,15 @@ async fn tag_op(shared: Arc<Shared>, session: Arc<Session>, request: u64, op: Ta
                 journal: Some(("tag-create".into(), None, Some(tag.object), tag.name)),
             }),
         TagOp::Delete { name, expected } => {
-            git.delete_tag(info, name, expected).await.map(|object| BranchDone {
-                message: format!(
-                    "Tag {name} supprimé (aucune branche touchée). Pour le rétablir : git update-ref refs/tags/{name} {object}"
-                ),
-                journal: Some(("tag-delete".into(), Some(object), None, name.clone())),
-            })
+            git.delete_tag(info, name, expected)
+                .await
+                .map(|object| BranchDone {
+                    message: format!(
+                        "Tag {name} supprimé (aucune branche touchée). Pour le rétablir : {}",
+                        crate::shell::restore_tag(name, &object)
+                    ),
+                    journal: Some(("tag-delete".into(), Some(object), None, name.clone())),
+                })
         }
     };
     shared.emit(Event::TagDone {
@@ -845,8 +848,9 @@ async fn branch_op(shared: Arc<Shared>, session: Arc<Session>, request: u64, op:
         BranchOp::Delete { name, mode } => match git.delete_branch(info, name, mode).await {
             Ok(tip) => Ok(BranchDone {
                 message: format!(
-                    "Branche {name} supprimée (elle pointait sur {}). Pour la rétablir : git branch {name} {tip}",
-                    short(&tip)
+                    "Branche {name} supprimée (elle pointait sur {}). Pour la rétablir : {}",
+                    short(&tip),
+                    crate::shell::restore_branch(name, &tip)
                 ),
                 journal: Some(("branch-delete".into(), Some(tip), None, name.clone())),
             }),

@@ -154,8 +154,8 @@ fn confirmation(s: &State) -> Option<El> {
     panel = panel
         .child(
             text(format!(
-                "Pour revenir en arrière : git branch {} {} (aussi noté dans le journal).",
-                confirm.name, confirm.loss.tip
+                "Pour revenir en arrière : {} (aussi noté dans le journal).",
+                crate::shell::restore_branch(&confirm.name, &confirm.loss.tip)
             ))
             .font(theme::SMALL)
             .color(p.muted)

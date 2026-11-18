@@ -9,6 +9,7 @@ mod keys;
 mod perf;
 mod profiles;
 mod profiles_view;
+mod shell;
 mod state;
 mod tags;
 mod tags_view;

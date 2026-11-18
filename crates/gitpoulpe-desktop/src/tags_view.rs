@@ -182,8 +182,9 @@ fn selected_detail(s: &State, mut panel: El) -> El {
                 .border(1.0, p.red)
                 .child(
                     text(format!(
-                        "Supprimer le tag « {} » ? Aucune branche n'est touchée. Pour le rétablir : git update-ref refs/tags/{} {}",
-                        tag.name, tag.name, tag.object
+                        "Supprimer le tag « {} » ? Aucune branche n'est touchée. Pour le rétablir : {}",
+                        tag.name,
+                        crate::shell::restore_tag(&tag.name, &tag.object)
                     ))
                     .font(theme::SMALL)
                     .color(p.red)

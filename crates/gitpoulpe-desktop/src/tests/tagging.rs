@@ -253,7 +253,10 @@ fn deleting_a_tag_names_it_asks_first_and_leaves_the_branches_alone() {
         step(&mut rt);
     }
     assert!(shows(&rt, "Supprimer le tag « v1 »"));
-    assert!(shows(&rt, &format!("git update-ref refs/tags/v1 {object}")));
+    assert!(shows(
+        &rt,
+        &format!("git update-ref 'refs/tags/v1' {object}")
+    ));
     assert!(
         tags(f.dir.path()).contains(&"v1".to_owned()),
         "nothing is deleted before the confirmation"

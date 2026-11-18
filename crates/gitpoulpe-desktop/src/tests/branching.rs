@@ -207,7 +207,7 @@ fn deleting_an_unmerged_branch_asks_first_and_names_the_lost_commits() {
     );
     assert!(shows(&rt, "perdre 1 commit"));
     assert!(shows(&rt, "unmerged work"));
-    assert!(shows(&rt, &format!("git branch wip {tip}")));
+    assert!(shows(&rt, &format!("git branch -- 'wip' {tip}")));
 
     click(&mut rt, "branch-delete-cancel");
     settle(&mut rt, |s| s.branches.confirm.is_none());
@@ -224,7 +224,7 @@ fn deleting_an_unmerged_branch_asks_first_and_names_the_lost_commits() {
         rt.state
             .notice
             .as_deref()
-            .is_some_and(|n| n.contains(&format!("git branch wip {tip}")))
+            .is_some_and(|n| n.contains(&format!("git branch -- 'wip' {tip}")))
     );
     let entry = rt
         .state
