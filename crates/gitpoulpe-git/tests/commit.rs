@@ -769,6 +769,8 @@ impl Drop for Agent {
     }
 }
 
+static VERIFY_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 fn new_ssh_key(dir: &Path, name: &str) -> (PathBuf, PathBuf) {
     let private = dir.join(name);
     let status = std::process::Command::new("ssh-keygen")
@@ -812,6 +814,7 @@ fn verify_with(
 
 #[tokio::test]
 async fn a_commit_signed_with_an_ssh_key_from_the_agent_is_verifiable_by_git() {
+    let _serial = VERIFY_LOCK.lock().await;
     let tools = tempfile::tempdir().unwrap();
     let (private, public) = new_ssh_key(tools.path(), "id_test");
     let (_, other_public) = new_ssh_key(tools.path(), "id_other");
@@ -929,6 +932,7 @@ async fn without_a_usable_agent_the_signature_fails_cleanly_and_nothing_is_commi
 
 #[tokio::test]
 async fn an_amended_commit_is_signed_again() {
+    let _serial = VERIFY_LOCK.lock().await;
     let tools = tempfile::tempdir().unwrap();
     let (private, public) = new_ssh_key(tools.path(), "id_test");
     let agent = Agent::start(tools.path());
@@ -961,6 +965,7 @@ async fn an_amended_commit_is_signed_again() {
 
 #[tokio::test]
 async fn the_signature_check_accepts_only_the_key_that_signed() {
+    let _serial = VERIFY_LOCK.lock().await;
     let tools = tempfile::tempdir().unwrap();
     let (private, public) = new_ssh_key(tools.path(), "id_signer");
     let (_, other_public) = new_ssh_key(tools.path(), "id_other");

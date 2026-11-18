@@ -45,6 +45,8 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
         crate::ignored_view::ignored_screen(s)
     } else if s.branches.open {
         crate::branches_view::branches_screen(s)
+    } else if s.tags.open {
+        crate::tags_view::tags_screen(s)
     } else {
         body
     };

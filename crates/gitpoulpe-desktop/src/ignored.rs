@@ -69,6 +69,7 @@ impl State {
         }
         self.close_history();
         self.close_branches();
+        self.close_tags();
         self.profiles_open = false;
         self.ignored.open = true;
         self.ignored.target = None;

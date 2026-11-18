@@ -8,7 +8,7 @@ use gitpoulpe_core::{
     AmendInfo, AmendRequest, Branch, BranchLoss, ChangeEntry, Commit, CommitDetail, CommitOutcome,
     CommitRange, CommitRequest, DiffLine, DiffSide, DocumentMeta, Generation, IgnoreReason,
     IgnoreScope, OpenError, Profile, RangeError, ReadError, SessionId, SessionInfo, StageOutcome,
-    StatusSnapshot, WriteError, WriteJob,
+    StatusSnapshot, Tag, WriteError, WriteJob,
 };
 use gitpoulpe_git::{
     BranchError, CacheConfig, Cancel, DeleteMode, DiffCache, DiffError, DiffReader, Git,
@@ -36,6 +36,20 @@ pub enum BranchOp {
     Switch { name: String },
     Rename { old: String, new: String },
     Delete { name: String, mode: DeleteMode },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TagOp {
+    Create {
+        name: String,
+        target: Option<String>,
+        message: Option<String>,
+        profile: Option<Box<Profile>>,
+    },
+    Delete {
+        name: String,
+        expected: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -122,6 +136,13 @@ pub enum Command {
         request: u64,
         edit: IgnoreEdit,
     },
+    TagList {
+        request: u64,
+    },
+    TagOp {
+        request: u64,
+        op: TagOp,
+    },
     BranchList {
         request: u64,
     },
@@ -203,6 +224,14 @@ pub enum Event {
     WatchState {
         available: bool,
         reason: String,
+    },
+    TagsListed {
+        request: u64,
+        result: Result<Vec<Tag>, String>,
+    },
+    TagDone {
+        request: u64,
+        result: Result<BranchDone, String>,
     },
     BranchesListed {
         request: u64,
@@ -507,6 +536,26 @@ async fn run(
                             shared.emit(Event::AmendInfo { request, info });
                         });
                     }
+                    Command::TagList { request } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .list_tags(&current.info)
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::TagsListed { request, result });
+                        });
+                    }
+                    Command::TagOp { request, op } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        tokio::spawn(tag_op(shared.clone(), current, request, op));
+                    }
                     Command::BranchList { request } => {
                         let Some(current) = session.clone() else {
                             continue;
@@ -714,6 +763,49 @@ async fn open(
 
 fn short(oid: &str) -> String {
     oid.chars().take(8).collect()
+}
+
+async fn tag_op(shared: Arc<Shared>, session: Arc<Session>, request: u64, op: TagOp) {
+    let _guard = session.writer.lock().await;
+    let git = &shared.git;
+    let info = &session.info;
+    let result = match &op {
+        TagOp::Create {
+            name,
+            target,
+            message,
+            profile,
+        } => git
+            .create_tag(
+                info,
+                name,
+                target.as_deref(),
+                message.as_deref(),
+                profile.as_deref(),
+            )
+            .await
+            .map(|tag| BranchDone {
+                message: format!(
+                    "Tag {} {} créé sur {}.",
+                    tag.name,
+                    if tag.annotated { "annoté" } else { "léger" },
+                    tag.target.as_deref().map(short).unwrap_or_default()
+                ),
+                journal: Some(("tag-create".into(), None, Some(tag.object), tag.name)),
+            }),
+        TagOp::Delete { name, expected } => {
+            git.delete_tag(info, name, expected).await.map(|object| BranchDone {
+                message: format!(
+                    "Tag {name} supprimé (aucune branche touchée). Pour le rétablir : git update-ref refs/tags/{name} {object}"
+                ),
+                journal: Some(("tag-delete".into(), Some(object), None, name.clone())),
+            })
+        }
+    };
+    shared.emit(Event::TagDone {
+        request,
+        result: result.map_err(|e| e.to_string()),
+    });
 }
 
 async fn branch_op(shared: Arc<Shared>, session: Arc<Session>, request: u64, op: BranchOp) {

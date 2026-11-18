@@ -10,6 +10,8 @@ mod perf;
 mod profiles;
 mod profiles_view;
 mod state;
+mod tags;
+mod tags_view;
 mod theme;
 mod view;
 

@@ -184,6 +184,7 @@ pub struct State {
     pub profiles_open: bool,
     pub ignored: crate::ignored::IgnoredState,
     pub branches: crate::branches::BranchesState,
+    pub tags: crate::tags::TagsState,
     pub form: ProfileForm,
     identity_request: u64,
     signing_request: u64,
@@ -299,6 +300,7 @@ impl State {
             profiles_open: false,
             ignored: crate::ignored::IgnoredState::default(),
             branches: crate::branches::BranchesState::default(),
+            tags: crate::tags::TagsState::default(),
             form: ProfileForm::default(),
             identity_request: 0,
             signing_request: 0,
@@ -563,6 +565,7 @@ impl State {
                 self.history = HistoryState::default();
                 self.ignored = crate::ignored::IgnoredState::default();
                 self.branches = crate::branches::BranchesState::default();
+                self.tags = crate::tags::TagsState::default();
                 self.writing = false;
                 self.positions.clear();
                 self.pending_anchor = None;
@@ -698,6 +701,8 @@ impl State {
                 self.finish_commit(result);
                 true
             }
+            Event::TagsListed { request, result } => self.apply_tags_listed(request, result),
+            Event::TagDone { request, result } => self.apply_tag_done(request, result),
             Event::BranchesListed { request, result } => {
                 self.apply_branches_listed(request, result)
             }
@@ -1720,6 +1725,7 @@ impl State {
         self.profiles_open = true;
         self.close_ignored();
         self.close_branches();
+        self.close_tags();
         let selected = self
             .active_profile()
             .or_else(|| self.book.profiles.first())
@@ -2069,6 +2075,7 @@ impl State {
         self.profiles_open = false;
         self.close_ignored();
         self.close_branches();
+        self.close_tags();
         self.start_history();
     }
 
@@ -2196,6 +2203,7 @@ impl State {
         if self.repo.is_none() {
             return;
         }
+        self.close_tags();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::CommitInspect {

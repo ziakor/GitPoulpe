@@ -296,6 +296,9 @@ pub fn branches_screen(s: &State) -> El {
                 .truncate(),
         )
         .child(
+            action(s, "branches-tags", "Tags", false).on_press(|s: &mut State| s.open_tags(None)),
+        )
+        .child(
             action(s, "branches-close", "Fermer", false)
                 .on_press(|s: &mut State| s.close_branches()),
         );

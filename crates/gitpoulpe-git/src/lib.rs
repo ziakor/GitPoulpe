@@ -14,6 +14,7 @@ mod parse;
 mod process;
 mod stage;
 mod status;
+mod tag;
 mod watch;
 
 pub use branch::{BranchError, DeleteMode};
@@ -31,6 +32,7 @@ pub use ignore::{IgnoreError, IgnoredList, MAX_IGNORED_ENTRIES};
 pub use inspect::InspectError;
 pub use parse::{ParseError, StatusParser};
 pub use stage::stamp_of;
+pub use tag::TagError;
 pub use watch::{MAX_WAIT, QUIET_PERIOD, RepoWatcher, Signal, WatchError, coalesce, is_relevant};
 
 use std::ffi::OsString;

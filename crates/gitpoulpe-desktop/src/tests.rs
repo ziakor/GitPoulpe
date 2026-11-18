@@ -16,6 +16,7 @@ mod ignoring;
 mod inspecting;
 mod profiles;
 mod staging;
+mod tagging;
 
 use crate::state::{Screen, State, ViewKind, path_from_args};
 use crate::view::view;

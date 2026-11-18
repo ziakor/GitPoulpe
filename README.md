@@ -49,6 +49,13 @@ Git runs as an external program, without a shell, with the repository's filters,
 - Deleting a branch that is fully merged is immediate. Deleting one that is not merged first lists the commits no other branch reaches (up to 100) and the command to bring the branch back; only then can it be forced, and only if the branch still points at the commit that was listed. The tip of every deleted branch is also written to the per-repository journal.
 - Remote-tracking branches and tags are not touched by this screen.
 
+## Tags
+
+- The "Tags" button of the branch screen (or "Créer un tag ici" on a commit in the history) opens the tag screen. It lists local tags, light or annotated, with their commit; an annotated tag also shows its tagger, date and full message, and "Inspecter le commit" opens the tagged commit.
+- A light tag or an annotated tag (message required) is created on `HEAD` or on the commit chosen in the history. The name is validated with `git check-ref-format` first; an existing name is refused and a tag is never replaced or moved. An annotated tag is signed with the active profile's identity, or the configured one, and creation stops when no identity is known.
+- Deleting a tag is explicit and asks first. It names the tag, states that no branch is touched, and gives the `git update-ref` command that restores it, annotation included. It only goes through if the tag still points at the object that was displayed. Deletions and creations are written to the per-repository journal.
+- Remote tags are not read or pushed.
+
 ## Committing
 
 - Write a message in the box at the bottom of the file list, then "Créer le commit" or Ctrl+Enter. The commit contains exactly the staged content shown, with the effective identity of the repository's profile (or your Git configuration when it has none). The box also shows who will be the author and whether the profile's signing key is usable.

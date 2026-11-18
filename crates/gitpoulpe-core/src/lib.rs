@@ -9,6 +9,7 @@ mod profile;
 mod session;
 mod split;
 mod status;
+mod tag;
 mod write;
 
 pub use branch::{Branch, BranchLoss, LOSS_LIST_LIMIT, LostCommit};
@@ -30,6 +31,7 @@ pub use profile::{Profile, ProfileBook, ProfileError, SigningPreference};
 pub use session::{RepoKind, SessionInfo, SessionState, StaleSnapshot};
 pub use split::{SplitCells, SplitIndex, SplitIndexBuilder, SplitRow, SplitUnit, split_rows};
 pub use status::{BranchInfo, ChangeEntry, EntryKind, StatusCode, StatusSnapshot, display_label};
+pub use tag::Tag;
 pub use write::{
     FileStamp, HunkLines, HunkSpec, LineSelection, Refusal, StageOutcome, StageTarget, StampKind,
     WriteError, WriteJob,
