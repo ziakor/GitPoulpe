@@ -33,6 +33,14 @@ Git runs as an external program, without a shell, with the repository's filters,
 - Inspect a commit: select it and use "Inspecter ce commit". The commit view shows the message, author and date, the files the commit changed (renames detected) and their diffs in the same continuous reader as the working changes, with binary files and unusual paths handled as everywhere else. For a merge, choose which parent to compare against; the first commit is compared with an empty tree. No staging, unstaging or commit control is offered there, and `Escape` or "Quitter l'inspection" returns to the history. Commit ids passed to Git are validated as hexadecimal and the comparison is read-only.
 - A repository without any commit and a Git failure are different states, so a failure never looks like an empty history.
 
+## Ignored files
+
+- The "Ignorés" screen lists the paths Git ignores (a fully ignored directory is listed once, the list is capped at 5000 entries). Selecting one shows the rule that applies, its line and its scope: a `.gitignore` (root or nested), `.git/info/exclude` or the user's global exclude file. An exception (`!pattern`) is reported as a re-inclusion, not as an exclusion.
+- A file already tracked by Git is reported as tracked: an ignore rule never removes it from the index, and GitPoulpe never runs `git rm --cached` for you.
+- Rules are added or removed in one file that you choose (the root `.gitignore`, the one of the file's directory, `.git/info/exclude` or the global file). Only that file is rewritten, atomically (temporary file then rename); the rewrite is abandoned if the file changed in between, and a symlinked `.gitignore` that leaves the repository is refused. Rules built from a path are anchored and escaped, so they match that path only.
+- Untracked files have an "Ignorer…" button on their header that opens the same screen on that file.
+- Paths that are not valid UTF-8 cannot be turned into a rule automatically.
+
 ## Committing
 
 - Write a message in the box at the bottom of the file list, then "Créer le commit" or Ctrl+Enter. The commit contains exactly the staged content shown, with the effective identity of the repository's profile (or your Git configuration when it has none). The box also shows who will be the author and whether the profile's signing key is usable.

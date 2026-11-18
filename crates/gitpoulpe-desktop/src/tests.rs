@@ -11,6 +11,7 @@ mod acceptance;
 mod amending;
 mod committing;
 mod history;
+mod ignoring;
 mod inspecting;
 mod profiles;
 mod staging;
@@ -1386,6 +1387,7 @@ fn every_control_stays_inside_the_window_at_the_smallest_supported_size() {
     for key in [
         "open",
         "history",
+        "ignored",
         "profiles",
         "refresh",
         "theme",
@@ -1553,4 +1555,22 @@ fn returning_to_the_window_refreshes_once_and_not_in_a_burst() {
     state.refresh_on_focus();
     state.refresh_on_focus();
     assert_eq!(state.refresh_request, before + 1);
+}
+
+#[test]
+fn the_wordmark_fits_its_column_at_the_smallest_supported_size() {
+    let (_repo, rt) = sized_runtime(6, 720.0, 480.0);
+    let right = |needle: &str| {
+        rt.elements()
+            .into_iter()
+            .find(|e| e.text.as_deref() == Some(needle))
+            .map(|e| e.rect[0] + e.rect[2])
+            .unwrap()
+    };
+    let context_left = rect_of(&rt, "open").unwrap()[0];
+    assert!(
+        right("poulpe") <= context_left,
+        "{} > {context_left}",
+        right("poulpe")
+    );
 }

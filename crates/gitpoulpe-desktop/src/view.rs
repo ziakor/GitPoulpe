@@ -41,6 +41,8 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
         crate::profiles_view::profiles_screen(s)
     } else if s.history_open {
         crate::history_view::history_screen(s)
+    } else if s.ignored.open {
+        crate::ignored_view::ignored_screen(s)
     } else {
         body
     };
@@ -149,16 +151,39 @@ fn top_bar(s: &State) -> El {
         .border(1.0, p.line)
         .child(
             row()
-                .w(172.0)
+                .w(if s.window_width < 900.0 { 124.0 } else { 172.0 })
                 .child(text("git").font(theme::WORDMARK).color(p.text))
                 .child(text("poulpe").font(theme::WORDMARK_BOLD).color(p.text)),
         )
         .child(context)
         .child(open_button(&p, false))
         .child(history_button(s))
+        .child(ignored_button(s))
         .child(profile_button(s))
         .child(refresh_button(s))
         .child(theme_toggle)
+}
+
+fn ignored_button(s: &State) -> El {
+    let p = s.palette;
+    el().key("ignored")
+        .role("button")
+        .label("Fichiers ignorés")
+        .focusable(true)
+        .focus_ring(2.0, 2.0, p.accent)
+        .h(32.0)
+        .px(10.0)
+        .center()
+        .radius(3.0)
+        .hover(p.hover)
+        .on_press(|s: &mut State| {
+            if s.ignored.open {
+                s.close_ignored();
+            } else {
+                s.open_ignored(None);
+            }
+        })
+        .child(text("Ignorés".to_owned()).font(theme::BODY).color(p.muted))
 }
 
 fn history_button(s: &State) -> El {
@@ -1170,6 +1195,18 @@ fn header_action(s: &State, index: usize, entry: &ChangeEntry, label: &str) -> E
             )
             .on_press(|s: &mut State| s.write_picked_lines())
         });
+    let ignore_button =
+        (staging && entry.kind == gitpoulpe_core::EntryKind::Untracked).then(|| {
+            let target = entry.path.clone();
+            stage_button(
+                s,
+                format!("ig{index}"),
+                format!("Ignorer {label}"),
+                "Ignorer…".to_owned(),
+                false,
+            )
+            .on_press(move |s: &mut State| s.open_ignored(Some(target.clone())))
+        });
     let (key, verb) = if staging {
         (format!("st{index}"), "Indexer")
     } else {
@@ -1187,6 +1224,7 @@ fn header_action(s: &State, index: usize, entry: &ChangeEntry, label: &str) -> E
         .gap(6.0)
         .center_y()
         .child(lines_button.unwrap_or_else(|| el().w(0.0)))
+        .child(ignore_button.unwrap_or_else(|| el().w(0.0)))
         .child(file_button)
 }
 

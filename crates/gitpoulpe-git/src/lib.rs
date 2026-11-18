@@ -6,6 +6,7 @@ mod diff;
 mod diff_parse;
 mod history;
 mod identity;
+mod ignore;
 mod inspect;
 mod open;
 mod parse;
@@ -24,6 +25,7 @@ pub use identity::{
     Identity, IdentityError, SigningCheck, check_signing, check_signing_with_env, profile_env,
     signing_config,
 };
+pub use ignore::{IgnoreError, IgnoredList, MAX_IGNORED_ENTRIES};
 pub use inspect::InspectError;
 pub use parse::{ParseError, StatusParser};
 pub use stage::stamp_of;

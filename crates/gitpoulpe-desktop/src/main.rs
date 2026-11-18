@@ -1,6 +1,8 @@
 mod engine;
 mod history_state;
 mod history_view;
+mod ignored;
+mod ignored_view;
 mod keys;
 mod perf;
 mod profiles;

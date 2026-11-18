@@ -95,6 +95,10 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         s.close_profiles();
         return true;
     }
+    if s.ignored.open && event.key == Key::Escape {
+        s.close_ignored();
+        return true;
+    }
     if s.history_open && event.key == Key::Escape {
         s.close_history();
         return true;
@@ -119,7 +123,9 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
     }
     let reading = matches!(s.screen, crate::state::Screen::Ready);
     let free = tx.focused().is_none() || tx.focused() == Some("viewport");
-    let typing = tx.focused().is_some_and(|key| TEXT_INPUTS.contains(&key)) || s.profiles_open;
+    let typing = tx.focused().is_some_and(|key| TEXT_INPUTS.contains(&key))
+        || s.profiles_open
+        || s.ignored.open;
     match &event.key {
         Key::Text(text) if reading && !typing => match text.as_str() {
             "/" => tx.focus("filter", true),

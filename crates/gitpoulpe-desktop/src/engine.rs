@@ -6,13 +6,14 @@ use std::sync::{Arc, Mutex};
 
 use gitpoulpe_core::{
     AmendInfo, AmendRequest, ChangeEntry, Commit, CommitDetail, CommitOutcome, CommitRange,
-    CommitRequest, DiffLine, DiffSide, DocumentMeta, Generation, OpenError, Profile, RangeError,
-    ReadError, SessionId, SessionInfo, StageOutcome, StatusSnapshot, WriteError, WriteJob,
+    CommitRequest, DiffLine, DiffSide, DocumentMeta, Generation, IgnoreReason, IgnoreScope,
+    OpenError, Profile, RangeError, ReadError, SessionId, SessionInfo, StageOutcome,
+    StatusSnapshot, WriteError, WriteJob,
 };
 use gitpoulpe_git::{
     CacheConfig, Cancel, DiffCache, DiffError, DiffReader, Git, HistoryError, HistoryStream,
-    Identity, IdentityError, InspectError, MAX_WAIT, QUIET_PERIOD, RepoWatcher, Signal,
-    SigningCheck, check_signing, coalesce,
+    Identity, IdentityError, IgnoreError, IgnoredList, InspectError, MAX_WAIT, QUIET_PERIOD,
+    RepoWatcher, Signal, SigningCheck, check_signing, coalesce,
 };
 use rune::Waker;
 use std::time::Duration;
@@ -22,6 +23,12 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 pub const MAX_COPY_BYTES: usize = 32 * 1024 * 1024;
 const COPY_SPAN_LINES: u64 = 4096;
 const SHUTDOWN_WAIT: Duration = Duration::from_secs(3);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum IgnoreEdit {
+    Add { scope: IgnoreScope, rule: String },
+    Remove { scope: IgnoreScope, rule: String },
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CopyRequest {
@@ -89,6 +96,17 @@ pub enum Command {
     CheckSigning {
         request: u64,
         profile: Box<Profile>,
+    },
+    IgnoreList {
+        request: u64,
+    },
+    IgnoreReason {
+        request: u64,
+        path: PathBuf,
+    },
+    IgnoreEdit {
+        request: u64,
+        edit: IgnoreEdit,
     },
     Shutdown(std::sync::mpsc::Sender<()>),
     Read {
@@ -164,6 +182,19 @@ pub enum Event {
     WatchState {
         available: bool,
         reason: String,
+    },
+    IgnoreListed {
+        request: u64,
+        result: Result<IgnoredList, String>,
+    },
+    IgnoreReasoned {
+        request: u64,
+        path: PathBuf,
+        result: Result<Option<IgnoreReason>, String>,
+    },
+    IgnoreEdited {
+        request: u64,
+        result: Result<String, String>,
     },
     Copied {
         request: u64,
@@ -442,6 +473,44 @@ async fn run(
                             shared.emit(Event::AmendInfo { request, info });
                         });
                     }
+                    Command::IgnoreList { request } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .list_ignored(&current.info)
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::IgnoreListed { request, result });
+                        });
+                    }
+                    Command::IgnoreReason { request, path } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .ignore_reason(&current.info, &path)
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::IgnoreReasoned {
+                                request,
+                                path,
+                                result,
+                            });
+                        });
+                    }
+                    Command::IgnoreEdit { request, edit } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        tokio::spawn(ignore_edit(shared.clone(), current, request, edit));
+                    }
                     Command::Identity { request, profile } => {
                         let Some(current) = session.clone() else {
                             continue;
@@ -587,6 +656,24 @@ async fn open(
         .await
         .map_err(describe_read_error)?;
     Ok((info, snapshot))
+}
+
+async fn ignore_edit(shared: Arc<Shared>, session: Arc<Session>, request: u64, edit: IgnoreEdit) {
+    let _guard = session.writer.lock().await;
+    let result = match &edit {
+        IgnoreEdit::Add { scope, rule } => shared
+            .git
+            .add_ignore_rule(&session.info, scope, rule)
+            .await
+            .map(|file| format!("Règle {rule} ajoutée à {}.", file.display())),
+        IgnoreEdit::Remove { scope, rule } => shared
+            .git
+            .remove_ignore_rule(&session.info, scope, rule)
+            .await
+            .map(|file| format!("Règle {rule} retirée de {}.", file.display())),
+    }
+    .map_err(|e: IgnoreError| e.to_string());
+    shared.emit(Event::IgnoreEdited { request, result });
 }
 
 async fn identity(

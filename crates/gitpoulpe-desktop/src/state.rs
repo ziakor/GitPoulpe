@@ -182,6 +182,7 @@ pub struct State {
     submitted_amend: bool,
     pub identity_shown: Option<IdentityShown>,
     pub profiles_open: bool,
+    pub ignored: crate::ignored::IgnoredState,
     pub form: ProfileForm,
     identity_request: u64,
     signing_request: u64,
@@ -208,7 +209,7 @@ pub struct State {
     follow: Option<usize>,
     pub list_width: f32,
     prefs: Prefs,
-    engine: Option<Engine>,
+    pub(crate) engine: Option<Engine>,
     events: Receiver<Event>,
     waker: WakerSlot,
     request: u64,
@@ -295,6 +296,7 @@ impl State {
             submitted_amend: false,
             identity_shown: None,
             profiles_open: false,
+            ignored: crate::ignored::IgnoredState::default(),
             form: ProfileForm::default(),
             identity_request: 0,
             signing_request: 0,
@@ -557,6 +559,7 @@ impl State {
                 self.clear_pick();
                 self.history_open = false;
                 self.history = HistoryState::default();
+                self.ignored = crate::ignored::IgnoredState::default();
                 self.writing = false;
                 self.positions.clear();
                 self.pending_anchor = None;
@@ -692,6 +695,13 @@ impl State {
                 self.finish_commit(result);
                 true
             }
+            Event::IgnoreListed { request, result } => self.apply_ignore_listed(request, result),
+            Event::IgnoreReasoned {
+                request,
+                path,
+                result,
+            } => self.apply_ignore_reasoned(request, &path, result),
+            Event::IgnoreEdited { request, result } => self.apply_ignore_edited(request, result),
             Event::Identity {
                 request,
                 result,
@@ -1212,7 +1222,7 @@ impl State {
         self.relocate(anchor, &old_paths, false);
     }
 
-    fn request_refresh(&mut self, announce: bool) {
+    pub(crate) fn request_refresh(&mut self, announce: bool) {
         if self.repo.is_none() {
             return;
         }
@@ -1696,6 +1706,7 @@ impl State {
 
     pub fn open_profiles(&mut self) {
         self.profiles_open = true;
+        self.close_ignored();
         let selected = self
             .active_profile()
             .or_else(|| self.book.profiles.first())
@@ -2043,6 +2054,7 @@ impl State {
         }
         self.history_open = true;
         self.profiles_open = false;
+        self.close_ignored();
         self.start_history();
     }
 
