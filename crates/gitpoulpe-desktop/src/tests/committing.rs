@@ -274,3 +274,72 @@ fn shortcuts_do_nothing_behind_the_profile_screen() {
     );
     drop(repo);
 }
+
+fn shows_text(rt: &Runtime<State>, needle: &str) -> bool {
+    rt.elements()
+        .into_iter()
+        .any(|e| e.text.as_deref().is_some_and(|t| t.contains(needle)))
+}
+
+fn profile_with_key(rt: &mut Runtime<State>, label: &str, key: &Path) {
+    let state = &mut rt.state;
+    state.new_profile();
+    state.form.label.text = label.to_owned();
+    state.form.name.text = "Ada Lovelace".to_owned();
+    state.form.email.text = "ada@example.org".to_owned();
+    state.set_form_signing(crate::profiles::SigningKind::Ssh);
+    state.form.key.text = key.to_string_lossy().into_owned();
+    state.save_profile();
+    let id = state.form.editing.clone().unwrap();
+    state.use_profile_here(Some(id));
+    for _ in 0..40 {
+        step(rt);
+        if rt
+            .state
+            .identity_shown
+            .as_ref()
+            .is_some_and(|shown| shown.profile.as_deref() == Some(label))
+        {
+            break;
+        }
+    }
+    for _ in 0..4 {
+        step(rt);
+    }
+}
+
+#[test]
+fn the_summary_names_the_effective_identity_and_the_signature_mode_before_the_commit() {
+    let keys = tempfile::tempdir().unwrap();
+    let private = keys.path().join("id_test");
+    let status = Command::new("ssh-keygen")
+        .args(["-q", "-t", "ed25519", "-N", "", "-f"])
+        .arg(&private)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let (_repo, mut rt) = staged_runtime(3);
+    assert!(
+        shows_text(&rt, "Signature : selon la configuration Git"),
+        "no signing preference is stated as such"
+    );
+    assert!(shows_text(
+        &rt,
+        "Auteur : Ada Lovelace <ada@example.org> (profil Test)"
+    ));
+
+    profile_with_key(&mut rt, "Signé", &keys.path().join("id_test.pub"));
+    assert!(
+        shows_text(&rt, "Signature : SSH, clé id_test.pub — utilisable"),
+        "the mode and the key are named"
+    );
+
+    profile_with_key(&mut rt, "Cassé", &keys.path().join("absent.pub"));
+    assert!(
+        shows_text(
+            &rt,
+            "Signature : SSH, clé absent.pub — impossible, voir Profil"
+        ),
+        "an unusable key is flagged before anything is committed"
+    );
+}

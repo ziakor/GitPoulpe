@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use gitpoulpe_core::{
     AmendInfo, AmendRequest, CommitFailureKind, CommitOutcome, CommitRefusal, CommitRequest,
-    SessionInfo, SigningPreference, WriteError,
+    SessionInfo, Signature, SignatureKind, SigningPreference, WriteError,
 };
 
 use crate::diagnostics::filter_diagnostic;
@@ -26,6 +26,8 @@ fn signing_failure(output: &str) -> bool {
         "ssh-keygen",
         "couldn't load public key",
         "no secret key",
+        "no private key found",
+        "agent refused",
     ]
     .iter()
     .any(|marker| lower.contains(marker))
@@ -39,6 +41,78 @@ impl Git {
         let (run, out) = self.run_collect(dir, &refs, &Cancel::new()).await.ok()?;
         run.succeeded()
             .then(|| String::from_utf8_lossy(&out).trim().to_owned())
+    }
+
+    async fn read_signature(
+        &self,
+        info: &SessionInfo,
+        profile: Option<&gitpoulpe_core::Profile>,
+    ) -> Option<Signature> {
+        let raw = self.collect(info, &["cat-file", "commit", "HEAD"]).await?;
+        let header: Vec<&str> = raw
+            .lines()
+            .skip_while(|line| !line.starts_with("gpgsig"))
+            .take(2)
+            .collect();
+        let first = header.first()?;
+        let kind = if first.contains("BEGIN SSH SIGNATURE")
+            || header
+                .get(1)
+                .is_some_and(|l| l.contains("BEGIN SSH SIGNATURE"))
+        {
+            SignatureKind::Ssh
+        } else {
+            SignatureKind::Gpg
+        };
+        let verified = match (kind, profile.map(|p| &p.signing)) {
+            (SignatureKind::Ssh, Some(SigningPreference::Ssh { public_key })) => {
+                let email = profile.map(|p| p.user_email.as_str()).unwrap_or_default();
+                self.verify_ssh_signature(info, public_key, email).await
+            }
+            _ => false,
+        };
+        Some(Signature { kind, verified })
+    }
+
+    pub async fn verify_ssh_signature(
+        &self,
+        info: &SessionInfo,
+        public_key: &std::path::Path,
+        email: &str,
+    ) -> bool {
+        let Ok(text) = std::fs::read_to_string(public_key) else {
+            return false;
+        };
+        let mut fields = text.split_whitespace();
+        let (Some(kind), Some(key)) = (fields.next(), fields.next()) else {
+            return false;
+        };
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let dir =
+            std::env::temp_dir().join(format!("gitpoulpe-verify-{}-{nanos}", std::process::id()));
+        if std::fs::create_dir(&dir).is_err() {
+            return false;
+        }
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+        let allowed = dir.join("allowed_signers");
+        let written = std::fs::write(&allowed, format!("{email} {kind} {key}\n")).is_ok();
+        let verified = written
+            && self
+                .collect(
+                    info,
+                    &[
+                        "-c",
+                        &format!("gpg.ssh.allowedSignersFile={}", allowed.display()),
+                        "verify-commit",
+                        "HEAD",
+                    ],
+                )
+                .await
+                .is_some();
+        let _ = std::fs::remove_dir_all(&dir);
+        verified
     }
 
     async fn head(&self, info: &SessionInfo) -> Option<String> {
@@ -252,15 +326,12 @@ impl Git {
             return Ok(CommitOutcome::Failed { kind, output });
         }
         let oid = self.head(info).await.unwrap_or_default();
-        let signed = self
-            .collect(info, &["cat-file", "commit", "HEAD"])
-            .await
-            .is_some_and(|text| text.lines().any(|l| l.starts_with("gpgsig")));
+        let signature = self.read_signature(info, profile).await;
         Ok(CommitOutcome::Created {
             subject: message.lines().next().unwrap_or_default().to_owned(),
             oid,
             before,
-            signed,
+            signature,
         })
     }
 }

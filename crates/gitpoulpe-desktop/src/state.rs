@@ -1799,12 +1799,26 @@ impl State {
                 oid,
                 subject,
                 before,
-                signed,
+                signature,
             }) => {
                 self.commit_message = TextEdit::new("");
                 self.commit_report = None;
                 let short: String = oid.chars().take(8).collect();
-                let signed_note = if signed { " et signé" } else { "" };
+                let signed_note = match signature {
+                    Some(gitpoulpe_core::Signature {
+                        kind: gitpoulpe_core::SignatureKind::Ssh,
+                        verified: true,
+                    }) => " et signé en SSH (signature vérifiée)",
+                    Some(gitpoulpe_core::Signature {
+                        kind: gitpoulpe_core::SignatureKind::Ssh,
+                        ..
+                    }) => " et signé en SSH",
+                    Some(gitpoulpe_core::Signature {
+                        kind: gitpoulpe_core::SignatureKind::Gpg,
+                        ..
+                    }) => " et signé en GPG",
+                    None => "",
+                };
                 if self.submitted_amend {
                     let previous: String = before
                         .as_deref()

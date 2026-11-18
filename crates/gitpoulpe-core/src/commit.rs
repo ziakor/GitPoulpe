@@ -44,13 +44,25 @@ pub enum CommitFailureKind {
     Other,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SignatureKind {
+    Ssh,
+    Gpg,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Signature {
+    pub kind: SignatureKind,
+    pub verified: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CommitOutcome {
     Created {
         oid: String,
         subject: String,
         before: Option<String>,
-        signed: bool,
+        signature: Option<Signature>,
     },
     Refused(CommitRefusal),
     Failed {

@@ -11,10 +11,20 @@ use gitpoulpe_core::{
 use gitpoulpe_git::{Cancel, Git};
 
 fn isolated_git(dir: &Path) -> Git {
+    isolated_git_with_agent(dir, None)
+}
+
+fn isolated_git_with_agent(dir: &Path, agent: Option<&Path>) -> Git {
     let script = dir.join("isolated-git.sh");
+    let agent = agent.map_or_else(
+        || "unset SSH_AUTH_SOCK".to_owned(),
+        |socket| format!("export SSH_AUTH_SOCK='{}'", socket.display()),
+    );
     std::fs::write(
         &script,
-        "#!/bin/sh\nexport GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null\nunset EMAIL\nexec git \"$@\"\n",
+        format!(
+            "#!/bin/sh\nexport GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null\nunset EMAIL\n{agent}\nexec git \"$@\"\n"
+        ),
     )
     .unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -107,14 +117,14 @@ async fn the_commit_holds_exactly_the_staged_content_with_the_announced_message_
         oid,
         subject,
         before,
-        signed,
+        signature,
     } = outcome
     else {
         panic!("{outcome:?}")
     };
     assert_eq!(subject, "Add a second line");
     assert_eq!(before.as_deref(), Some(parent.as_str()));
-    assert!(!signed);
+    assert_eq!(signature, None);
     assert_eq!(head(dir), oid);
     assert_eq!(
         tree_hash(&run_git(dir, &["rev-parse", "HEAD^{tree}"])),
@@ -712,5 +722,286 @@ async fn amending_a_merge_commit_keeps_both_parents() {
         after.split_whitespace().skip(1).collect::<Vec<_>>(),
         before.split_whitespace().skip(1).collect::<Vec<_>>(),
         "the parents of the merge are unchanged"
+    );
+}
+
+struct Agent {
+    child: std::process::Child,
+    socket: PathBuf,
+}
+
+impl Agent {
+    fn start(dir: &Path) -> Self {
+        let socket = dir.join("agent.sock");
+        let child = std::process::Command::new("ssh-agent")
+            .args(["-D", "-a"])
+            .arg(&socket)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("ssh-agent starts");
+        for _ in 0..200 {
+            if socket.exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(socket.exists(), "the agent socket appeared");
+        Self { child, socket }
+    }
+
+    fn add(&self, private_key: &Path) {
+        let status = std::process::Command::new("ssh-add")
+            .env("SSH_AUTH_SOCK", &self.socket)
+            .arg(private_key)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "the key was added to the agent");
+    }
+}
+
+impl Drop for Agent {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+fn new_ssh_key(dir: &Path, name: &str) -> (PathBuf, PathBuf) {
+    let private = dir.join(name);
+    let status = std::process::Command::new("ssh-keygen")
+        .args(["-q", "-t", "ed25519", "-N", "", "-C", "test", "-f"])
+        .arg(&private)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let public = dir.join(format!("{name}.pub"));
+    (private, public)
+}
+
+fn verify_with(
+    dir: &Path,
+    principal: &str,
+    public_key: &Path,
+    work: &Path,
+) -> std::process::Output {
+    let text = std::fs::read_to_string(public_key).unwrap();
+    let mut fields = text.split_whitespace();
+    let allowed = work.join(format!("allowed-{principal}"));
+    std::fs::write(
+        &allowed,
+        format!(
+            "{principal} {} {}\n",
+            fields.next().unwrap(),
+            fields.next().unwrap()
+        ),
+    )
+    .unwrap();
+    git_output(
+        dir,
+        &[
+            "-c",
+            &format!("gpg.ssh.allowedSignersFile={}", allowed.display()),
+            "verify-commit",
+            "HEAD",
+        ],
+    )
+}
+
+#[tokio::test]
+async fn a_commit_signed_with_an_ssh_key_from_the_agent_is_verifiable_by_git() {
+    let tools = tempfile::tempdir().unwrap();
+    let (private, public) = new_ssh_key(tools.path(), "id_test");
+    let (_, other_public) = new_ssh_key(tools.path(), "id_other");
+    let agent = Agent::start(tools.path());
+    agent.add(&private);
+    let git = isolated_git_with_agent(tools.path(), Some(&agent.socket));
+    let repo = repo_with_staged_change();
+    let dir = repo.path();
+    let (info, snapshot) = open(&git, dir).await;
+    let ssh = profile(SigningPreference::Ssh {
+        public_key: public.clone(),
+    });
+    let private_before = std::fs::read(&private).unwrap();
+
+    let outcome = git
+        .commit(
+            &info,
+            &request(&snapshot, "Signed change", Some(ssh)),
+            &Cancel::new(),
+        )
+        .await
+        .unwrap();
+    let CommitOutcome::Created { signature, .. } = outcome else {
+        panic!("{outcome:?}")
+    };
+    assert_eq!(
+        signature,
+        Some(gitpoulpe_core::Signature {
+            kind: gitpoulpe_core::SignatureKind::Ssh,
+            verified: true
+        }),
+        "the result reports an SSH signature verified against the profile key"
+    );
+
+    let good = verify_with(dir, "ada@example.org", &public, tools.path());
+    assert!(
+        good.status.success(),
+        "Git itself verifies the signature: {}",
+        String::from_utf8_lossy(&good.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&good.stderr).contains("Good"),
+        "{}",
+        String::from_utf8_lossy(&good.stderr)
+    );
+    let wrong = verify_with(dir, "ada@example.org", &other_public, tools.path());
+    assert!(
+        !wrong.status.success(),
+        "another key does not verify the signature"
+    );
+    assert!(
+        String::from_utf8_lossy(&run_git(dir, &["cat-file", "commit", "HEAD"]))
+            .contains("BEGIN SSH SIGNATURE"),
+        "the commit object carries the SSH signature"
+    );
+
+    assert_eq!(
+        std::fs::read(&private).unwrap(),
+        private_before,
+        "the private key was left alone"
+    );
+    let leftovers = std::fs::read_dir(std::env::temp_dir())
+        .unwrap()
+        .flatten()
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with(&format!("gitpoulpe-verify-{}", std::process::id()))
+        })
+        .count();
+    assert_eq!(
+        leftovers, 0,
+        "the temporary verification files were removed"
+    );
+    let in_repo = std::process::Command::new("grep")
+        .args(["-rl", "PRIVATE KEY"])
+        .arg(dir.join(".git"))
+        .output()
+        .unwrap();
+    assert!(
+        in_repo.stdout.is_empty(),
+        "no private key material in the repository"
+    );
+}
+
+#[tokio::test]
+async fn without_a_usable_agent_the_signature_fails_cleanly_and_nothing_is_committed() {
+    let tools = tempfile::tempdir().unwrap();
+    let (private, public) = new_ssh_key(tools.path(), "id_test");
+    std::fs::remove_file(&private).unwrap();
+    let git = isolated_git(tools.path());
+    let repo = repo_with_staged_change();
+    let dir = repo.path();
+    let (info, snapshot) = open(&git, dir).await;
+    let head_before = head(dir);
+    let index_before = run_git(dir, &["ls-files", "--stage", "-z"]);
+    let ssh = profile(SigningPreference::Ssh { public_key: public });
+
+    let outcome = git
+        .commit(
+            &info,
+            &request(&snapshot, "Cannot be signed", Some(ssh)),
+            &Cancel::new(),
+        )
+        .await
+        .unwrap();
+    let CommitOutcome::Failed { kind, output } = outcome else {
+        panic!("{outcome:?}")
+    };
+    assert_eq!(kind, CommitFailureKind::SigningUnavailable);
+    assert!(!output.trim().is_empty(), "the diagnostic is kept");
+    assert_eq!(head(dir), head_before);
+    assert_eq!(run_git(dir, &["ls-files", "--stage", "-z"]), index_before);
+}
+
+#[tokio::test]
+async fn an_amended_commit_is_signed_again() {
+    let tools = tempfile::tempdir().unwrap();
+    let (private, public) = new_ssh_key(tools.path(), "id_test");
+    let agent = Agent::start(tools.path());
+    agent.add(&private);
+    let git = isolated_git_with_agent(tools.path(), Some(&agent.socket));
+    let repo = init_repo();
+    let dir = repo.path();
+    original_commit(dir);
+    let (info, snapshot) = open(&git, dir).await;
+    let amend = git.amend_info(&info).await.unwrap();
+    let ssh = profile(SigningPreference::Ssh {
+        public_key: public.clone(),
+    });
+    let request = gitpoulpe_core::AmendRequest {
+        commit: request(&snapshot, "reworded and signed", Some(ssh)),
+        head: amend.head.clone(),
+        confirmed_published: false,
+    };
+    let outcome = git.amend(&info, &request, &Cancel::new()).await.unwrap();
+    let CommitOutcome::Created { signature, .. } = outcome else {
+        panic!("{outcome:?}")
+    };
+    assert_eq!(signature.map(|s| s.verified), Some(true));
+    assert!(
+        verify_with(dir, "ada@example.org", &public, tools.path())
+            .status
+            .success()
+    );
+}
+
+#[tokio::test]
+async fn the_signature_check_accepts_only_the_key_that_signed() {
+    let tools = tempfile::tempdir().unwrap();
+    let (private, public) = new_ssh_key(tools.path(), "id_signer");
+    let (_, other_public) = new_ssh_key(tools.path(), "id_other");
+    let git = isolated_git(tools.path());
+    let repo = repo_with_staged_change();
+    let dir = repo.path();
+    let status = std::process::Command::new("git")
+        .current_dir(dir)
+        .args([
+            "-c",
+            "gpg.format=ssh",
+            "-c",
+            &format!("user.signingkey={}", private.display()),
+            "-c",
+            "commit.gpgsign=true",
+            "commit",
+            "-q",
+            "-m",
+            "signed with the key file",
+        ])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_AUTHOR_NAME", "Ada Lovelace")
+        .env("GIT_AUTHOR_EMAIL", "ada@example.org")
+        .env("GIT_COMMITTER_NAME", "Ada Lovelace")
+        .env("GIT_COMMITTER_EMAIL", "ada@example.org")
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let (info, _) = open(&git, dir).await;
+
+    assert!(
+        git.verify_ssh_signature(&info, &public, "ada@example.org")
+            .await
+    );
+    assert!(
+        !git.verify_ssh_signature(&info, &other_public, "ada@example.org")
+            .await,
+        "another key does not match"
+    );
+    assert!(
+        !git.verify_ssh_signature(&info, &tools.path().join("absent.pub"), "ada@example.org")
+            .await
     );
 }

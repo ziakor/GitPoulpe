@@ -10,7 +10,7 @@ mod write;
 
 pub use commit::{
     AmendInfo, AmendRequest, CommitFailureKind, CommitOutcome, CommitRefusal, CommitRequest,
-    JOURNAL_LIMIT, JournalEntry, push_journal,
+    JOURNAL_LIMIT, JournalEntry, Signature, SignatureKind, push_journal,
 };
 pub use diff::{
     BuildState, DiffKey, DiffLine, DiffLineKind, DiffSide, DocumentKind, DocumentMeta, FileRef,

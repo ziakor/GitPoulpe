@@ -441,25 +441,8 @@ fn commit_box(s: &State) -> El {
                 );
             }
         }
-        match &shown.signing {
-            gitpoulpe_git::SigningCheck::Ready => {
-                lines = lines.child(
-                    text("Signature : clé du profil utilisable.".to_owned())
-                        .font(theme::SMALL)
-                        .color(p.muted),
-                );
-            }
-            gitpoulpe_git::SigningCheck::Problem(_) => {
-                lines = lines.child(
-                    text("Signature impossible avec ce profil : voir Profil.".to_owned())
-                        .font(theme::SMALL)
-                        .color(p.red)
-                        .wrap(),
-                );
-            }
-            gitpoulpe_git::SigningCheck::NotRequested => {}
-        }
     }
+    lines = lines.child(signing_summary(s));
     let input = text_input(&s.commit_message, theme::BODY)
         .key("commit-message")
         .label("Message du commit")
@@ -531,6 +514,44 @@ fn commit_box(s: &State) -> El {
         .h(32.0)
         .on_press(|s: &mut State| s.commit()),
     )
+}
+
+fn signing_summary(s: &State) -> El {
+    let p = s.palette;
+    let mode = match s.active_profile().map(|profile| &profile.signing) {
+        Some(gitpoulpe_core::SigningPreference::Ssh { public_key }) => format!(
+            "SSH, clé {}",
+            public_key
+                .file_name()
+                .map(|n| display_label(Path::new(n)))
+                .unwrap_or_default()
+        ),
+        Some(gitpoulpe_core::SigningPreference::Gpg { key_id }) => {
+            let short: String = key_id
+                .chars()
+                .rev()
+                .take(16)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
+            format!("GPG, clé …{short}")
+        }
+        _ => {
+            return text("Signature : selon la configuration Git".to_owned())
+                .font(theme::SMALL)
+                .color(p.muted);
+        }
+    };
+    let (status, ink) = match s.identity_shown.as_ref().map(|shown| &shown.signing) {
+        Some(gitpoulpe_git::SigningCheck::Ready) => ("utilisable", p.muted),
+        Some(gitpoulpe_git::SigningCheck::Problem(_)) => ("impossible, voir Profil", p.red),
+        _ => ("vérification en cours", p.muted),
+    };
+    text(format!("Signature : {mode} — {status}"))
+        .font(theme::SMALL)
+        .color(ink)
+        .wrap()
 }
 
 fn amend_toggle(s: &State) -> El {
