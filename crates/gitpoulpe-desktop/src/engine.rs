@@ -8,11 +8,11 @@ use gitpoulpe_core::{
     AmendInfo, AmendRequest, Branch, BranchLoss, ChangeEntry, Commit, CommitDetail, CommitOutcome,
     CommitRange, CommitRequest, ConflictFile, ConflictVersions, DiffLine, DiffSide, DocumentMeta,
     EmptyPolicy, Generation, IgnoreReason, IgnoreScope, MergeMode, MergeOutcome, MergePreview,
-    OpenError, Operation, OperationKind, Profile, PushMode, PushOutcome, PushPreview, RangeError,
-    ReadError, ReflogEntry, ReflogInspect, Remote, RemoteImpact, ResetMode, ResetOutcome,
-    ResetPreview, Resolution, SequenceKind, SequenceOutcome, SequencePreview, SessionId,
-    SessionInfo, StageOutcome, Stash, StashApplied, StashDetail, StashScope, StatusSnapshot, Tag,
-    UndoDirection, UndoRecord, WriteError, WriteJob, mask_url,
+    OpenError, Operation, OperationKind, PlanItem, Profile, PushMode, PushOutcome, PushPreview,
+    RangeError, ReadError, RebaseOutcome, RebasePlanInfo, ReflogEntry, ReflogInspect, Remote,
+    RemoteImpact, ResetMode, ResetOutcome, ResetPreview, Resolution, SequenceKind, SequenceOutcome,
+    SequencePreview, SessionId, SessionInfo, StageOutcome, Stash, StashApplied, StashDetail,
+    StashScope, StatusSnapshot, Tag, UndoDirection, UndoRecord, WriteError, WriteJob, mask_url,
 };
 use gitpoulpe_git::{
     BranchError, CacheConfig, Cancel, CloneError, ConflictError, ConflictSide, DeleteMode,
@@ -362,6 +362,18 @@ pub enum Command {
         record: Box<UndoRecord>,
         direction: UndoDirection,
     },
+    RebasePlan {
+        request: u64,
+        base: String,
+    },
+    Rebase {
+        request: u64,
+        base: String,
+        items: Vec<PlanItem>,
+        expected_head: String,
+        autostash: bool,
+        profile: Option<Box<Profile>>,
+    },
     NetCancel,
     InitPrepare {
         request: u64,
@@ -625,6 +637,14 @@ pub enum Event {
         id: u64,
         direction: UndoDirection,
         result: Result<(), String>,
+    },
+    RebasePlanned {
+        request: u64,
+        result: Result<Box<RebasePlanInfo>, String>,
+    },
+    RebaseFinished {
+        request: u64,
+        result: Result<RebaseOutcome, String>,
     },
     CloneProgress {
         request: u64,
@@ -1476,6 +1496,50 @@ async fn run(
                                 direction,
                                 result,
                             });
+                        });
+                    }
+                    Command::RebasePlan { request, base } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .rebase_plan(&current.info, &base)
+                                .await
+                                .map(Box::new)
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::RebasePlanned { request, result });
+                        });
+                    }
+                    Command::Rebase {
+                        request,
+                        base,
+                        items,
+                        expected_head,
+                        autostash,
+                        profile,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let _guard = current.writer.lock().await;
+                            let result = shared
+                                .git
+                                .start_rebase(
+                                    &current.info,
+                                    &base,
+                                    &items,
+                                    &expected_head,
+                                    autostash,
+                                    profile.as_deref(),
+                                )
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::RebaseFinished { request, result });
                         });
                     }
                     Command::NetCancel => {

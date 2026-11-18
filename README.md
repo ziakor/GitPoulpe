@@ -155,6 +155,12 @@ Git runs as an external program, without a shell, with the repository's filters,
 - Moving the current branch back uses `git reset --keep`, so unrelated local changes survive and an undo that would overwrite local work is refused; a branch that is not checked out is moved with a compare-and-swap `update-ref`; a branch checked out in another worktree is left alone. The undo of a hard reset cannot bring back unsaved changes (they are in `refs/gitpoulpe/recovery`), and the screen says so.
 - An operation is recorded only once it succeeded, so an interruption between the operation and its record leaves the repository consistent: the operation is simply not offered for undo (the reflog still has it). Operations finished after resolving conflicts are not recorded.
 
+## Interactive rebase
+
+- On a commit of the history, "Rebase interactif depuis ce commit…" takes that commit as the base and lists the commits after it, oldest first, each as `pick`. Touch an action to cycle through `pick`, `reword` (with the new message), `edit`, `squash`, `fixup` and `drop`, and move commits up to reorder them. Ranges that contain a merge commit are refused.
+- The plan is validated before anything is rewritten, and the problem is shown live: every commit must appear exactly once (a commit is removed with an explicit `drop`), the first kept commit cannot be `squash` or `fixup`, a `reword` needs a message, and at least one commit must stay. The rebase also refuses if the branch moved since the plan, if another operation is in progress, or if local changes would be in the way (an option puts them aside with `--autostash`).
+- Before rewriting, the old tip is pinned under `refs/gitpoulpe/recovery/<time>-<id>-rebase` (Git also sets `ORIG_HEAD`). A conflict or an `edit` step pauses the rebase and opens the resolution screen, which names the sides after the rebase (the base, and your replayed commit); from there it is continued, the commit is skipped, or it is abandoned, which restores the old tip. A finished rebase is recorded in the undo log.
+
 ## Committing
 
 - Write a message in the box at the bottom of the file list, then "Créer le commit" or Ctrl+Enter. The commit contains exactly the staged content shown, with the effective identity of the repository's profile (or your Git configuration when it has none). The box also shows who will be the author and whether the profile's signing key is usable.

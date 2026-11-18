@@ -191,6 +191,7 @@ pub struct State {
     pub stashes: crate::stashes::StashesState,
     pub undo_screen: crate::undos::UndoScreen,
     pub resetting: crate::resetting::ResetSlot,
+    pub rebasing: crate::rebasing::RebaseSlot,
     pub sequencing: crate::sequencing::SequenceSlot,
     pub reflog: crate::reflogs::ReflogState,
     pub publishing: crate::publishing::PublishSlot,
@@ -320,6 +321,7 @@ impl State {
             stashes: crate::stashes::StashesState::default(),
             undo_screen: crate::undos::UndoScreen::default(),
             resetting: crate::resetting::ResetSlot::default(),
+            rebasing: crate::rebasing::RebaseSlot::default(),
             sequencing: crate::sequencing::SequenceSlot::default(),
             reflog: crate::reflogs::ReflogState::default(),
             publishing: crate::publishing::PublishSlot::default(),
@@ -607,6 +609,7 @@ impl State {
                 self.stashes = crate::stashes::StashesState::default();
                 self.undo_screen = crate::undos::UndoScreen::default();
                 self.resetting = crate::resetting::ResetSlot::default();
+                self.rebasing = crate::rebasing::RebaseSlot::default();
                 self.sequencing = crate::sequencing::SequenceSlot::default();
                 self.reflog = crate::reflogs::ReflogState::default();
                 self.publishing = crate::publishing::PublishSlot::default();
@@ -834,6 +837,10 @@ impl State {
                 direction,
                 result,
             } => self.apply_undo_finished(request, id, direction, result),
+            Event::RebasePlanned { request, result } => self.apply_rebase_planned(request, result),
+            Event::RebaseFinished { request, result } => {
+                self.apply_rebase_finished(request, result)
+            }
             Event::SshScanned { request, result } => self.apply_ssh_scanned(request, result),
             Event::SshTrusted { request, result } => self.apply_ssh_trusted(request, result),
             Event::TagsListed { request, result } => self.apply_tags_listed(request, result),

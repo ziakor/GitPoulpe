@@ -332,6 +332,167 @@ fn sequence_card(s: &State) -> Option<El> {
     )
 }
 
+fn rebase_card(s: &State) -> Option<El> {
+    use gitpoulpe_core::RebaseAction;
+    let p = s.palette;
+    let ui = s.rebasing.state.as_ref()?;
+    let mut card = col()
+        .key("rebase-card")
+        .w_full()
+        .gap(6.0)
+        .px(12.0)
+        .py(10.0)
+        .radius(3.0)
+        .border(1.0, p.line)
+        .child(
+            text("Rebase interactif".to_owned())
+                .font(theme::BODY_STRONG)
+                .color(p.text)
+                .wrap(),
+        );
+    if let Some(error) = &ui.error {
+        card = card.child(
+            text(error.clone())
+                .key("rebase-error")
+                .font(theme::SMALL)
+                .color(p.red)
+                .wrap(),
+        );
+    }
+    let Some(info) = &ui.info else {
+        if ui.error.is_none() {
+            card = card.child(
+                text("Lecture de la plage…".to_owned())
+                    .font(theme::SMALL)
+                    .color(p.muted),
+            );
+        }
+        return Some(card.child(
+            action(s, "rebase-close", "Fermer", false).on_press(|s: &mut State| s.rebase_close()),
+        ));
+    };
+    card = card
+        .child(
+            text(format!(
+                "Base : {} · sur {} · {} commit(s) réécrits, du plus ancien au plus récent.",
+                info.base.chars().take(8).collect::<String>(),
+                info.branch.as_deref().unwrap_or("HEAD détaché"),
+                info.commits.len()
+            ))
+            .key("rebase-summary")
+            .font(theme::SMALL)
+            .color(p.muted)
+            .wrap(),
+        )
+        .child(
+            text(
+                "Touchez l'action pour la changer (pick, reword, edit, squash, fixup, drop)."
+                    .to_owned(),
+            )
+            .font(theme::SMALL)
+            .color(p.muted)
+            .wrap(),
+        );
+    for (index, item) in ui.items.iter().enumerate() {
+        let subject = ui.subject_of(&item.oid);
+        card = card.child(
+            row()
+                .gap(6.0)
+                .center_y()
+                .child(
+                    action(
+                        s,
+                        &format!("rebase-act{index}"),
+                        item.action.caption(),
+                        item.action != RebaseAction::Pick,
+                    )
+                    .on_press(move |s: &mut State| s.rebase_cycle(index)),
+                )
+                .child(
+                    el().key(format!("rebase-item{index}"))
+                        .role("option")
+                        .focusable(true)
+                        .grow(1.0)
+                        .on_press(move |s: &mut State| s.rebase_select(index))
+                        .child(
+                            text(format!(
+                                "{} {subject}",
+                                item.oid.chars().take(8).collect::<String>()
+                            ))
+                            .font(theme::PATH_SMALL)
+                            .color(if ui.selected == Some(index) {
+                                p.accent
+                            } else {
+                                p.text
+                            })
+                            .truncate(),
+                        ),
+                )
+                .child(
+                    action(s, &format!("rebase-up{index}"), "↑", false)
+                        .on_press(move |s: &mut State| s.rebase_move_up(index)),
+                ),
+        );
+    }
+    if let Some(index) = ui.selected
+        && ui
+            .items
+            .get(index)
+            .is_some_and(|i| i.action == RebaseAction::Reword)
+    {
+        card = card.child(
+            crate::widgets::field(
+                s,
+                "rebase-message",
+                "Nouveau message",
+                &ui.message,
+                "Message",
+            )
+            .on_edit(|s: &mut State| &mut s.rebasing.state.as_mut().expect("rebase card").message),
+        );
+    }
+    if let Some(problem) = ui.problem() {
+        card = card.child(
+            text(problem)
+                .key("rebase-problem")
+                .font(theme::SMALL)
+                .color(p.red)
+                .wrap(),
+        );
+    }
+    if !info.local_changes.is_empty() {
+        card = card.child(
+            crate::widgets::toggle(
+                s,
+                "rebase-autostash",
+                "Mettre mon travail local de côté pendant le rebase",
+                ui.autostash,
+            )
+            .on_press(|s: &mut State| s.rebase_toggle_autostash()),
+        );
+    }
+    Some(
+        card.child(
+            text("L'ancien sommet est gardé sous refs/gitpoulpe/recovery. Un conflit ou une étape edit met le rebase en pause : continuez ou abandonnez depuis l'écran de résolution.".to_owned())
+                .font(theme::SMALL)
+                .color(p.muted)
+                .wrap(),
+        )
+        .child(
+            action(
+                s,
+                "rebase-run",
+                if ui.busy { "En cours…" } else { "Lancer le rebase" },
+                true,
+            )
+            .on_press(|s: &mut State| s.rebase_run()),
+        )
+        .child(
+            action(s, "rebase-close", "Fermer", false).on_press(|s: &mut State| s.rebase_close()),
+        ),
+    )
+}
+
 fn reset_card(s: &State, oid: &str) -> Option<El> {
     use gitpoulpe_core::ResetMode;
     let p = s.palette;
@@ -660,6 +821,17 @@ fn detail(s: &State) -> El {
                 },
             )
         })
+        .child({
+            let target = reset_oid.clone();
+            action(
+                s,
+                "rebase-here",
+                "Rebase interactif depuis ce commit…",
+                false,
+            )
+            .on_press(move |s: &mut State| s.rebase_ask(&target))
+        })
+        .children(rebase_card(s))
         .children(sequence_card(s))
         .children(reset_card(s, &reset_oid))
 }

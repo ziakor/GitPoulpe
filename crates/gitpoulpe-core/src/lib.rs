@@ -9,6 +9,7 @@ mod merge;
 mod operation;
 mod profile;
 mod push;
+mod rebase;
 mod reflog;
 mod remote;
 mod reset;
@@ -42,6 +43,7 @@ pub use operation::{
 };
 pub use profile::{Profile, ProfileBook, ProfileError, SigningPreference};
 pub use push::{LostRemoteCommit, PushKind, PushMode, PushOutcome, PushPreview};
+pub use rebase::{PlanItem, RebaseAction, RebaseCommit, RebaseOutcome, RebasePlanInfo};
 pub use reflog::{ReflogEntry, ReflogInspect};
 pub use remote::{Remote, RemoteImpact, mask_url, url_has_secret};
 pub use reset::{ResetCommit, ResetMode, ResetOutcome, ResetPreview};

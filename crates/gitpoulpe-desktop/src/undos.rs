@@ -76,6 +76,7 @@ impl State {
             "merge" => moved(format!("Fusion de {detail}"), None),
             "cherry-pick" => moved("Cherry-pick".to_owned(), None),
             "revert" => moved("Revert".to_owned(), None),
+            "rebase" => moved("Rebase interactif".to_owned(), None),
             "reset" => moved(
                 format!("Reset {detail}"),
                 Some(

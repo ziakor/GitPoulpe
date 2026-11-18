@@ -16,6 +16,7 @@ mod perf;
 mod profiles;
 mod profiles_view;
 mod publishing;
+mod rebasing;
 mod reflogs;
 mod reflogs_view;
 mod remotes;
