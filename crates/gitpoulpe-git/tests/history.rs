@@ -316,7 +316,7 @@ async fn dropping_the_stream_stops_the_git_process() {
     big_history(repo.path(), 20_000);
     let git = Git::new();
     let info = open(&git, repo.path()).await;
-    let marker = "--format=%H%x1f%P%x1f%an%x1f%at%x1f%s%x1f%D".to_owned();
+    let marker = "--format=%H%x1f%P%x1f%at%x1f%D%x1f%an%x1f%s".to_owned();
     let count = |dir: &Path| -> usize {
         let out = Command::new("pgrep")
             .args(["-fc", "--", &marker])
@@ -538,7 +538,7 @@ async fn a_gigantic_record_is_cut_instead_of_filling_the_memory_and_the_next_rec
     let script = tools.path().join("giant-git");
     std::fs::write(
         &script,
-        "#!/bin/sh\ncase \"$*\" in *rev-parse*) exit 1;; esac\nprintf 'aaaa\\037\\037Ada\\0371700000001\\037'\nhead -c 6000000 /dev/zero | tr '\\0' 'x'\nprintf '\\037\\037\\000'\nprintf 'bbbb\\037aaaa\\037Grace\\0371700000002\\037second\\037\\000'\n",
+        "#!/bin/sh\ncase \"$*\" in *rev-parse*) exit 1;; esac\nprintf 'aaaa\\037\\0371700000001\\037\\037Ada\\037'\nhead -c 6000000 /dev/zero | tr '\\0' 'x'\nprintf '\\037\\000'\nprintf 'bbbb\\037aaaa\\0371700000002\\037\\037Grace\\037second\\000'\n",
     )
     .unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -569,4 +569,60 @@ async fn a_gigantic_record_is_cut_instead_of_filling_the_memory_and_the_next_rec
         ),
         ("bbbb", vec!["aaaa".to_owned()], "second")
     );
+}
+
+#[tokio::test]
+async fn control_bytes_in_a_message_or_a_name_cannot_break_the_listing_or_forge_a_commit() {
+    let repo = init_repo();
+    let dir = repo.path();
+    commit(dir, "before");
+    write(dir, "poison.txt", "p");
+    run_git(dir, &["add", "-A"]);
+    let message =
+        "subject\u{1f}with\u{1f}separators\n\nbody\u{1f}has\u{1f}more\u{1f}x ZEBRA9\u{1f}\u{1f}";
+    let committed = std::process::Command::new("git")
+        .current_dir(dir)
+        .args(["commit", "-q", "-F", "-"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_AUTHOR_NAME", "Ada\u{1f}Evil\u{1f}Name")
+        .env("GIT_AUTHOR_EMAIL", "ada@example.org")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@example.com")
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    use std::io::Write;
+    let mut committed = committed;
+    committed
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(message.as_bytes())
+        .unwrap();
+    assert!(committed.wait().unwrap().success());
+    commit(dir, "after");
+
+    let git = Git::new();
+    let info = open(&git, dir).await;
+    let got = read_all(&git, &info, 2)
+        .await
+        .expect("the listing survives control bytes");
+    let expected = oracle(dir);
+    assert_eq!(
+        got.iter()
+            .map(|c| (c.oid.clone(), c.parents.clone()))
+            .collect::<Vec<_>>(),
+        expected,
+        "ids and parent links are exactly Git's"
+    );
+    assert_eq!(got.len(), 3, "no forged or lost commit");
+    assert_eq!(got[0].subject, "after");
+    assert_eq!(got[2].subject, "before");
+    verify_graph(&got);
+
+    let found = search_all(&git, &info, "zebra9")
+        .await
+        .expect("the search survives too");
+    assert_eq!(found.len(), 1, "the body is still searched");
+    assert_eq!(found[0].oid, got[1].oid);
 }

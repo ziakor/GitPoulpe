@@ -56,42 +56,45 @@ pub struct HistoryStream {
 fn parse_record(
     record: &[u8],
     with_body: bool,
-    truncated: bool,
+    _truncated: bool,
 ) -> Result<(Commit, String), HistoryError> {
-    let mut fields: Vec<&[u8]> = record.split(|b| *b == FIELD).collect();
-    let expected = if with_body { 7 } else { 6 };
-    if truncated && fields.len() >= 5 && fields.len() < expected {
-        fields.resize(expected, &[]);
-    }
-    if fields.len() != expected {
-        return Err(HistoryError::Parse(format!(
-            "a commit record has {} fields instead of {expected}",
-            fields.len()
-        )));
-    }
+    let mut head = record.splitn(5, |b| *b == FIELD);
+    let (Some(oid), Some(parents), Some(timestamp), Some(refs)) =
+        (head.next(), head.next(), head.next(), head.next())
+    else {
+        return Err(HistoryError::Parse(
+            "a commit record is missing its leading fields".to_owned(),
+        ));
+    };
+    let rest = head.next().unwrap_or_default();
     let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
-    let oid = text(fields[0]);
-    if oid.is_empty() {
-        return Err(HistoryError::Parse("a commit record has no id".to_owned()));
+    let oid = text(oid);
+    if oid.is_empty() || !oid.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(HistoryError::Parse(
+            "a commit record has no valid id".to_owned(),
+        ));
     }
-    let timestamp = text(fields[3])
+    let timestamp = text(timestamp)
         .parse()
         .map_err(|_| HistoryError::Parse("a commit date is not a number".to_owned()))?;
+    let mut tail = rest.splitn(3, |b| *b == FIELD);
+    let author = text(tail.next().unwrap_or_default());
+    let subject = text(tail.next().unwrap_or_default());
     let body = if with_body {
-        text(fields[6])
+        text(tail.next().unwrap_or_default())
     } else {
         String::new()
     };
     let commit = Commit {
         oid,
-        parents: text(fields[1])
+        parents: text(parents)
             .split_whitespace()
             .map(str::to_owned)
             .collect(),
-        author: text(fields[2]),
+        author,
         timestamp,
-        subject: text(fields[4]),
-        refs: text(fields[5])
+        subject,
+        refs: text(refs)
             .split(", ")
             .filter(|r| !r.is_empty())
             .map(|r| r.strip_prefix("HEAD -> ").unwrap_or(r).to_owned())
@@ -147,9 +150,9 @@ impl Git {
             "-z",
             "--no-show-signature",
             if query.is_some() {
-                "--format=%H%x1f%P%x1f%an%x1f%at%x1f%s%x1f%D%x1f%b"
+                "--format=%H%x1f%P%x1f%at%x1f%D%x1f%an%x1f%s%x1f%b"
             } else {
-                "--format=%H%x1f%P%x1f%an%x1f%at%x1f%s%x1f%D"
+                "--format=%H%x1f%P%x1f%at%x1f%D%x1f%an%x1f%s"
             },
             "--branches",
             "--tags",
