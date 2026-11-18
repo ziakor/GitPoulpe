@@ -185,6 +185,7 @@ pub struct State {
     pub ignored: crate::ignored::IgnoredState,
     pub branches: crate::branches::BranchesState,
     pub tags: crate::tags::TagsState,
+    pub init: crate::initialize::InitState,
     pub form: ProfileForm,
     identity_request: u64,
     signing_request: u64,
@@ -301,6 +302,7 @@ impl State {
             ignored: crate::ignored::IgnoredState::default(),
             branches: crate::branches::BranchesState::default(),
             tags: crate::tags::TagsState::default(),
+            init: crate::initialize::InitState::default(),
             form: ProfileForm::default(),
             identity_request: 0,
             signing_request: 0,
@@ -701,6 +703,13 @@ impl State {
                 self.finish_commit(result);
                 true
             }
+            Event::InitPrepared { request, branch } => self.apply_init_prepared(request, branch),
+            Event::InitDone {
+                request,
+                path,
+                completed_existing,
+            } => self.apply_init_done(request, path, completed_existing),
+            Event::InitFailed { request, message } => self.apply_init_failed(request, message),
             Event::TagsListed { request, result } => self.apply_tags_listed(request, result),
             Event::TagDone { request, result } => self.apply_tag_done(request, result),
             Event::BranchesListed { request, result } => {

@@ -26,18 +26,24 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
             "Ouvrir un dépôt Git",
             "Choisissez un dossier, ou lancez gitpoulpe avec le chemin du dépôt.",
             true,
+            None,
         ),
-        Screen::Opening(path) => message_screen(&p, "Ouverture…", &display_label(path), false),
+        Screen::Opening(path) => {
+            message_screen(&p, "Ouverture…", &display_label(path), false, None)
+        }
         Screen::Failed { path, message } => {
             let detail = if path.as_os_str().is_empty() {
                 message.clone()
             } else {
                 format!("{}\n{message}", display_label(path))
             };
-            message_screen(&p, "Impossible d'ouvrir ce dépôt", &detail, true)
+            let here = (message == "Ce dossier n'est pas un dépôt Git.").then(|| path.clone());
+            message_screen(&p, "Impossible d'ouvrir ce dépôt", &detail, true, here)
         }
     };
-    let body = if s.profiles_open {
+    let body = if s.init.open {
+        crate::initialize_view::init_screen(s)
+    } else if s.profiles_open {
         crate::profiles_view::profiles_screen(s)
     } else if s.history_open {
         crate::history_view::history_screen(s)
@@ -272,7 +278,38 @@ fn refresh_button(s: &State) -> El {
         .child(text("Actualiser").font(theme::BODY).color(p.muted))
 }
 
-fn message_screen(p: &Palette, title: &str, detail: &str, with_open: bool) -> El {
+fn init_button(p: &Palette, here: Option<std::path::PathBuf>) -> El {
+    let (key, caption) = if here.is_some() {
+        ("init-here", "Initialiser ce dossier")
+    } else {
+        ("init", "Initialiser un dossier…")
+    };
+    el().key(key)
+        .role("button")
+        .label(caption)
+        .focusable(true)
+        .focus_ring(2.0, 2.0, p.accent)
+        .h(32.0)
+        .px(12.0)
+        .center()
+        .radius(3.0)
+        .fill(p.raised)
+        .border(1.0, p.line)
+        .hover(p.hover)
+        .on_press_tx(move |s: &mut State, tx: &mut Tx| match &here {
+            Some(path) => s.begin_init(path.clone()),
+            None => crate::keys::init_dialog(tx),
+        })
+        .child(text(caption).font(theme::BODY).color(p.text))
+}
+
+fn message_screen(
+    p: &Palette,
+    title: &str,
+    detail: &str,
+    with_open: bool,
+    here: Option<std::path::PathBuf>,
+) -> El {
     let mut card = col()
         .gap(10.0)
         .max_w(520.0)
@@ -284,7 +321,12 @@ fn message_screen(p: &Palette, title: &str, detail: &str, with_open: bool) -> El
             .wrap(),
     );
     if with_open {
-        card = card.child(open_button(p, true));
+        let mut actions = row().gap(8.0).child(open_button(p, here.is_none()));
+        if here.is_some() {
+            actions = actions.child(init_button(p, here.clone()));
+        }
+        actions = actions.child(init_button(p, None));
+        card = card.child(actions);
     }
     col().w_full().grow(1.0).center().child(card)
 }

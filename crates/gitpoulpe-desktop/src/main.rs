@@ -5,6 +5,8 @@ mod history_state;
 mod history_view;
 mod ignored;
 mod ignored_view;
+mod initialize;
+mod initialize_view;
 mod keys;
 mod perf;
 mod profiles;
@@ -15,6 +17,7 @@ mod tags;
 mod tags_view;
 mod theme;
 mod view;
+mod widgets;
 
 #[cfg(test)]
 mod bench;

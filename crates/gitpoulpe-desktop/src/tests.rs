@@ -13,6 +13,7 @@ mod branching;
 mod committing;
 mod history;
 mod ignoring;
+mod initializing;
 mod inspecting;
 mod profiles;
 mod staging;

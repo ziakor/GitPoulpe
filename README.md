@@ -56,6 +56,12 @@ Git runs as an external program, without a shell, with the repository's filters,
 - Deleting a tag is explicit and asks first. It names the tag, states that no branch is touched, and gives the `git update-ref` command that restores it, annotation included. It only goes through if the tag still points at the object that was displayed. Deletions and creations are written to the per-repository journal.
 - Remote tags are not read or pushed.
 
+## Initialising a repository
+
+- On the welcome screen, "Initialiser un dossier…" asks for a folder; when opening a folder fails because it is not a repository, "Initialiser ce dossier" starts from that folder. A panel shows the path and the initial branch (the `init.defaultBranch` setting, else `main`), validated with `git check-ref-format`.
+- The folder becomes an empty repository without a first commit and opens immediately; the files already in it appear as untracked.
+- An existing repository, including a bare one, is never reinitialised, and a folder inside another repository is refused with the path of the enclosing one. A refused access or an interrupted creation leaves the panel open with the reason; trying again completes a half-created `.git`.
+
 ## Committing
 
 - Write a message in the box at the bottom of the file list, then "Créer le commit" or Ctrl+Enter. The commit contains exactly the staged content shown, with the effective identity of the repository's profile (or your Git configuration when it has none). The box also shows who will be the author and whether the profile's signing key is usable.

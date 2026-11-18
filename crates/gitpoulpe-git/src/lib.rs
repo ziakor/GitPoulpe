@@ -8,6 +8,7 @@ mod diff_parse;
 mod history;
 mod identity;
 mod ignore;
+mod init;
 mod inspect;
 mod open;
 mod parse;
@@ -29,6 +30,7 @@ pub use identity::{
     signing_config,
 };
 pub use ignore::{IgnoreError, IgnoredList, MAX_IGNORED_ENTRIES};
+pub use init::{DEFAULT_BRANCH, InitError, Initialized};
 pub use inspect::InspectError;
 pub use parse::{ParseError, StatusParser};
 pub use stage::stamp_of;

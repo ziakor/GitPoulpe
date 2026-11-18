@@ -136,6 +136,15 @@ pub enum Command {
         request: u64,
         edit: IgnoreEdit,
     },
+    InitPrepare {
+        request: u64,
+        path: PathBuf,
+    },
+    Init {
+        request: u64,
+        path: PathBuf,
+        branch: String,
+    },
     TagList {
         request: u64,
     },
@@ -271,6 +280,19 @@ pub enum Event {
         snapshot: Box<StatusSnapshot>,
     },
     OpenFailed {
+        request: u64,
+        message: String,
+    },
+    InitPrepared {
+        request: u64,
+        branch: String,
+    },
+    InitDone {
+        request: u64,
+        path: PathBuf,
+        completed_existing: bool,
+    },
+    InitFailed {
         request: u64,
         message: String,
     },
@@ -534,6 +556,37 @@ async fn run(
                         tokio::spawn(async move {
                             let info = shared.git.amend_info(&current.info).await;
                             shared.emit(Event::AmendInfo { request, info });
+                        });
+                    }
+                    Command::InitPrepare { request, path } => {
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let branch = shared.git.default_branch_name(&path).await;
+                            shared.emit(Event::InitPrepared { request, branch });
+                        });
+                    }
+                    Command::Init {
+                        request,
+                        path,
+                        branch,
+                    } => {
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            match shared
+                                .git
+                                .init_repository(&path, &branch, &Cancel::new())
+                                .await
+                            {
+                                Ok(done) => shared.emit(Event::InitDone {
+                                    request,
+                                    path,
+                                    completed_existing: done.completed_existing,
+                                }),
+                                Err(error) => shared.emit(Event::InitFailed {
+                                    request,
+                                    message: error.to_string(),
+                                }),
+                            }
                         });
                     }
                     Command::TagList { request } => {

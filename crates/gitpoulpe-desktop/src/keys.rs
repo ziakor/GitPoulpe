@@ -6,7 +6,8 @@ use crate::view::row_key;
 const LINES_PER_KEY: usize = 3;
 const SIDEWAYS_STEP: f32 = 96.0;
 
-const TEXT_INPUTS: [&str; 7] = [
+const TEXT_INPUTS: [&str; 8] = [
+    "init-branch",
     "filter",
     "commit-message",
     "history-search",
@@ -23,6 +24,18 @@ pub fn open_dialog(tx: &mut Tx) {
     };
     tx.open_folder(options, |s: &mut State, result, _| match result {
         Ok(Some(path)) => s.open_path(path),
+        Ok(None) => {}
+        Err(error) => s.notice = Some(format!("Sélecteur de dossier indisponible : {error}")),
+    });
+}
+
+pub fn init_dialog(tx: &mut Tx) {
+    let options = FileDialogOptions {
+        title: "Choisir le dossier à initialiser".into(),
+        ..Default::default()
+    };
+    tx.open_folder(options, |s: &mut State, result, _| match result {
+        Ok(Some(path)) => s.begin_init(path),
         Ok(None) => {}
         Err(error) => s.notice = Some(format!("Sélecteur de dossier indisponible : {error}")),
     });
@@ -91,6 +104,10 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         return copy_selection(s, tx);
     }
     s.notice = None;
+    if s.init.open && event.key == Key::Escape {
+        s.cancel_init();
+        return true;
+    }
     if s.profiles_open && event.key == Key::Escape {
         s.close_profiles();
         return true;
@@ -140,6 +157,7 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
     let reading = matches!(s.screen, crate::state::Screen::Ready);
     let free = tx.focused().is_none() || tx.focused() == Some("viewport");
     let typing = tx.focused().is_some_and(|key| TEXT_INPUTS.contains(&key))
+        || s.init.open
         || s.profiles_open
         || s.ignored.open
         || s.branches.open
