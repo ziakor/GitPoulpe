@@ -343,3 +343,34 @@ fn the_summary_names_the_effective_identity_and_the_signature_mode_before_the_co
         "an unusable key is flagged before anything is committed"
     );
 }
+
+#[test]
+fn the_summary_names_a_gpg_key_and_flags_one_the_keyring_does_not_have() {
+    let (_repo, mut rt) = staged_runtime(3);
+    {
+        let state = &mut rt.state;
+        state.new_profile();
+        state.form.label.text = "Gpg".to_owned();
+        state.form.name.text = "Ada Lovelace".to_owned();
+        state.form.email.text = "ada@example.org".to_owned();
+        state.set_form_signing(crate::profiles::SigningKind::Gpg);
+        state.form.key.text = "DEADBEEFDEADBEEF0123456789ABCDEF01234567".to_owned();
+        state.save_profile();
+        let id = state.form.editing.clone().unwrap();
+        state.use_profile_here(Some(id));
+    }
+    for _ in 0..60 {
+        step(&mut rt);
+        if shows_text(&rt, "impossible, voir Profil") {
+            break;
+        }
+    }
+    assert!(
+        shows_text(&rt, "Signature : GPG, clé …"),
+        "the mode and the end of the key id are named"
+    );
+    assert!(
+        shows_text(&rt, "impossible, voir Profil"),
+        "a key missing from the keyring is flagged"
+    );
+}

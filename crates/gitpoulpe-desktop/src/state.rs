@@ -1815,6 +1815,10 @@ impl State {
                     }) => " et signé en SSH",
                     Some(gitpoulpe_core::Signature {
                         kind: gitpoulpe_core::SignatureKind::Gpg,
+                        verified: true,
+                    }) => " et signé en GPG (signature vérifiée)",
+                    Some(gitpoulpe_core::Signature {
+                        kind: gitpoulpe_core::SignatureKind::Gpg,
                         ..
                     }) => " et signé en GPG",
                     None => "",

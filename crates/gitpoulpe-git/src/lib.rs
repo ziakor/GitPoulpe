@@ -30,19 +30,31 @@ use std::ffi::OsString;
 #[derive(Clone, Debug)]
 pub struct Git {
     program: OsString,
+    env: Vec<(OsString, OsString)>,
 }
 
 impl Git {
     pub fn new() -> Self {
         Self {
             program: OsString::from("git"),
+            env: Vec::new(),
         }
     }
 
     pub fn with_program(program: impl Into<OsString>) -> Self {
         Self {
             program: program.into(),
+            env: Vec::new(),
         }
+    }
+
+    pub fn with_env(mut self, name: impl Into<OsString>, value: impl Into<OsString>) -> Self {
+        self.env.push((name.into(), value.into()));
+        self
+    }
+
+    pub(crate) fn extra_env(&self) -> &[(OsString, OsString)] {
+        &self.env
     }
 }
 

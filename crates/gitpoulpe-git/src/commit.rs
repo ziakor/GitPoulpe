@@ -9,7 +9,9 @@ use gitpoulpe_core::{
 };
 
 use crate::diagnostics::filter_diagnostic;
-use crate::identity::{IdentityError, SigningCheck, check_signing, profile_env, signing_config};
+use crate::identity::{
+    IdentityError, SigningCheck, check_signing_with_env, profile_env, signing_config,
+};
 use crate::stage::{locked_index, write_failure};
 use crate::{Cancel, Git};
 
@@ -69,6 +71,10 @@ impl Git {
                 let email = profile.map(|p| p.user_email.as_str()).unwrap_or_default();
                 self.verify_ssh_signature(info, public_key, email).await
             }
+            (SignatureKind::Gpg, Some(SigningPreference::Gpg { .. })) => self
+                .collect(info, &["verify-commit", "HEAD"])
+                .await
+                .is_some(),
             _ => false,
         };
         Some(Signature { kind, verified })
@@ -258,7 +264,8 @@ impl Git {
         }
         if let Some(profile) = profile
             && profile.signing != SigningPreference::None
-            && let SigningCheck::Problem(message) = check_signing(profile).await
+            && let SigningCheck::Problem(message) =
+                check_signing_with_env(profile, self.extra_env()).await
         {
             return Ok(CommitOutcome::Failed {
                 kind: CommitFailureKind::SigningUnavailable,

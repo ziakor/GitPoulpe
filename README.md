@@ -39,6 +39,7 @@ Git runs as an external program, without a shell, with the repository's filters,
 - A profile is applied only to the commands GitPoulpe runs. Nothing is written to your Git configuration, global or local; a commit made in a terminal can therefore use another identity.
 - Profiles and the repository assignments are stored in GitPoulpe's own preferences file, outside the repository.
 - For signing, only a reference is stored: the path of an SSH public key (`.pub`) or a GPG key identifier. A private key path is refused, and an unreadable key or a GPG key missing from the keyring is reported with how to fix it. No private key or passphrase is ever read or stored.
+- GPG signing: choose "GPG" and the key fingerprint. The passphrase prompt is the one of your `gpg-agent` / pinentry; GitPoulpe never sees, stores or logs a passphrase. A cancelled prompt, a locked key or a key missing from the keyring creates no commit and keeps the work staged; after unlocking you can retry the same commit. A graphical pinentry is needed (a terminal-only pinentry cannot prompt from a window application).
 - SSH signing: choose "SSH" and the path of your public key. Git signs through `ssh-agent` (or the matching private key file, as OpenSSH does); the commit box states the signing mode and whether the key is usable before you commit, and after a signed commit GitPoulpe checks the signature against the profile's key. If neither an agent nor the private key is available, nothing is committed and the diagnostic is kept.
 
 ## Keyboard shortcuts

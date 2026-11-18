@@ -174,6 +174,7 @@ impl Git {
         for name in SCRUBBED_ENV {
             command.env_remove(name);
         }
+        command.envs(self.extra_env().iter().map(|(k, v)| (k, v)));
         command.envs(env.iter().map(|(k, v)| (k, v)));
         let mut child = spawn_with_retry(&mut command, cancel).await?;
         let writer = input.and_then(|bytes| {
