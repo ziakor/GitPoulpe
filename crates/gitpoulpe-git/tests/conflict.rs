@@ -570,3 +570,110 @@ async fn a_result_is_never_written_through_a_symbolic_link() {
             .is_none()
     );
 }
+
+#[tokio::test]
+async fn a_file_name_that_looks_like_a_pathspec_only_ever_means_itself() {
+    let repo = init_repo();
+    let p = repo.path();
+    write(p, "*.txt", "base star\n");
+    write(p, "b.txt", "base b\n");
+    commit_all(p, "base");
+    run_git(p, &["checkout", "-q", "-b", "side"]);
+    write(p, "*.txt", "side star\n");
+    write(p, "b.txt", "side b\n");
+    commit_all(p, "side");
+    run_git(p, &["checkout", "-q", "main"]);
+    write(p, "*.txt", "main star\n");
+    write(p, "b.txt", "main b\n");
+    commit_all(p, "main");
+    assert!(!git_output(p, &["merge", "side"]).status.success());
+    let git = Git::new()
+        .with_env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .with_env("GIT_CONFIG_SYSTEM", "/dev/null");
+    let info = git.open(p, &Cancel::new()).await.unwrap();
+    git.resolve_with_side(&info, Path::new("*.txt"), ConflictSide::Theirs)
+        .await
+        .unwrap();
+    let left: Vec<String> = git
+        .list_conflicts(&info)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|f| f.path.display().to_string())
+        .collect();
+    assert_eq!(left, ["b.txt"]);
+    assert!(String::from_utf8_lossy(&std::fs::read(p.join("b.txt")).unwrap()).contains("<<<<<<<"));
+    git.resolve_with_content(&info, Path::new("b.txt"), b"resolved b\n", false)
+        .await
+        .unwrap();
+    git.resolve_with_side(&info, Path::new("*.txt"), ConflictSide::Ours)
+        .await
+        .unwrap_err();
+    assert_eq!(std::fs::read(p.join("b.txt")).unwrap(), b"resolved b\n");
+}
+
+#[tokio::test]
+async fn a_predictable_temporary_name_cannot_redirect_the_written_result() {
+    let e = merge_env().await;
+    let victim = tempfile::tempdir().unwrap();
+    let target = victim.path().join("victim.txt");
+    std::fs::write(&target, "untouched\n").unwrap();
+    for name in [
+        format!(".gitpoulpe-resolve-{}", std::process::id()),
+        ".gitpoulpe-resolve-".to_owned(),
+    ] {
+        let _ = std::os::unix::fs::symlink(&target, e.path().join(name));
+    }
+    e.git
+        .resolve_with_content(&e.info, Path::new("a.txt"), b"line1\nok\nline3\n", false)
+        .await
+        .unwrap();
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "untouched\n");
+    assert_eq!(e.read("a.txt"), b"line1\nok\nline3\n");
+}
+
+#[tokio::test]
+async fn missing_directories_are_never_created_behind_a_symbolic_link() {
+    let repo = init_repo();
+    let p = repo.path();
+    write(p, "keep.txt", "k\n");
+    commit_all(p, "base");
+    run_git(p, &["checkout", "-q", "-b", "side"]);
+    std::fs::create_dir_all(p.join("sub/new")).unwrap();
+    write(p, "sub/new/f.txt", "side\n");
+    commit_all(p, "side");
+    run_git(p, &["checkout", "-q", "main"]);
+    std::fs::create_dir_all(p.join("sub/new")).unwrap();
+    write(p, "sub/new/f.txt", "main\n");
+    commit_all(p, "main");
+    assert!(!git_output(p, &["merge", "side"]).status.success());
+    let git = Git::new()
+        .with_env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .with_env("GIT_CONFIG_SYSTEM", "/dev/null");
+    let info = git.open(p, &Cancel::new()).await.unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::remove_dir_all(p.join("sub")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), p.join("sub")).unwrap();
+    let error = git
+        .resolve_with_content(&info, Path::new("sub/new/f.txt"), b"x\n", false)
+        .await
+        .unwrap_err();
+    assert_eq!(error, ConflictError::Symlink);
+    assert!(std::fs::read_dir(outside.path()).unwrap().next().is_none());
+}
+
+#[tokio::test]
+async fn a_forged_commit_reference_in_the_git_directory_is_never_given_to_git_as_an_option() {
+    let e = merge_env().await;
+    run_git(e.path(), &["merge", "--abort"]);
+    let marker = tempfile::tempdir().unwrap().keep().join("written-by-git");
+    std::fs::write(
+        e.path().join(".git/CHERRY_PICK_HEAD"),
+        format!("--output={}\n", marker.display()),
+    )
+    .unwrap();
+    let op = e.git.operation_state(&e.info).await.unwrap().unwrap();
+    assert_eq!(op.kind, OperationKind::CherryPick);
+    assert!(!marker.exists());
+    assert!(op.theirs_label.contains("un commit"), "{}", op.theirs_label);
+}

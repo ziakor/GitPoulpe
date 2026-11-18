@@ -88,6 +88,23 @@ fn has_markers(text: &str) -> bool {
         .any(|line| MARKERS.iter().any(|m| line.starts_with(m)))
 }
 
+fn ensure_plain_directories(root: &Path, relative: &Path) -> Result<(), ConflictError> {
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        current.push(component);
+        match std::fs::symlink_metadata(&current) {
+            Ok(meta) if meta.file_type().is_symlink() => return Err(ConflictError::Symlink),
+            Ok(meta) if meta.is_dir() => {}
+            Ok(_) => return Err(ConflictError::UnsafePath),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::create_dir(&current).map_err(|e| ConflictError::Io(e.to_string()))?;
+            }
+            Err(e) => return Err(ConflictError::Io(e.to_string())),
+        }
+    }
+    Ok(())
+}
+
 fn read_text(git_dir: &Path, name: &str) -> Option<String> {
     std::fs::read_to_string(git_dir.join(name))
         .ok()
@@ -102,6 +119,10 @@ fn quoted_name(message: &str) -> Option<String> {
 
 impl Git {
     async fn describe_commit(&self, info: &SessionInfo, rev: &str) -> String {
+        let hex = (4..=64).contains(&rev.len()) && rev.chars().all(|c| c.is_ascii_hexdigit());
+        if !hex {
+            return "un commit".to_owned();
+        }
         self.exec(info, &["log", "-1", "--format=%h %s", rev, "--"], &[], None)
             .await
             .ok()
@@ -348,13 +369,11 @@ impl Git {
         }
         let root = std::fs::canonicalize(worktree).map_err(|e| ConflictError::Io(e.to_string()))?;
         let target = root.join(path);
-        let parent = target.parent().ok_or(ConflictError::UnsafePath)?;
-        std::fs::create_dir_all(parent).map_err(|e| ConflictError::Io(e.to_string()))?;
-        let real_parent =
-            std::fs::canonicalize(parent).map_err(|e| ConflictError::Io(e.to_string()))?;
-        if !real_parent.starts_with(&root) || real_parent != parent {
-            return Err(ConflictError::Symlink);
-        }
+        let parent = target
+            .parent()
+            .ok_or(ConflictError::UnsafePath)?
+            .to_path_buf();
+        ensure_plain_directories(&root, path.parent().unwrap_or(Path::new("")))?;
         let existing = std::fs::symlink_metadata(&target).ok();
         if existing
             .as_ref()
@@ -363,14 +382,19 @@ impl Git {
             return Err(ConflictError::Symlink);
         }
         let mode = existing.map_or(0o644, |m| m.permissions().mode() & 0o777);
-        let temp = parent.join(format!(".gitpoulpe-resolve-{}", std::process::id()));
-        std::fs::write(&temp, content).map_err(|e| ConflictError::Io(e.to_string()))?;
-        std::fs::set_permissions(&temp, std::fs::Permissions::from_mode(mode))
-            .and_then(|()| std::fs::rename(&temp, &target))
-            .map_err(|e| {
-                let _ = std::fs::remove_file(&temp);
-                ConflictError::Io(e.to_string())
-            })?;
+        let mut temp = tempfile::Builder::new()
+            .prefix(".gitpoulpe-resolve-")
+            .tempfile_in(&parent)
+            .map_err(|e| ConflictError::Io(e.to_string()))?;
+        std::io::Write::write_all(&mut temp, content)
+            .and_then(|()| {
+                temp.as_file()
+                    .set_permissions(std::fs::Permissions::from_mode(mode))
+            })
+            .and_then(|()| temp.as_file().sync_all())
+            .map_err(|e| ConflictError::Io(e.to_string()))?;
+        temp.persist(&target)
+            .map_err(|e| ConflictError::Io(e.error.to_string()))?;
         let name = path.to_string_lossy().into_owned();
         self.exec_ok(info, &["add", "--", &name]).await?;
         Ok(())

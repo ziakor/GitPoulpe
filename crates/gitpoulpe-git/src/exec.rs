@@ -76,6 +76,11 @@ impl Git {
         input: Option<Vec<u8>>,
     ) -> Result<ExecOut, ExecError> {
         let worktree = info.worktree.as_deref().ok_or(ExecError::NoWorktree)?;
+        let mut env = env.to_vec();
+        if !env.iter().any(|(k, _)| k == "GIT_LITERAL_PATHSPECS") {
+            env.push(("GIT_LITERAL_PATHSPECS".into(), "1".into()));
+        }
+        let env = &env[..];
         let args: Vec<OsString> = args.iter().map(OsString::from).collect();
         let refs: Vec<&OsStr> = args.iter().map(OsString::as_os_str).collect();
         let mut out = Vec::new();
