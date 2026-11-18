@@ -3,6 +3,7 @@ mod commit;
 mod diff;
 mod error;
 mod history;
+mod hooks;
 mod identity;
 mod ignore;
 mod merge;
@@ -35,6 +36,7 @@ pub use diff::{
 };
 pub use error::{Diagnostic, OpenError, ReadError};
 pub use history::{Commit, CommitDetail, GraphLayout, GraphRow, glyphs};
+pub use hooks::{HookInfo, HooksView};
 pub use identity::{Generation, RepoId, RequestId, SessionId};
 pub use ignore::{
     IgnoreReason, IgnoreRuleError, IgnoreScope, IgnoreSource, is_plain_relative, rule_for_path,

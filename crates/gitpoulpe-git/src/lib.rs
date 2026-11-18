@@ -10,6 +10,7 @@ mod diff_parse;
 mod exec;
 mod fetch;
 mod history;
+mod hooks;
 mod identity;
 mod ignore;
 mod init;
@@ -46,6 +47,7 @@ pub use diff_parse::{DiffParseError, DiffParser, DiffSummary};
 pub use exec::ExecError;
 pub use fetch::{FetchOutcome, RefUpdate};
 pub use history::{HistoryError, HistoryStream};
+pub use hooks::{HookError, KNOWN_HOOKS};
 pub use identity::{
     Identity, IdentityError, SigningCheck, check_signing, check_signing_with_env, profile_env,
     signing_config,

@@ -7,6 +7,8 @@ mod conflicts_view;
 mod engine;
 mod history_state;
 mod history_view;
+mod hook_screen;
+mod hook_screen_view;
 mod ignored;
 mod ignored_view;
 mod initialize;

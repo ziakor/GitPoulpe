@@ -69,6 +69,7 @@ impl State {
         self.close_reflog();
         self.close_undo();
         self.close_worktrees();
+        self.close_hooks();
         self.profiles_open = false;
         self.stashes.open = true;
         self.reload_stashes();

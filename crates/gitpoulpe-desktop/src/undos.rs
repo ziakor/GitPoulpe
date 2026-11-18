@@ -179,6 +179,7 @@ impl State {
         self.close_stashes();
         self.close_reflog();
         self.close_worktrees();
+        self.close_hooks();
         self.profiles_open = false;
         self.undo_screen.open = true;
         self.undo_screen.message = None;

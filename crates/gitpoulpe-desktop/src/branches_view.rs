@@ -811,6 +811,7 @@ pub fn branches_screen(s: &State) -> El {
                 .grow(1.0)
                 .truncate(),
         )
+        .child(action(s, "branches-hooks", "Hooks", false).on_press(|s: &mut State| s.open_hooks()))
         .child(
             action(s, "branches-worktrees", "Worktrees", false)
                 .on_press(|s: &mut State| s.open_worktrees()),

@@ -14,6 +14,7 @@ mod cloning;
 mod committing;
 mod conflicting;
 mod history;
+mod hooking;
 mod ignoring;
 mod initializing;
 mod inspecting;

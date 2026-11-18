@@ -7,20 +7,20 @@ use std::sync::{Arc, Mutex};
 use gitpoulpe_core::{
     AmendInfo, AmendRequest, Branch, BranchLoss, ChangeEntry, Commit, CommitDetail, CommitOutcome,
     CommitRange, CommitRequest, ConflictFile, ConflictVersions, DiffLine, DiffSide, DocumentMeta,
-    EmptyPolicy, Generation, IgnoreReason, IgnoreScope, MergeMode, MergeOutcome, MergePreview,
-    OpenError, Operation, OperationKind, PlanItem, Profile, PullOutcome, PullPreview, PullStrategy,
-    PushMode, PushOutcome, PushPreview, RangeError, ReadError, RebaseOutcome, RebasePlanInfo,
-    ReflogEntry, ReflogInspect, Remote, RemoteImpact, ResetMode, ResetOutcome, ResetPreview,
-    Resolution, SequenceKind, SequenceOutcome, SequencePreview, SessionId, SessionInfo,
-    StageOutcome, Stash, StashApplied, StashDetail, StashScope, StatusSnapshot, Tag, UndoDirection,
-    UndoRecord, Worktree, WorktreeRemoval, WriteError, WriteJob, mask_url,
+    EmptyPolicy, Generation, HooksView, IgnoreReason, IgnoreScope, MergeMode, MergeOutcome,
+    MergePreview, OpenError, Operation, OperationKind, PlanItem, Profile, PullOutcome, PullPreview,
+    PullStrategy, PushMode, PushOutcome, PushPreview, RangeError, ReadError, RebaseOutcome,
+    RebasePlanInfo, ReflogEntry, ReflogInspect, Remote, RemoteImpact, ResetMode, ResetOutcome,
+    ResetPreview, Resolution, SequenceKind, SequenceOutcome, SequencePreview, SessionId,
+    SessionInfo, StageOutcome, Stash, StashApplied, StashDetail, StashScope, StatusSnapshot, Tag,
+    UndoDirection, UndoRecord, Worktree, WorktreeRemoval, WriteError, WriteJob, mask_url,
 };
 use gitpoulpe_git::{
     BranchChoice, BranchError, CacheConfig, Cancel, CloneError, ConflictError, ConflictSide,
     DeleteMode, DiffCache, DiffError, DiffReader, FetchOutcome, Git, HistoryError, HistoryStream,
-    HostKey, Identity, IdentityError, IgnoreError, IgnoredList, InspectError, MAX_WAIT, NetError,
-    PullRequest, PushRequest, QUIET_PERIOD, RemoteCheck, RepoWatcher, SequenceRequest, Signal,
-    SigningCheck, StashError, WorktreeError, check_signing, coalesce,
+    HookError, HostKey, Identity, IdentityError, IgnoreError, IgnoredList, InspectError, MAX_WAIT,
+    NetError, PullRequest, PushRequest, QUIET_PERIOD, RemoteCheck, RepoWatcher, SequenceRequest,
+    Signal, SigningCheck, StashError, WorktreeError, check_signing, coalesce,
 };
 use rune::Waker;
 use std::time::Duration;
@@ -417,6 +417,15 @@ pub enum Command {
         request: u64,
         op: WorktreeOp,
     },
+    HookList {
+        request: u64,
+    },
+    HookSet {
+        request: u64,
+        name: String,
+        enabled: bool,
+        confirm_shared: bool,
+    },
     NetCancel,
     InitPrepare {
         request: u64,
@@ -713,6 +722,16 @@ pub enum Event {
     WorktreeFinished {
         request: u64,
         result: Result<BranchDone, String>,
+    },
+    HooksListed {
+        request: u64,
+        result: Result<Box<HooksView>, String>,
+    },
+    HookChanged {
+        request: u64,
+        name: String,
+        enabled: bool,
+        result: Result<Box<HooksView>, HookError>,
     },
     CloneProgress {
         request: u64,
@@ -1702,6 +1721,46 @@ async fn run(
                             continue;
                         };
                         tokio::spawn(worktree_op(shared.clone(), current, request, op));
+                    }
+                    Command::HookList { request } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .list_hooks(&current.info)
+                                .await
+                                .map(Box::new)
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::HooksListed { request, result });
+                        });
+                    }
+                    Command::HookSet {
+                        request,
+                        name,
+                        enabled,
+                        confirm_shared,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let _guard = current.writer.lock().await;
+                            let result = shared
+                                .git
+                                .set_hook_enabled(&current.info, &name, enabled, confirm_shared)
+                                .await
+                                .map(Box::new);
+                            shared.emit(Event::HookChanged {
+                                request,
+                                name,
+                                enabled,
+                                result,
+                            });
+                        });
                     }
                     Command::NetCancel => {
                         if let Some(cancel) = net_cancel.take() {
