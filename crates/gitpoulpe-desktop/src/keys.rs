@@ -81,6 +81,10 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         return copy_selection(s, tx);
     }
     s.notice = None;
+    if s.profiles_open && event.key == Key::Escape {
+        s.close_profiles();
+        return true;
+    }
     if event.mods.cmd {
         if event.is_command('o') {
             open_dialog(tx);

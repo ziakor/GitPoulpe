@@ -8,6 +8,7 @@ use rune::{Env, Runtime};
 use tempfile::TempDir;
 
 mod acceptance;
+mod profiles;
 mod staging;
 
 use crate::state::{Screen, State, ViewKind, path_from_args};
@@ -1379,6 +1380,8 @@ fn every_control_stays_inside_the_window_at_the_smallest_supported_size() {
     let (_repo, rt) = sized_runtime(6, 720.0, 480.0);
     for key in [
         "open",
+        "profiles",
+        "refresh",
         "theme",
         "Non indexés",
         "Indexés",

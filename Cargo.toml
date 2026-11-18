@@ -11,6 +11,7 @@ rust-version = "1.100.0"
 [workspace.dependencies]
 rune = { git = "https://github.com/anomalyco/rune", rev = "1dba3423fd1f1904553422e7814700f817abe8af", features = ["native-file-dialog"] }
 notify = "=8.2.2"
+serde = { version = "=1.0.229", features = ["derive"] }
 tokio = { version = "=1.54.1", features = ["rt-multi-thread", "process", "sync", "time", "io-util", "macros"] }
 
 [patch.crates-io]

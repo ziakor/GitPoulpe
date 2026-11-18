@@ -2,7 +2,7 @@
 
 A free, open-source native Git client written in Rust, with the [Rune](https://github.com/anomalyco/rune) UI toolkit (GPLv3). Linux first; Windows and macOS will follow.
 
-Status: milestone M1, "local inspection", is delivered. Milestone M2, "local work", is in progress: so far the app can stage and unstage whole files, single blocks and selected lines. Reading a repository never modifies it; the only writes are the explicit actions listed under "Writing".
+Status: milestone M1, "local inspection", is delivered. Milestone M2, "local work", is in progress: so far the app can stage and unstage whole files, single blocks and selected lines, and manage local Git profiles. Reading a repository never modifies it; the only writes are the explicit actions listed under "Writing".
 
 The interface is currently in French only.
 
@@ -24,6 +24,13 @@ Git runs as an external program, without a shell, with the repository's filters,
 - Unstage, in the staged view: "Désindexer" button in a file header, `u` for the current file (or for the selected lines when there are some), tick several files and use "Désindexer la sélection" or `Shift+U`. "Désindexer ce bloc" and line selection work like their staging counterparts, including for newly added files; deleted, renamed and mode-changed files are unstaged whole. A staged rename is undone as a whole. Unstaging never touches the working directory and works before the first commit.
 - Nothing is staged if a file changed after it was displayed, if the index changed, or if the file is in conflict; the state is re-read and a message says why.
 - Git runs as configured for these actions (clean filters, such as Git LFS, apply). An existing `index.lock` is reported, never removed.
+
+## Profiles
+
+- "Profil" button in the top bar: create profiles (name, Git name, e-mail, optional commit signing reference) and choose which one a repository uses. The effective identity (what Git would use, from `git var`) is shown for the open repository.
+- A profile is applied only to the commands GitPoulpe runs. Nothing is written to your Git configuration, global or local; a commit made in a terminal can therefore use another identity.
+- Profiles and the repository assignments are stored in GitPoulpe's own preferences file, outside the repository.
+- For signing, only a reference is stored: the path of an SSH public key (`.pub`) or a GPG key identifier. A private key path is refused, and an unreadable key or a GPG key missing from the keyring is reported with how to fix it. No private key or passphrase is ever read or stored. Signing itself arrives with the commit feature.
 
 ## Keyboard shortcuts
 

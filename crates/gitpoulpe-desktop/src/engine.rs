@@ -5,12 +5,12 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 use gitpoulpe_core::{
-    ChangeEntry, DiffLine, DiffSide, DocumentMeta, Generation, OpenError, RangeError, ReadError,
-    SessionId, SessionInfo, StageOutcome, StatusSnapshot, WriteError, WriteJob,
+    ChangeEntry, DiffLine, DiffSide, DocumentMeta, Generation, OpenError, Profile, RangeError,
+    ReadError, SessionId, SessionInfo, StageOutcome, StatusSnapshot, WriteError, WriteJob,
 };
 use gitpoulpe_git::{
-    CacheConfig, Cancel, DiffCache, DiffReader, Git, MAX_WAIT, QUIET_PERIOD, RepoWatcher, Signal,
-    coalesce,
+    CacheConfig, Cancel, DiffCache, DiffReader, Git, Identity, IdentityError, MAX_WAIT,
+    QUIET_PERIOD, RepoWatcher, Signal, SigningCheck, check_signing, coalesce,
 };
 use rune::Waker;
 use std::time::Duration;
@@ -48,6 +48,14 @@ pub enum Command {
         request: u64,
         job: Box<WriteJob>,
     },
+    Identity {
+        request: u64,
+        profile: Option<Box<Profile>>,
+    },
+    CheckSigning {
+        request: u64,
+        profile: Box<Profile>,
+    },
     Shutdown(std::sync::mpsc::Sender<()>),
     Read {
         generation: Generation,
@@ -71,6 +79,15 @@ pub enum Event {
     Staged {
         request: u64,
         result: Result<StageOutcome, WriteError>,
+    },
+    Identity {
+        request: u64,
+        result: Result<Identity, String>,
+        signing: SigningCheck,
+    },
+    Signing {
+        request: u64,
+        check: SigningCheck,
     },
     WatchState {
         available: bool,
@@ -273,6 +290,19 @@ async fn run(
                             start_refresh(&shared, current, request, false);
                         }
                     }
+                    Command::Identity { request, profile } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        tokio::spawn(identity(shared.clone(), current, request, profile));
+                    }
+                    Command::CheckSigning { request, profile } => {
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let check = check_signing(&profile).await;
+                            shared.emit(Event::Signing { request, check });
+                        });
+                    }
                     Command::Write { request, job } => {
                         let Some(current) = session.clone() else {
                             continue;
@@ -405,6 +435,31 @@ async fn open(
         .await
         .map_err(describe_read_error)?;
     Ok((info, snapshot))
+}
+
+async fn identity(
+    shared: Arc<Shared>,
+    session: Arc<Session>,
+    request: u64,
+    profile: Option<Box<Profile>>,
+) {
+    let result = shared
+        .git
+        .effective_identity(&session.info, profile.as_deref(), &Cancel::new())
+        .await
+        .map_err(|error| match error {
+            IdentityError::Unknown(message) => message,
+            other => other.to_string(),
+        });
+    let signing = match profile.as_deref() {
+        Some(profile) => check_signing(profile).await,
+        None => SigningCheck::NotRequested,
+    };
+    shared.emit(Event::Identity {
+        request,
+        result,
+        signing,
+    });
 }
 
 async fn write(shared: Arc<Shared>, session: Arc<Session>, request: u64, job: WriteJob) {

@@ -1,6 +1,7 @@
 mod diff;
 mod error;
 mod identity;
+mod profile;
 mod session;
 mod split;
 mod status;
@@ -12,6 +13,7 @@ pub use diff::{
 };
 pub use error::{Diagnostic, OpenError, ReadError};
 pub use identity::{Generation, RepoId, RequestId, SessionId};
+pub use profile::{Profile, ProfileBook, ProfileError, SigningPreference};
 pub use session::{RepoKind, SessionInfo, SessionState, StaleSnapshot};
 pub use split::{SplitCells, SplitIndex, SplitIndexBuilder, SplitRow, SplitUnit, split_rows};
 pub use status::{BranchInfo, ChangeEntry, EntryKind, StatusCode, StatusSnapshot, display_label};

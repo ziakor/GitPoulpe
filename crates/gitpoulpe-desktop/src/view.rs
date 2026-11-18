@@ -37,6 +37,11 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
             message_screen(&p, "Impossible d'ouvrir ce dépôt", &detail, true)
         }
     };
+    let body = if s.profiles_open {
+        crate::profiles_view::profiles_screen(s)
+    } else {
+        body
+    };
     col()
         .w_full()
         .h_full()
@@ -148,8 +153,33 @@ fn top_bar(s: &State) -> El {
         )
         .child(context)
         .child(open_button(&p, false))
+        .child(profile_button(s))
         .child(refresh_button(s))
         .child(theme_toggle)
+}
+
+fn profile_button(s: &State) -> El {
+    let p = s.palette;
+    let compact = s.window_width < 900.0;
+    let caption = match (s.repo.is_some(), s.active_profile()) {
+        _ if compact => "Profils".to_owned(),
+        (true, Some(profile)) => format!("Profil : {}", profile.label),
+        (true, None) => "Profil : configuration Git".to_owned(),
+        (false, _) => "Profils".to_owned(),
+    };
+    el().key("profiles")
+        .role("button")
+        .label("Profils Git")
+        .focusable(true)
+        .focus_ring(2.0, 2.0, p.accent)
+        .h(32.0)
+        .px(10.0)
+        .center()
+        .radius(3.0)
+        .hover(p.hover)
+        .on_press(|s: &mut State| s.open_profiles())
+        .max_w(260.0)
+        .child(text(caption).font(theme::BODY).color(p.muted).truncate())
 }
 
 fn refresh_button(s: &State) -> El {

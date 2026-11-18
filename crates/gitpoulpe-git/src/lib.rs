@@ -3,6 +3,7 @@ mod cancel;
 mod diagnostics;
 mod diff;
 mod diff_parse;
+mod identity;
 mod open;
 mod parse;
 mod process;
@@ -15,6 +16,10 @@ pub use cancel::Cancel;
 pub use diagnostics::filter_diagnostic;
 pub use diff::{DiffDocument, DiffError, DiffReader};
 pub use diff_parse::{DiffParseError, DiffParser, DiffSummary};
+pub use identity::{
+    Identity, IdentityError, SigningCheck, check_signing, check_signing_with_env, profile_env,
+    signing_config,
+};
 pub use parse::{ParseError, StatusParser};
 pub use stage::stamp_of;
 pub use watch::{MAX_WAIT, QUIET_PERIOD, RepoWatcher, Signal, WatchError, coalesce, is_relevant};

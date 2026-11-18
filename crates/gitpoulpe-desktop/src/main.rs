@@ -1,6 +1,8 @@
 mod engine;
 mod keys;
 mod perf;
+mod profiles;
+mod profiles_view;
 mod state;
 mod theme;
 mod view;

@@ -5,11 +5,14 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::profiles::{IdentityShown, PROFILES_KEY, ProfileForm, SigningKind};
 use gitpoulpe_core::{
     BuildState, ChangeEntry, DiffLine, DiffSide, DocumentKind, DocumentMeta, Generation, HunkLines,
     HunkSpec, LineSelection, Refusal, SplitIndex, StageOutcome, StageTarget, StatusSnapshot,
     WriteError, WriteJob, display_label,
 };
+use gitpoulpe_core::{Profile, ProfileBook};
+use gitpoulpe_git::SigningCheck;
 use rune::prefs::Prefs;
 use rune::{Live, TextEdit, Tx, Waker};
 
@@ -146,6 +149,12 @@ pub struct State {
     pub marked: HashSet<PathBuf>,
     pub marks_version: u32,
     pub line_pick: Option<LinePick>,
+    pub book: ProfileBook,
+    pub identity_shown: Option<IdentityShown>,
+    pub profiles_open: bool,
+    pub form: ProfileForm,
+    identity_request: u64,
+    signing_request: u64,
     pub pick_version: u32,
     pub writing: bool,
     stage_request: u64,
@@ -236,6 +245,12 @@ impl State {
             marked: HashSet::new(),
             marks_version: 0,
             line_pick: None,
+            book: prefs.get::<ProfileBook>(PROFILES_KEY).unwrap_or_default(),
+            identity_shown: None,
+            profiles_open: false,
+            form: ProfileForm::default(),
+            identity_request: 0,
+            signing_request: 0,
             pick_version: 0,
             writing: false,
             stage_request: 0,
@@ -483,6 +498,7 @@ impl State {
                 self.stick_end = false;
                 self.screen = Screen::Ready;
                 self.refilter();
+                self.request_identity();
                 true
             }
             Event::Refreshed {
@@ -503,6 +519,28 @@ impl State {
                 } else {
                     WatchStatus::Unavailable(reason)
                 };
+                true
+            }
+            Event::Identity {
+                request,
+                result,
+                signing,
+            } => {
+                if request != self.identity_request {
+                    return false;
+                }
+                self.identity_shown = Some(IdentityShown {
+                    profile: self.active_profile().map(|p| p.label.clone()),
+                    result,
+                    signing,
+                });
+                true
+            }
+            Event::Signing { request, check } => {
+                if request != self.signing_request {
+                    return false;
+                }
+                self.form.signing_check = Some(check);
                 true
             }
             Event::Staged { request, result } => {
@@ -1432,5 +1470,132 @@ impl State {
             ViewKind::Unstaged => WriteJob::StageLines { target, selection },
             ViewKind::Staged => WriteJob::UnstageLines { target, selection },
         });
+    }
+}
+
+impl State {
+    pub fn repo_key(&self) -> Option<String> {
+        let repo = self.repo.as_ref()?;
+        Some(ProfileBook::repo_key(repo.snapshot.repo.common_dir()))
+    }
+
+    pub fn active_profile(&self) -> Option<&Profile> {
+        self.book.profile_for(&self.repo_key()?)
+    }
+
+    pub fn request_identity(&mut self) {
+        if self.repo.is_none() {
+            return;
+        }
+        self.identity_request += 1;
+        let profile = self.active_profile().cloned().map(Box::new);
+        if let Some(engine) = &self.engine {
+            engine.send(Command::Identity {
+                request: self.identity_request,
+                profile,
+            });
+        }
+    }
+
+    fn request_form_signing_check(&mut self, profile: &Profile) {
+        self.form.signing_check = None;
+        if profile.signing == gitpoulpe_core::SigningPreference::None {
+            self.form.signing_check = Some(SigningCheck::NotRequested);
+            return;
+        }
+        self.signing_request += 1;
+        if let Some(engine) = &self.engine {
+            engine.send(Command::CheckSigning {
+                request: self.signing_request,
+                profile: Box::new(profile.clone()),
+            });
+        }
+    }
+
+    fn persist_profiles(&mut self) {
+        let _ = self.prefs.set(PROFILES_KEY, &self.book);
+    }
+
+    pub fn open_profiles(&mut self) {
+        self.profiles_open = true;
+        let selected = self
+            .active_profile()
+            .or_else(|| self.book.profiles.first())
+            .cloned();
+        match selected {
+            Some(profile) => self.edit_profile(&profile.id),
+            None => self.new_profile(),
+        }
+    }
+
+    pub fn close_profiles(&mut self) {
+        self.profiles_open = false;
+    }
+
+    pub fn new_profile(&mut self) {
+        self.form = ProfileForm::default();
+    }
+
+    pub fn edit_profile(&mut self, id: &str) {
+        let Some(profile) = self.book.get(id).cloned() else {
+            return;
+        };
+        self.form.load(&profile);
+        self.request_form_signing_check(&profile);
+    }
+
+    pub fn set_form_signing(&mut self, kind: SigningKind) {
+        self.form.signing = kind;
+        self.form.signing_check = None;
+    }
+
+    pub fn save_profile(&mut self) {
+        let id = self
+            .form
+            .editing
+            .clone()
+            .unwrap_or_else(|| self.book.new_id());
+        let profile = self.form.to_profile(id.clone());
+        if let Err(error) = self.book.upsert(profile) {
+            self.form.error = Some(error.to_string());
+            return;
+        }
+        self.persist_profiles();
+        let saved = self.book.get(&id).cloned();
+        self.form.error = None;
+        self.form.editing = Some(id);
+        if let Some(saved) = saved {
+            self.request_form_signing_check(&saved);
+        }
+        self.request_identity();
+        self.notice = Some("Profil enregistré.".to_owned());
+    }
+
+    pub fn delete_profile(&mut self) {
+        let Some(id) = self.form.editing.clone() else {
+            return;
+        };
+        self.book.remove(&id);
+        self.persist_profiles();
+        self.form = ProfileForm::default();
+        self.request_identity();
+        self.notice = Some("Profil supprimé.".to_owned());
+    }
+
+    pub fn use_profile_here(&mut self, id: Option<String>) {
+        let Some(key) = self.repo_key() else {
+            return;
+        };
+        match self.book.assign(&key, id.as_deref()) {
+            Ok(()) => {
+                self.persist_profiles();
+                self.request_identity();
+                self.notice = Some(match id {
+                    Some(_) => "Profil appliqué à ce dépôt.".to_owned(),
+                    None => "Ce dépôt suit de nouveau la configuration Git.".to_owned(),
+                });
+            }
+            Err(error) => self.form.error = Some(error.to_string()),
+        }
     }
 }
