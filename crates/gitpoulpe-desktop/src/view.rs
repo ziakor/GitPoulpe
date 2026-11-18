@@ -61,6 +61,8 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
         crate::conflicts_view::conflicts_screen(s)
     } else if s.stashes.open {
         crate::stashes_view::stashes_screen(s)
+    } else if s.reflog.open {
+        crate::reflogs_view::reflog_screen(s)
     } else {
         body
     };

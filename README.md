@@ -128,6 +128,13 @@ Git runs as an external program, without a shell, with the repository's filters,
 - A rewritten history can only be published through `--force-with-lease` with the exact remote commit known at the time (the remote-tracking branch of the last fetch), after a confirmation that names that commit and lists the remote commits that would stop being reachable. If somebody pushed since, the push is refused and nothing is overwritten. There is no plain force.
 - After a successful push the remote branch is read back (`ls-remote`) and compared with what was sent; a remote that did not keep the value (a server hook, for instance) is reported. The transfer shows its progress and can be cancelled; SSH, HTTPS and local remotes behave as described above, and a `pre-push` hook runs as configured. Pushes are recorded in the per-repository journal.
 
+## Reflog
+
+- "Reflog" on the branch screen lists the entries of the `HEAD` reflog or of the current branch's reflog, newest first, with the selector (`HEAD@{n}`), the operation and its message, the commit and the date. The file is read directly, so an entry whose object has been pruned is still listed and marked "objet absent".
+- Selecting an entry inspects its commit (subject, author, parents) and says which branches or tags still reach it; a commit that only the reflog keeps is called out.
+- "Créer une branche de récupération" gives a name to an old commit without moving or touching the current branch, the index or the working tree (an existing name is refused). An object that is no longer in the repository can be neither inspected nor recovered, and the screen says so instead of reporting a recovery. Recoveries are recorded in the per-repository journal.
+- Reflogs are local and temporary: Git eventually expires them, which is why the recovery branch is the durable mark.
+
 ## Committing
 
 - Write a message in the box at the bottom of the file list, then "Créer le commit" or Ctrl+Enter. The commit contains exactly the staged content shown, with the effective identity of the repository's profile (or your Git configuration when it has none). The box also shows who will be the author and whether the profile's signing key is usable.

@@ -189,6 +189,7 @@ pub struct State {
     pub init: crate::initialize::InitState,
     pub conflicts: crate::conflicts::ConflictsState,
     pub stashes: crate::stashes::StashesState,
+    pub reflog: crate::reflogs::ReflogState,
     pub publishing: crate::publishing::PublishSlot,
     pub operation_kind: Option<gitpoulpe_core::OperationKind>,
     pub(crate) probe_request: u64,
@@ -314,6 +315,7 @@ impl State {
             init: crate::initialize::InitState::default(),
             conflicts: crate::conflicts::ConflictsState::default(),
             stashes: crate::stashes::StashesState::default(),
+            reflog: crate::reflogs::ReflogState::default(),
             publishing: crate::publishing::PublishSlot::default(),
             operation_kind: None,
             probe_request: 0,
@@ -597,6 +599,7 @@ impl State {
                 self.remotes = crate::remotes::RemotesState::default();
                 self.conflicts = crate::conflicts::ConflictsState::default();
                 self.stashes = crate::stashes::StashesState::default();
+                self.reflog = crate::reflogs::ReflogState::default();
                 self.publishing = crate::publishing::PublishSlot::default();
                 self.operation_kind = None;
                 self.writing = false;
@@ -799,6 +802,13 @@ impl State {
                 percent,
             } => self.apply_push_progress(request, phase, percent),
             Event::PushFinished { request, result } => self.apply_push_finished(request, result),
+            Event::ReflogListed { request, result } => self.apply_reflog_listed(request, result),
+            Event::ReflogInspected { request, result } => {
+                self.apply_reflog_inspected(request, result)
+            }
+            Event::ReflogRecovered { request, result } => {
+                self.apply_reflog_recovered(request, result)
+            }
             Event::SshScanned { request, result } => self.apply_ssh_scanned(request, result),
             Event::SshTrusted { request, result } => self.apply_ssh_trusted(request, result),
             Event::TagsListed { request, result } => self.apply_tags_listed(request, result),
@@ -1837,6 +1847,7 @@ impl State {
         self.close_remotes();
         self.close_conflicts();
         self.close_stashes();
+        self.close_reflog();
         let selected = self
             .active_profile()
             .or_else(|| self.book.profiles.first())
@@ -2190,6 +2201,7 @@ impl State {
         self.close_remotes();
         self.close_conflicts();
         self.close_stashes();
+        self.close_reflog();
         self.start_history();
     }
 
@@ -2321,6 +2333,7 @@ impl State {
         self.close_remotes();
         self.close_conflicts();
         self.close_stashes();
+        self.close_reflog();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::CommitInspect {

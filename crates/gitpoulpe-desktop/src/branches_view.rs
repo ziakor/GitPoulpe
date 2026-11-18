@@ -655,6 +655,9 @@ pub fn branches_screen(s: &State) -> El {
                 .truncate(),
         )
         .child(
+            action(s, "branches-reflog", "Reflog", false).on_press(|s: &mut State| s.open_reflog()),
+        )
+        .child(
             action(s, "branches-stashes", "Réserve", false)
                 .on_press(|s: &mut State| s.open_stashes()),
         )

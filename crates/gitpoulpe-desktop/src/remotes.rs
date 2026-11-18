@@ -121,6 +121,7 @@ impl State {
         self.close_tags();
         self.close_conflicts();
         self.close_stashes();
+        self.close_reflog();
         self.profiles_open = false;
         self.remotes.open = true;
         self.reload_remotes();

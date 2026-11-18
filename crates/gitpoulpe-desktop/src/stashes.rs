@@ -66,6 +66,7 @@ impl State {
         self.close_tags();
         self.close_remotes();
         self.close_conflicts();
+        self.close_reflog();
         self.profiles_open = false;
         self.stashes.open = true;
         self.reload_stashes();

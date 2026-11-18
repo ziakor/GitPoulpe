@@ -9,8 +9,9 @@ use gitpoulpe_core::{
     CommitRange, CommitRequest, ConflictFile, ConflictVersions, DiffLine, DiffSide, DocumentMeta,
     Generation, IgnoreReason, IgnoreScope, MergeMode, MergeOutcome, MergePreview, OpenError,
     Operation, OperationKind, Profile, PushMode, PushOutcome, PushPreview, RangeError, ReadError,
-    Remote, RemoteImpact, Resolution, SessionId, SessionInfo, StageOutcome, Stash, StashApplied,
-    StashDetail, StashScope, StatusSnapshot, Tag, WriteError, WriteJob, mask_url,
+    ReflogEntry, ReflogInspect, Remote, RemoteImpact, Resolution, SessionId, SessionInfo,
+    StageOutcome, Stash, StashApplied, StashDetail, StashScope, StatusSnapshot, Tag, WriteError,
+    WriteJob, mask_url,
 };
 use gitpoulpe_git::{
     BranchError, CacheConfig, Cancel, CloneError, ConflictError, ConflictSide, DeleteMode,
@@ -315,6 +316,19 @@ pub enum Command {
         expected: Option<String>,
         set_upstream: bool,
     },
+    ReflogList {
+        request: u64,
+        reference: String,
+    },
+    ReflogInspect {
+        request: u64,
+        oid: String,
+    },
+    ReflogRecover {
+        request: u64,
+        oid: String,
+        name: String,
+    },
     NetCancel,
     InitPrepare {
         request: u64,
@@ -544,6 +558,18 @@ pub enum Event {
     PushFinished {
         request: u64,
         result: Result<PushOutcome, String>,
+    },
+    ReflogListed {
+        request: u64,
+        result: Result<Vec<ReflogEntry>, String>,
+    },
+    ReflogInspected {
+        request: u64,
+        result: Result<ReflogInspect, String>,
+    },
+    ReflogRecovered {
+        request: u64,
+        result: Result<BranchDone, String>,
     },
     CloneProgress {
         request: u64,
@@ -1224,6 +1250,61 @@ async fn run(
                                 .await
                                 .map_err(|e| e.to_string());
                             shared.emit(Event::PushFinished { request, result });
+                        });
+                    }
+                    Command::ReflogList { request, reference } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .list_reflog(&current.info, &reference)
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::ReflogListed { request, result });
+                        });
+                    }
+                    Command::ReflogInspect { request, oid } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .inspect_reflog_entry(&current.info, &oid)
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::ReflogInspected { request, result });
+                        });
+                    }
+                    Command::ReflogRecover { request, oid, name } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let _guard = current.writer.lock().await;
+                            let result = shared
+                                .git
+                                .create_recovery_branch(&current.info, &oid, &name)
+                                .await
+                                .map(|()| BranchDone {
+                                    message: format!(
+                                        "Branche « {name} » créée sur {} : la branche courante n'a pas bougé.",
+                                        short(&oid)
+                                    ),
+                                    journal: Some((
+                                        "recover-branch".into(),
+                                        None,
+                                        Some(oid.clone()),
+                                        name.clone(),
+                                    )),
+                                })
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::ReflogRecovered { request, result });
                         });
                     }
                     Command::NetCancel => {

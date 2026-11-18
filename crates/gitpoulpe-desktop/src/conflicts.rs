@@ -123,6 +123,7 @@ impl State {
         self.close_tags();
         self.close_remotes();
         self.close_stashes();
+        self.close_reflog();
         self.profiles_open = false;
         self.conflicts.open = true;
         self.reload_conflicts();
