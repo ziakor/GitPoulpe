@@ -8,6 +8,7 @@ use rune::{Env, Runtime};
 use tempfile::TempDir;
 
 mod acceptance;
+mod amending;
 mod committing;
 mod profiles;
 mod staging;
@@ -631,7 +632,7 @@ fn page_keys_home_and_arrows_scroll_the_diff_from_the_keyboard() {
 fn every_focusable_control_shows_a_visible_focus_when_reached_by_tab() {
     let (_repo, mut rt) = keyboard_runtime(5);
     let mut visited = std::collections::BTreeSet::new();
-    for _ in 0..12 {
+    for _ in 0..20 {
         press(&mut rt, rune::Key::Tab);
         if let Some(info) = rt.elements().into_iter().find(|e| e.focused) {
             assert!(info.focus_visible, "no visible focus on {:?}", info.key);

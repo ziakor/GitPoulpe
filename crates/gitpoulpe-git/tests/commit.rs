@@ -414,3 +414,303 @@ async fn a_locked_index_is_reported_and_the_lock_stays() {
     assert!(matches!(error, WriteError::IndexLocked(_)), "{error:?}");
     assert!(lock.exists());
 }
+
+fn amend_request(
+    snapshot: &StatusSnapshot,
+    info: &gitpoulpe_core::AmendInfo,
+    message: &str,
+    confirmed: bool,
+) -> gitpoulpe_core::AmendRequest {
+    gitpoulpe_core::AmendRequest {
+        commit: request(snapshot, message, Some(profile(SigningPreference::None))),
+        head: info.head.clone(),
+        confirmed_published: confirmed,
+    }
+}
+
+fn author_of_head(dir: &Path) -> String {
+    String::from_utf8(run_git(
+        dir,
+        &["log", "-1", "--format=%an <%ae> | %cn <%ce> | %s"],
+    ))
+    .unwrap()
+    .trim()
+    .to_owned()
+}
+
+fn original_commit(repo: &Path) {
+    write(repo, "a.txt", "one\n");
+    commit_all(repo, "first version");
+}
+
+#[tokio::test]
+async fn amending_the_message_then_the_content_replaces_the_tip_and_keeps_the_original_author() {
+    let tools = tempfile::tempdir().unwrap();
+    let git = isolated_git(tools.path());
+    let repo = init_repo();
+    let dir = repo.path();
+    original_commit(dir);
+    let first = head(dir);
+
+    let (info, snapshot) = open(&git, dir).await;
+    let amend = git
+        .amend_info(&info)
+        .await
+        .expect("there is a commit to amend");
+    assert_eq!(amend.head, first);
+    assert_eq!(amend.message, "first version");
+    assert!(amend.published_on.is_empty());
+    let outcome = git
+        .amend(
+            &info,
+            &amend_request(&snapshot, &amend, "better message", false),
+            &Cancel::new(),
+        )
+        .await
+        .unwrap();
+    let CommitOutcome::Created { before, oid, .. } = outcome else {
+        panic!("{outcome:?}")
+    };
+    assert_eq!(
+        before.as_deref(),
+        Some(first.as_str()),
+        "the previous tip is reported"
+    );
+    assert_ne!(oid, first);
+    assert_eq!(
+        run_git(dir, &["rev-list", "--count", "HEAD"]),
+        b"1\n",
+        "replaced, not added"
+    );
+    assert_eq!(
+        author_of_head(dir),
+        "t <t@example.com> | Ada Lovelace <ada@example.org> | better message",
+        "the author is kept, the committer is the profile"
+    );
+    assert_eq!(
+        run_git(dir, &["cat-file", "-t", &first]),
+        b"commit\n",
+        "the old commit still exists"
+    );
+
+    write(dir, "a.txt", "one\ntwo\n");
+    run_git(dir, &["add", "a.txt"]);
+    let (info, snapshot) = open(&git, dir).await;
+    let amend = git.amend_info(&info).await.unwrap();
+    let outcome = git
+        .amend(
+            &info,
+            &amend_request(&snapshot, &amend, "better message", false),
+            &Cancel::new(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        matches!(outcome, CommitOutcome::Created { .. }),
+        "{outcome:?}"
+    );
+    assert_eq!(
+        run_git(dir, &["show", "HEAD:a.txt"]),
+        b"one\ntwo\n",
+        "the content was amended"
+    );
+    assert_eq!(run_git(dir, &["rev-list", "--count", "HEAD"]), b"1\n");
+}
+
+#[tokio::test]
+async fn a_published_commit_needs_an_explicit_confirmation_and_names_where_it_is_published() {
+    let tools = tempfile::tempdir().unwrap();
+    let git = isolated_git(tools.path());
+    let bare = tempfile::tempdir().unwrap();
+    git_output(bare.path(), &["init", "-q", "--bare", "-b", "main"]);
+    let repo = init_repo();
+    let dir = repo.path();
+    original_commit(dir);
+    git_output(
+        dir,
+        &["remote", "add", "origin", &bare.path().to_string_lossy()],
+    );
+    assert!(
+        git_output(dir, &["push", "-q", "origin", "main"])
+            .status
+            .success()
+    );
+    let (info, snapshot) = open(&git, dir).await;
+    let amend = git.amend_info(&info).await.unwrap();
+    assert_eq!(amend.published_on, vec!["origin/main".to_owned()]);
+    let head_before = head(dir);
+
+    let outcome = git
+        .amend(
+            &info,
+            &amend_request(&snapshot, &amend, "rewritten", false),
+            &Cancel::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome, CommitOutcome::Refused(CommitRefusal::Published));
+    assert_eq!(
+        head(dir),
+        head_before,
+        "nothing was rewritten without confirmation"
+    );
+
+    let outcome = git
+        .amend(
+            &info,
+            &amend_request(&snapshot, &amend, "rewritten", true),
+            &Cancel::new(),
+        )
+        .await
+        .unwrap();
+    let CommitOutcome::Created { before, .. } = outcome else {
+        panic!("{outcome:?}")
+    };
+    assert_eq!(before.as_deref(), Some(head_before.as_str()));
+    assert_eq!(
+        run_git(dir, &["cat-file", "-t", &head_before]),
+        b"commit\n",
+        "the published commit is still reachable by its id"
+    );
+}
+
+#[tokio::test]
+async fn amending_is_refused_when_there_is_nothing_to_change_or_nothing_to_amend() {
+    let tools = tempfile::tempdir().unwrap();
+    let git = isolated_git(tools.path());
+    let repo = init_repo();
+    let dir = repo.path();
+    original_commit(dir);
+    let (info, snapshot) = open(&git, dir).await;
+    let amend = git.amend_info(&info).await.unwrap();
+    let head_before = head(dir);
+
+    for (message, expected) in [
+        ("first version", CommitRefusal::NothingToAmend),
+        ("  ", CommitRefusal::EmptyMessage),
+    ] {
+        let outcome = git
+            .amend(
+                &info,
+                &amend_request(&snapshot, &amend, message, false),
+                &Cancel::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(outcome, CommitOutcome::Refused(expected), "{message:?}");
+    }
+    let mut stale = amend.clone();
+    stale.head = "0".repeat(40);
+    let outcome = git
+        .amend(
+            &info,
+            &amend_request(&snapshot, &stale, "x", false),
+            &Cancel::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome, CommitOutcome::Refused(CommitRefusal::Stale));
+    assert_eq!(head(dir), head_before);
+
+    let unborn = init_repo();
+    let (info, snapshot) = open(&git, unborn.path()).await;
+    assert!(git.amend_info(&info).await.is_none());
+    let fake = gitpoulpe_core::AmendInfo {
+        head: String::new(),
+        message: String::new(),
+        published_on: Vec::new(),
+    };
+    let outcome = git
+        .amend(
+            &info,
+            &amend_request(&snapshot, &fake, "x", false),
+            &Cancel::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome, CommitOutcome::Refused(CommitRefusal::NoCommit));
+}
+
+#[tokio::test]
+async fn a_hook_that_refuses_an_amendment_leaves_the_tip_where_it_was_and_a_retry_works() {
+    let tools = tempfile::tempdir().unwrap();
+    let git = isolated_git(tools.path());
+    let repo = init_repo();
+    let dir = repo.path();
+    original_commit(dir);
+    let commit_msg = hook(dir, "commit-msg", "echo 'subject too long' >&2\nexit 1");
+    let (info, snapshot) = open(&git, dir).await;
+    let amend = git.amend_info(&info).await.unwrap();
+    let head_before = head(dir);
+
+    let outcome = git
+        .amend(
+            &info,
+            &amend_request(&snapshot, &amend, "a new subject", false),
+            &Cancel::new(),
+        )
+        .await
+        .unwrap();
+    let CommitOutcome::Failed { kind, output } = outcome else {
+        panic!("{outcome:?}")
+    };
+    assert_eq!(kind, CommitFailureKind::Hook);
+    assert!(output.contains("subject too long"), "{output}");
+    assert_eq!(
+        head(dir),
+        head_before,
+        "the previous tip is untouched and still the tip"
+    );
+
+    std::fs::remove_file(&commit_msg).unwrap();
+    let outcome = git
+        .amend(
+            &info,
+            &amend_request(&snapshot, &amend, "a new subject", false),
+            &Cancel::new(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        matches!(outcome, CommitOutcome::Created { .. }),
+        "{outcome:?}"
+    );
+}
+
+#[tokio::test]
+async fn amending_a_merge_commit_keeps_both_parents() {
+    let tools = tempfile::tempdir().unwrap();
+    let git = isolated_git(tools.path());
+    let repo = init_repo();
+    let dir = repo.path();
+    original_commit(dir);
+    run_git(dir, &["checkout", "-q", "-b", "side"]);
+    write(dir, "side.txt", "s\n");
+    commit_all(dir, "side work");
+    run_git(dir, &["checkout", "-q", "main"]);
+    write(dir, "main.txt", "m\n");
+    commit_all(dir, "main work");
+    run_git(dir, &["merge", "-q", "--no-ff", "-m", "merge side", "side"]);
+    let parents_before = run_git(dir, &["rev-list", "--parents", "-1", "HEAD"]);
+    let (info, snapshot) = open(&git, dir).await;
+    let amend = git.amend_info(&info).await.unwrap();
+    let outcome = git
+        .amend(
+            &info,
+            &amend_request(&snapshot, &amend, "merge side branch", false),
+            &Cancel::new(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        matches!(outcome, CommitOutcome::Created { .. }),
+        "{outcome:?}"
+    );
+    let after = String::from_utf8(run_git(dir, &["rev-list", "--parents", "-1", "HEAD"])).unwrap();
+    let before = String::from_utf8(parents_before).unwrap();
+    assert_eq!(
+        after.split_whitespace().skip(1).collect::<Vec<_>>(),
+        before.split_whitespace().skip(1).collect::<Vec<_>>(),
+        "the parents of the merge are unchanged"
+    );
+}

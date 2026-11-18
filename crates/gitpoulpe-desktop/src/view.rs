@@ -484,10 +484,18 @@ fn commit_box(s: &State) -> El {
             }
             false
         });
-    let caption = match staged {
-        0 => "Créer le commit".to_owned(),
-        1 => "Créer le commit (1 fichier)".to_owned(),
-        n => format!("Créer le commit ({n} fichiers)"),
+    let caption = if s.amend_mode {
+        match staged {
+            0 => "Amender le commit".to_owned(),
+            1 => "Amender le commit (+1 fichier)".to_owned(),
+            n => format!("Amender le commit (+{n} fichiers)"),
+        }
+    } else {
+        match staged {
+            0 => "Créer le commit".to_owned(),
+            1 => "Créer le commit (1 fichier)".to_owned(),
+            n => format!("Créer le commit ({n} fichiers)"),
+        }
     };
     let mut column = col()
         .w_full()
@@ -496,8 +504,12 @@ fn commit_box(s: &State) -> El {
         .gap(8.0)
         .fill(p.panel)
         .border(1.0, p.line)
+        .child(amend_toggle(s))
         .child(input)
         .child(lines);
+    if let Some(warning) = amend_warning(s) {
+        column = column.child(warning);
+    }
     if let Some(report) = &s.commit_report {
         column = column.child(
             text(report.clone())
@@ -519,6 +531,66 @@ fn commit_box(s: &State) -> El {
         .h(32.0)
         .on_press(|s: &mut State| s.commit()),
     )
+}
+
+fn amend_toggle(s: &State) -> El {
+    let p = s.palette;
+    let label = if s.amend_mode {
+        "☑ Amender le dernier commit"
+    } else {
+        "☐ Amender le dernier commit"
+    };
+    el().key("amend-toggle")
+        .role("checkbox")
+        .label("Amender le dernier commit")
+        .focusable(true)
+        .focus_ring(2.0, 2.0, p.accent)
+        .h(26.0)
+        .px(2.0)
+        .center_y()
+        .hover(p.hover)
+        .on_press(|s: &mut State| {
+            let on = !s.amend_mode;
+            s.set_amend_mode(on);
+        })
+        .child(text(label.to_owned()).font(theme::SMALL).color(p.text))
+}
+
+fn amend_warning(s: &State) -> Option<El> {
+    if !s.amend_mode {
+        return None;
+    }
+    let p = s.palette;
+    let info = s.amend_info.as_ref()?;
+    let short: String = info.head.chars().take(8).collect();
+    let subject = info.message.lines().next().unwrap_or_default().to_owned();
+    let mut card = col().w_full().gap(6.0).child(
+        text(format!("Commit amendé : {short} « {subject} »"))
+            .font(theme::SMALL)
+            .color(p.muted)
+            .wrap(),
+    );
+    if !info.published_on.is_empty() {
+        card = card
+            .child(
+                text(format!(
+                    "Ce commit est déjà publié sur {}. L'amender réécrit l'historique : le prochain envoi devra être forcé et gênera les personnes qui l'ont déjà récupéré. L'ancien commit {short} reste récupérable.",
+                    info.published_on.join(", ")
+                ))
+                .font(theme::SMALL)
+                .color(p.red)
+                .wrap(),
+            );
+        if s.amend_confirming {
+            card = card.child(
+                text("Clique sur « Amender le commit » pour confirmer.".to_owned())
+                    .font(theme::SMALL)
+                    .color(p.red)
+                    .wrap(),
+            );
+        }
+    }
+    Some(card)
 }
 
 fn marked_bar(s: &State) -> El {

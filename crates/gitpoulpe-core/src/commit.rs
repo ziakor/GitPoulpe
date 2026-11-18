@@ -11,12 +11,29 @@ pub struct CommitRequest {
     pub profile: Option<Profile>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AmendInfo {
+    pub head: String,
+    pub message: String,
+    pub published_on: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AmendRequest {
+    pub commit: CommitRequest,
+    pub head: String,
+    pub confirmed_published: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CommitRefusal {
     EmptyMessage,
     EmptyIndex,
     Conflicts,
     Stale,
+    NoCommit,
+    NothingToAmend,
+    Published,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

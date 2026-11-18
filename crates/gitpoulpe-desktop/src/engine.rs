@@ -5,9 +5,9 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 use gitpoulpe_core::{
-    ChangeEntry, CommitOutcome, CommitRequest, DiffLine, DiffSide, DocumentMeta, Generation,
-    OpenError, Profile, RangeError, ReadError, SessionId, SessionInfo, StageOutcome,
-    StatusSnapshot, WriteError, WriteJob,
+    AmendInfo, AmendRequest, ChangeEntry, CommitOutcome, CommitRequest, DiffLine, DiffSide,
+    DocumentMeta, Generation, OpenError, Profile, RangeError, ReadError, SessionId, SessionInfo,
+    StageOutcome, StatusSnapshot, WriteError, WriteJob,
 };
 use gitpoulpe_git::{
     CacheConfig, Cancel, DiffCache, DiffReader, Git, Identity, IdentityError, MAX_WAIT,
@@ -53,6 +53,13 @@ pub enum Command {
         request: u64,
         job: Box<CommitRequest>,
     },
+    Amend {
+        request: u64,
+        job: Box<AmendRequest>,
+    },
+    AmendInfo {
+        request: u64,
+    },
     Identity {
         request: u64,
         profile: Option<Box<Profile>>,
@@ -88,6 +95,10 @@ pub enum Event {
     Committed {
         request: u64,
         result: Result<CommitOutcome, WriteError>,
+    },
+    AmendInfo {
+        request: u64,
+        info: Option<AmendInfo>,
     },
     Identity {
         request: u64,
@@ -305,6 +316,22 @@ async fn run(
                         };
                         tokio::spawn(commit(shared.clone(), current, request, *job));
                     }
+                    Command::Amend { request, job } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        tokio::spawn(amend(shared.clone(), current, request, *job));
+                    }
+                    Command::AmendInfo { request } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let info = shared.git.amend_info(&current.info).await;
+                            shared.emit(Event::AmendInfo { request, info });
+                        });
+                    }
                     Command::Identity { request, profile } => {
                         let Some(current) = session.clone() else {
                             continue;
@@ -475,6 +502,15 @@ async fn identity(
         result,
         signing,
     });
+}
+
+async fn amend(shared: Arc<Shared>, session: Arc<Session>, request: u64, job: AmendRequest) {
+    let result = {
+        let _writer = session.writer.lock().await;
+        shared.git.amend(&session.info, &job, &Cancel::new()).await
+    };
+    shared.emit(Event::Committed { request, result });
+    start_refresh(&shared, &session, 0, false);
 }
 
 async fn commit(shared: Arc<Shared>, session: Arc<Session>, request: u64, job: CommitRequest) {

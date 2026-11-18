@@ -4,8 +4,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 use gitpoulpe_core::{
-    CommitFailureKind, CommitOutcome, CommitRefusal, CommitRequest, SessionInfo, SigningPreference,
-    WriteError,
+    AmendInfo, AmendRequest, CommitFailureKind, CommitOutcome, CommitRefusal, CommitRequest,
+    SessionInfo, SigningPreference, WriteError,
 };
 
 use crate::diagnostics::filter_diagnostic;
@@ -70,6 +70,78 @@ impl Git {
         request: &CommitRequest,
         cancel: &Cancel,
     ) -> Result<CommitOutcome, WriteError> {
+        self.run_commit(info, request, false, cancel).await
+    }
+
+    pub async fn amend_info(&self, info: &SessionInfo) -> Option<AmendInfo> {
+        let head = self.head(info).await?;
+        let message = self
+            .collect(info, &["log", "-1", "--format=%B"])
+            .await
+            .unwrap_or_default();
+        let published = self
+            .collect(
+                info,
+                &[
+                    "for-each-ref",
+                    "--contains",
+                    "HEAD",
+                    "refs/remotes",
+                    "--format=%(refname)",
+                ],
+            )
+            .await
+            .unwrap_or_default();
+        Some(AmendInfo {
+            head,
+            message,
+            published_on: published
+                .lines()
+                .filter(|name| !name.is_empty() && !name.ends_with("/HEAD"))
+                .map(|name| {
+                    name.strip_prefix("refs/remotes/")
+                        .unwrap_or(name)
+                        .to_owned()
+                })
+                .collect(),
+        })
+    }
+
+    pub async fn amend(
+        &self,
+        info: &SessionInfo,
+        request: &AmendRequest,
+        cancel: &Cancel,
+    ) -> Result<CommitOutcome, WriteError> {
+        if request.commit.message.trim().is_empty() {
+            return Ok(CommitOutcome::Refused(CommitRefusal::EmptyMessage));
+        }
+        let Some(current) = self.amend_info(info).await else {
+            return Ok(CommitOutcome::Refused(CommitRefusal::NoCommit));
+        };
+        if current.head != request.head {
+            return Ok(CommitOutcome::Refused(CommitRefusal::Stale));
+        }
+        if !current.published_on.is_empty() && !request.confirmed_published {
+            return Ok(CommitOutcome::Refused(CommitRefusal::Published));
+        }
+        let nothing_staged = self
+            .collect(info, &["diff", "--cached", "--quiet"])
+            .await
+            .is_some();
+        if nothing_staged && request.commit.message.trim_end() == current.message.trim_end() {
+            return Ok(CommitOutcome::Refused(CommitRefusal::NothingToAmend));
+        }
+        self.run_commit(info, &request.commit, true, cancel).await
+    }
+
+    async fn run_commit(
+        &self,
+        info: &SessionInfo,
+        request: &CommitRequest,
+        amend: bool,
+        cancel: &Cancel,
+    ) -> Result<CommitOutcome, WriteError> {
         let worktree = info.worktree.as_ref().ok_or(WriteError::NoWorktree)?;
         let message = request.message.trim_end();
         if message.trim().is_empty() {
@@ -90,7 +162,7 @@ impl Git {
                 )
             })
             .collect();
-        if now.is_empty() {
+        if !amend && now.is_empty() {
             return Ok(CommitOutcome::Refused(CommitRefusal::EmptyIndex));
         }
         let seen: BTreeSet<(PathBuf, String)> = request.staged.iter().cloned().collect();
@@ -128,7 +200,11 @@ impl Git {
                 args.push(format!("{key}={value}").into());
             }
         }
-        args.extend(["commit", "--cleanup=whitespace", "-F", "-"].map(OsString::from));
+        args.push("commit".into());
+        if amend {
+            args.push("--amend".into());
+        }
+        args.extend(["--cleanup=whitespace", "-F", "-"].map(OsString::from));
         let refs: Vec<&OsStr> = args.iter().map(OsString::as_os_str).collect();
         let mut env = profile.map(profile_env).unwrap_or_default();
         env.push((OsString::from("GIT_EDITOR"), OsString::from(":")));

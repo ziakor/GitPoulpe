@@ -7,7 +7,7 @@ use rune::{Key, KeyEvent, Mods, Runtime};
 use super::{click_at, focus, keyboard_runtime, press, rect_of, step};
 use crate::state::{State, ViewKind};
 
-fn git_text(dir: &Path, args: &[&str]) -> String {
+pub(super) fn git_text(dir: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .current_dir(dir)
         .args(args)
@@ -28,7 +28,7 @@ fn use_profile(state: &mut State) {
     state.use_profile_here(Some(id));
 }
 
-fn settle_commit(rt: &mut Runtime<State>) {
+pub(super) fn settle_commit(rt: &mut Runtime<State>) {
     for _ in 0..200 {
         step(rt);
         if !rt.state.writing {
@@ -41,7 +41,7 @@ fn settle_commit(rt: &mut Runtime<State>) {
     assert!(!rt.state.writing, "the commit never finished");
 }
 
-fn staged_runtime(files: usize) -> (tempfile::TempDir, Runtime<State>) {
+pub(super) fn staged_runtime(files: usize) -> (tempfile::TempDir, Runtime<State>) {
     let (repo, mut rt) = keyboard_runtime(files);
     use_profile(&mut rt.state);
     for _ in 0..30 {
@@ -59,7 +59,7 @@ fn type_chars(rt: &mut Runtime<State>, text: &str) {
     }
 }
 
-fn commits(dir: &Path) -> usize {
+pub(super) fn commits(dir: &Path) -> usize {
     git_text(dir, &["rev-list", "--count", "HEAD"])
         .parse()
         .unwrap()
@@ -179,10 +179,7 @@ fn an_empty_message_or_a_stale_index_commits_nothing_and_keeps_what_was_typed() 
 
     assert_eq!(commits(dir), before, "no commit");
     let notice = rt.state.notice.clone().unwrap_or_default();
-    assert!(
-        notice.contains("L'index a changé depuis son affichage"),
-        "{notice}"
-    );
+    assert!(notice.contains("a changé depuis son affichage"), "{notice}");
     assert_eq!(
         rt.state.commit_message.text, "Will not be created",
         "the message is kept"

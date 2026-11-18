@@ -7,13 +7,13 @@ use std::time::{Duration, Instant};
 
 use crate::profiles::{IdentityShown, PROFILES_KEY, ProfileForm, SigningKind};
 use gitpoulpe_core::{
+    AmendInfo, AmendRequest, CommitFailureKind, CommitOutcome, CommitRefusal, CommitRequest,
+    JournalEntry, Profile, ProfileBook, push_journal,
+};
+use gitpoulpe_core::{
     BuildState, ChangeEntry, DiffLine, DiffSide, DocumentKind, DocumentMeta, Generation, HunkLines,
     HunkSpec, LineSelection, Refusal, SplitIndex, StageOutcome, StageTarget, StatusSnapshot,
     WriteError, WriteJob, display_label,
-};
-use gitpoulpe_core::{
-    CommitFailureKind, CommitOutcome, CommitRefusal, CommitRequest, JournalEntry, Profile,
-    ProfileBook, push_journal,
 };
 use gitpoulpe_git::SigningCheck;
 use rune::prefs::Prefs;
@@ -156,6 +156,11 @@ pub struct State {
     pub commit_message: TextEdit,
     pub commit_report: Option<String>,
     commit_request: u64,
+    pub amend_mode: bool,
+    pub amend_info: Option<AmendInfo>,
+    pub amend_confirming: bool,
+    amend_info_request: u64,
+    submitted_amend: bool,
     pub identity_shown: Option<IdentityShown>,
     pub profiles_open: bool,
     pub form: ProfileForm,
@@ -255,6 +260,11 @@ impl State {
             commit_message: TextEdit::new(""),
             commit_report: None,
             commit_request: 0,
+            amend_mode: false,
+            amend_info: None,
+            amend_confirming: false,
+            amend_info_request: 0,
+            submitted_amend: false,
             identity_shown: None,
             profiles_open: false,
             form: ProfileForm::default(),
@@ -528,6 +538,22 @@ impl State {
                 } else {
                     WatchStatus::Unavailable(reason)
                 };
+                true
+            }
+            Event::AmendInfo { request, info } => {
+                if request != self.amend_info_request || !self.amend_mode {
+                    return false;
+                }
+                if let Some(info) = &info
+                    && self.commit_message.text.trim().is_empty()
+                {
+                    self.commit_message = TextEdit::new(&info.message);
+                }
+                self.amend_info = info;
+                if self.amend_info.is_none() {
+                    self.amend_mode = false;
+                    self.notice = Some("Il n'y a aucun commit à amender.".to_owned());
+                }
                 true
             }
             Event::Committed { request, result } => {
@@ -1639,7 +1665,37 @@ impl State {
             .collect()
     }
 
+    pub fn set_amend_mode(&mut self, on: bool) {
+        if on == self.amend_mode || self.repo.is_none() {
+            return;
+        }
+        self.amend_mode = on;
+        self.amend_confirming = false;
+        if on {
+            self.amend_info = None;
+            self.amend_info_request += 1;
+            if let Some(engine) = &self.engine {
+                engine.send(Command::AmendInfo {
+                    request: self.amend_info_request,
+                });
+            }
+        } else {
+            if self
+                .amend_info
+                .as_ref()
+                .is_some_and(|info| info.message.trim_end() == self.commit_message.text.trim_end())
+            {
+                self.commit_message = TextEdit::new("");
+            }
+            self.amend_info = None;
+        }
+    }
+
     pub fn commit(&mut self) {
+        if self.amend_mode {
+            self.amend();
+            return;
+        }
         if self.writing {
             self.notice = Some("Une écriture est déjà en cours.".to_owned());
             return;
@@ -1654,10 +1710,50 @@ impl State {
         };
         self.commit_request += 1;
         self.writing = true;
+        self.submitted_amend = false;
         self.commit_report = None;
         self.notice = Some("Création du commit…".to_owned());
         if let Some(engine) = &self.engine {
             engine.send(Command::Commit {
+                request: self.commit_request,
+                job: Box::new(request),
+            });
+        }
+    }
+
+    fn amend(&mut self) {
+        if self.writing {
+            self.notice = Some("Une écriture est déjà en cours.".to_owned());
+            return;
+        }
+        let Some(info) = self.amend_info.clone() else {
+            self.notice = Some("Lecture du dernier commit en cours…".to_owned());
+            return;
+        };
+        if !info.published_on.is_empty() && !self.amend_confirming {
+            self.amend_confirming = true;
+            self.notice = Some(
+                "Ce commit est déjà publié : lis l'avertissement puis confirme pour l'amender."
+                    .to_owned(),
+            );
+            return;
+        }
+        let request = AmendRequest {
+            commit: CommitRequest {
+                message: self.commit_message.text.clone(),
+                staged: self.staged_for_commit(),
+                profile: self.active_profile().cloned(),
+            },
+            head: info.head,
+            confirmed_published: self.amend_confirming,
+        };
+        self.commit_request += 1;
+        self.writing = true;
+        self.submitted_amend = true;
+        self.commit_report = None;
+        self.notice = Some("Amendement du commit…".to_owned());
+        if let Some(engine) = &self.engine {
+            engine.send(Command::Amend {
                 request: self.commit_request,
                 job: Box::new(request),
             });
@@ -1708,19 +1804,52 @@ impl State {
                 self.commit_message = TextEdit::new("");
                 self.commit_report = None;
                 let short: String = oid.chars().take(8).collect();
-                self.notice = Some(format!(
-                    "Commit {short} créé{} : {subject}",
-                    if signed { " et signé" } else { "" }
-                ));
-                self.record_journal("commit", before, Some(oid), subject);
+                let signed_note = if signed { " et signé" } else { "" };
+                if self.submitted_amend {
+                    let previous: String = before
+                        .as_deref()
+                        .unwrap_or_default()
+                        .chars()
+                        .take(8)
+                        .collect();
+                    self.notice = Some(format!(
+                        "Commit amendé{signed_note} : {short} remplace {previous} (toujours récupérable : journal, `git reflog`) — {subject}"
+                    ));
+                    self.amend_mode = false;
+                    self.amend_info = None;
+                    self.amend_confirming = false;
+                    self.record_journal("amend", before, Some(oid), subject);
+                } else {
+                    self.notice = Some(format!("Commit {short} créé{signed_note} : {subject}"));
+                    self.record_journal("commit", before, Some(oid), subject);
+                }
             }
             Ok(CommitOutcome::Refused(reason)) => {
+                if self.amend_mode {
+                    match reason {
+                        CommitRefusal::Published => self.amend_confirming = true,
+                        CommitRefusal::Stale => {
+                            self.amend_info = None;
+                            self.amend_confirming = false;
+                            self.amend_info_request += 1;
+                            if let Some(engine) = &self.engine {
+                                engine.send(Command::AmendInfo {
+                                    request: self.amend_info_request,
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
                 self.notice = Some(
                     match reason {
                         CommitRefusal::EmptyMessage => "Écris un message de commit.",
                         CommitRefusal::EmptyIndex => "Rien n'est indexé : indexe des changements avant de créer le commit.",
                         CommitRefusal::Conflicts => "Des conflits ne sont pas résolus : la résolution n'est pas encore disponible, aucun commit n'a été créé.",
-                        CommitRefusal::Stale => "L'index a changé depuis son affichage : l'état a été relu, vérifie les fichiers indexés puis recommence. Ton message est conservé.",
+                        CommitRefusal::Stale => "L'index ou le dernier commit a changé depuis son affichage : l'état a été relu, vérifie puis recommence. Ton message est conservé.",
+                        CommitRefusal::NoCommit => "Il n'y a aucun commit à amender.",
+                        CommitRefusal::NothingToAmend => "Rien à amender : le message est inchangé et aucun changement n'est indexé.",
+                        CommitRefusal::Published => "Ce commit est déjà publié : confirme l'amendement pour continuer.",
                     }
                     .to_owned(),
                 );
