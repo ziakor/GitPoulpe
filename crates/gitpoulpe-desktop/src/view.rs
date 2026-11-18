@@ -45,6 +45,8 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
         crate::cloning_view::clone_screen(s)
     } else if s.init.open {
         crate::initialize_view::init_screen(s)
+    } else if s.accounts.open {
+        crate::accounts_view::accounts_screen(s)
     } else if s.profiles_open {
         crate::profiles_view::profiles_screen(s)
     } else if s.history_open {

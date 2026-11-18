@@ -1,5 +1,6 @@
 mod branch;
 mod commit;
+mod connection;
 mod diff;
 mod error;
 mod gitflow;
@@ -33,6 +34,7 @@ pub use commit::{
     AmendInfo, AmendRequest, CommitFailureKind, CommitOutcome, CommitRefusal, CommitRequest,
     JOURNAL_LIMIT, JournalEntry, Signature, SignatureKind, push_journal,
 };
+pub use connection::{Connection, ConnectionBook, Provider};
 pub use diff::{
     BuildState, CommitRange, DiffKey, DiffLine, DiffLineKind, DiffSide, DocumentKind, DocumentMeta,
     FileRef, Hunk, RangeData, RangeError,

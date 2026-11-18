@@ -6,16 +6,16 @@ use std::sync::{Arc, Mutex};
 
 use gitpoulpe_core::{
     AmendInfo, AmendRequest, Branch, BranchLoss, ChangeEntry, Commit, CommitDetail, CommitOutcome,
-    CommitRange, CommitRequest, ConflictFile, ConflictVersions, DiffLine, DiffSide, DocumentMeta,
-    EmptyPolicy, FlowKind, FlowOutcome, FlowPlan, Generation, GitflowConfig, GitflowView,
-    HooksView, IgnoreReason, IgnoreScope, LfsFile, LfsStatus, LfsTransfer, MergeMode, MergeOutcome,
-    MergePreview, OpenError, Operation, OperationKind, PlanItem, Profile, PullOutcome, PullPreview,
-    PullStrategy, PushMode, PushOutcome, PushPreview, RangeError, ReadError, RebaseOutcome,
-    RebasePlanInfo, ReflogEntry, ReflogInspect, Remote, RemoteImpact, ResetMode, ResetOutcome,
-    ResetPreview, Resolution, SequenceKind, SequenceOutcome, SequencePreview, SessionId,
-    SessionInfo, StageOutcome, Stash, StashApplied, StashDetail, StashScope, StatusSnapshot,
-    Submodule, Tag, UndoDirection, UndoRecord, Worktree, WorktreeRemoval, WriteError, WriteJob,
-    mask_url,
+    CommitRange, CommitRequest, ConflictFile, ConflictVersions, Connection, DiffLine, DiffSide,
+    DocumentMeta, EmptyPolicy, FlowKind, FlowOutcome, FlowPlan, Generation, GitflowConfig,
+    GitflowView, HooksView, IgnoreReason, IgnoreScope, LfsFile, LfsStatus, LfsTransfer, MergeMode,
+    MergeOutcome, MergePreview, OpenError, Operation, OperationKind, PlanItem, Profile,
+    PullOutcome, PullPreview, PullStrategy, PushMode, PushOutcome, PushPreview, RangeError,
+    ReadError, RebaseOutcome, RebasePlanInfo, ReflogEntry, ReflogInspect, Remote, RemoteImpact,
+    ResetMode, ResetOutcome, ResetPreview, Resolution, SequenceKind, SequenceOutcome,
+    SequencePreview, SessionId, SessionInfo, StageOutcome, Stash, StashApplied, StashDetail,
+    StashScope, StatusSnapshot, Submodule, Tag, UndoDirection, UndoRecord, Worktree,
+    WorktreeRemoval, WriteError, WriteJob, mask_url,
 };
 use gitpoulpe_git::{
     BranchChoice, BranchError, CacheConfig, Cancel, CloneError, ConflictError, ConflictSide,
@@ -24,6 +24,7 @@ use gitpoulpe_git::{
     NetError, PullRequest, PushRequest, QUIET_PERIOD, RemoteCheck, RepoWatcher, SequenceRequest,
     Signal, SigningCheck, StashError, SubmoduleError, WorktreeError, check_signing, coalesce,
 };
+use gitpoulpe_hosting::Session as AccountSession;
 use rune::Waker;
 use std::time::Duration;
 
@@ -784,6 +785,14 @@ pub enum Event {
     LfsFinished {
         request: u64,
         result: Result<(), String>,
+    },
+    AccountConnected {
+        request: u64,
+        result: Result<(Connection, AccountSession), String>,
+    },
+    AccountChecked {
+        id: String,
+        result: Result<AccountSession, String>,
     },
     GitflowLoaded {
         request: u64,

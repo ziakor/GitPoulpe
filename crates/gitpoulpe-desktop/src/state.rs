@@ -193,6 +193,8 @@ pub struct State {
     pub lfs: crate::lfs_screen::LfsState,
     pub submodules: crate::submodule_screen::SubmodulesState,
     pub gitflow: crate::gitflow_screen::GitflowState,
+    pub accounts: crate::accounts::AccountsState,
+    pub hosting: crate::accounts::Hosting,
     pub worktrees: crate::worktrees::WorktreesState,
     pub undo_screen: crate::undos::UndoScreen,
     pub resetting: crate::resetting::ResetSlot,
@@ -329,6 +331,14 @@ impl State {
             lfs: crate::lfs_screen::LfsState::default(),
             submodules: crate::submodule_screen::SubmodulesState::default(),
             gitflow: crate::gitflow_screen::GitflowState::default(),
+            accounts: crate::accounts::AccountsState::new(
+                prefs
+                    .get::<gitpoulpe_core::ConnectionBook>(crate::accounts::CONNECTIONS_KEY)
+                    .unwrap_or_default(),
+            ),
+            hosting: crate::accounts::Hosting::new(std::sync::Arc::new(
+                gitpoulpe_hosting::KeyringStore,
+            )),
             worktrees: crate::worktrees::WorktreesState::default(),
             undo_screen: crate::undos::UndoScreen::default(),
             resetting: crate::resetting::ResetSlot::default(),
@@ -366,6 +376,14 @@ impl State {
             initial_path,
             event_sender,
         }
+    }
+
+    pub(crate) fn waker_slot(&self) -> WakerSlot {
+        self.waker.clone()
+    }
+
+    pub(crate) fn event_tx(&self) -> Sender<Event> {
+        self.event_sender.clone()
     }
 
     pub fn setup(&mut self, waker: Waker) {
@@ -897,6 +915,10 @@ impl State {
                 phase,
                 percent,
             } => self.apply_submodule_progress(request, phase, percent),
+            Event::AccountConnected { request, result } => {
+                self.apply_account_connected(request, result)
+            }
+            Event::AccountChecked { id, result } => self.apply_account_checked(id, result),
             Event::GitflowLoaded { request, result } => self.apply_gitflow_loaded(request, result),
             Event::GitflowPlanned { request, result } => {
                 self.apply_gitflow_planned(request, result)

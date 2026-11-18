@@ -6,7 +6,9 @@ use crate::view::row_key;
 const LINES_PER_KEY: usize = 3;
 const SIDEWAYS_STEP: f32 = 96.0;
 
-const TEXT_INPUTS: [&str; 28] = [
+const TEXT_INPUTS: [&str; 30] = [
+    "ac-server",
+    "ac-token",
     "gf-name",
     "gf-main",
     "gf-develop",
@@ -148,6 +150,10 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         s.close_profiles();
         return true;
     }
+    if s.accounts.open && event.key == Key::Escape {
+        s.close_accounts();
+        return true;
+    }
     if s.gitflow.open && event.key == Key::Escape {
         s.close_gitflow();
         return true;
@@ -268,7 +274,8 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         || s.hooks.open
         || s.lfs.open
         || s.submodules.open
-        || s.gitflow.open;
+        || s.gitflow.open
+        || s.accounts.open;
     match &event.key {
         Key::Text(text) if reading && !typing => match text.as_str() {
             "/" => tx.focus("filter", true),

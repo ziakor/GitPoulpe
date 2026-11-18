@@ -318,6 +318,10 @@ pub fn profiles_screen(s: &State) -> El {
                         .grow(1.0),
                 )
                 .child(
+                    button(s, "accounts".to_owned(), "Comptes fournisseurs".to_owned(), false)
+                        .on_press(|s: &mut State| s.open_accounts()),
+                )
+                .child(
                     button(s, "pf-close".to_owned(), "Fermer".to_owned(), false)
                         .on_press(|s: &mut State| s.close_profiles()),
                 ),

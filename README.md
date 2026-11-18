@@ -205,6 +205,16 @@ The **Gitflow** button on the branches screen manages feature, release and hotfi
 - A merge conflict stops the flow and opens the conflict resolution screen. After resolving it, finishing the branch again skips the steps already done and resumes with the rest.
 - Flow steps are not recorded in the undo history; the reflog and the recovery markers remain available.
 
+## GitHub accounts
+
+The **Comptes fournisseurs** button on the profiles screen connects GitHub.com or a GitHub Enterprise Server with a personal access token. No GitPoulpe account exists or is needed.
+
+- The token is validated against the server before anything is saved, then stored in the system keyring (Secret Service on Linux). Preferences only hold the account name, server and granted scopes, never the token. The field is masked.
+- The account in use and the scopes the token grants are shown; fine-grained tokens, which carry no scope list, are labelled as such.
+- Each connection is re-checked when the screen opens or on demand. An expired or revoked token, an organisation that requires SSO authorisation (with the authorisation link), a rate limit and a refused permission are reported as distinct, recoverable states: pasting a new token reconnects the same account.
+- Servers must use HTTPS (plain HTTP is accepted for loopback only), redirects are never followed, and requests to another host are refused, so the token cannot leave the configured server.
+- Disconnecting removes only that connection's token. Local Git profiles are not touched.
+
 ## Committing
 
 - Write a message in the box at the bottom of the file list, then "Créer le commit" or Ctrl+Enter. The commit contains exactly the staged content shown, with the effective identity of the repository's profile (or your Git configuration when it has none). The box also shows who will be the author and whether the profile's signing key is usable.

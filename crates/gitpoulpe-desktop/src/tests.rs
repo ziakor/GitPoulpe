@@ -8,6 +8,7 @@ use rune::{Env, Runtime};
 use tempfile::TempDir;
 
 mod acceptance;
+mod accounting;
 mod amending;
 mod branching;
 mod cloning;
