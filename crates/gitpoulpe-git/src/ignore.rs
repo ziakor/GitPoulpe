@@ -17,6 +17,7 @@ pub enum IgnoreError {
     NoWorktree,
     InvalidPath,
     InvalidRule,
+    Symlink(PathBuf),
     UnknownScope(String),
     AlreadyPresent,
     NotFound,
@@ -34,6 +35,11 @@ impl std::fmt::Display for IgnoreError {
             Self::InvalidRule => {
                 f.write_str("règle invalide (vide, ligne multiple ou commentaire)")
             }
+            Self::Symlink(path) => write!(
+                f,
+                "{} est un lien symbolique : GitPoulpe ne l'écrit pas",
+                path.display()
+            ),
             Self::UnknownScope(m) => write!(f, "fichier d'exclusion introuvable : {m}"),
             Self::AlreadyPresent => f.write_str("cette règle existe déjà dans ce fichier"),
             Self::NotFound => f.write_str("cette règle n'existe pas dans ce fichier"),
@@ -96,7 +102,7 @@ impl Git {
         let text = out.strip_suffix(b"\n").unwrap_or(&out);
         let exclude = worktree.join(OsStr::from_bytes(text));
 
-        let args: Vec<&OsStr> = ["config", "--path", "--get", "core.excludesFile"]
+        let args: Vec<&OsStr> = ["config", "--global", "--path", "--get", "core.excludesFile"]
             .iter()
             .map(OsStr::new)
             .collect();
@@ -134,7 +140,19 @@ impl Git {
                 }
                 Ok(real.join(".gitignore"))
             }
-            IgnoreScope::Exclude => Ok(self.ignore_files(info).await?.0),
+            IgnoreScope::Exclude => {
+                let exclude = self.ignore_files(info).await?.0;
+                let expected = std::fs::canonicalize(info.common_dir.join("info"))
+                    .map_err(|e| io_error(&e))?;
+                let parent = exclude.parent().ok_or(IgnoreError::InvalidPath)?;
+                let inside = std::fs::canonicalize(parent).is_ok_and(|p| p == expected)
+                    && exclude.file_name() == Some(OsStr::new("exclude"));
+                if inside {
+                    Ok(exclude)
+                } else {
+                    Err(IgnoreError::InvalidPath)
+                }
+            }
             IgnoreScope::Global => self
                 .ignore_files(info)
                 .await?
@@ -288,7 +306,7 @@ impl Git {
     ) -> Result<PathBuf, IgnoreError> {
         check_rule(rule)?;
         let file = self.ignore_file(info, scope).await?;
-        edit_file(&file, |lines| {
+        edit_file(&file, scope != &IgnoreScope::Global, |lines| {
             if lines.iter().any(|l| same_rule(l, rule)) {
                 return Err(IgnoreError::AlreadyPresent);
             }
@@ -306,7 +324,7 @@ impl Git {
     ) -> Result<PathBuf, IgnoreError> {
         check_rule(rule)?;
         let file = self.ignore_file(info, scope).await?;
-        edit_file(&file, |lines| {
+        edit_file(&file, scope != &IgnoreScope::Global, |lines| {
             let before = lines.len();
             lines.retain(|l| !same_rule(l, rule));
             if lines.len() == before {
@@ -349,14 +367,31 @@ fn read_current(path: &Path) -> Result<Vec<u8>, IgnoreError> {
     }
 }
 
+fn refuse_symlink(path: &Path) -> Result<(), IgnoreError> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => Err(IgnoreError::Symlink(path.to_path_buf())),
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(io_error(&e)),
+    }
+}
+
 fn edit_file(
     path: &Path,
+    protect_from_symlink: bool,
     change: impl FnOnce(&mut Vec<Vec<u8>>) -> Result<(), IgnoreError>,
 ) -> Result<(), IgnoreError> {
-    let target = match std::fs::canonicalize(path) {
-        Ok(real) => real,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => path.to_path_buf(),
-        Err(e) => return Err(io_error(&e)),
+    if protect_from_symlink {
+        refuse_symlink(path)?;
+    }
+    let target = if protect_from_symlink {
+        path.to_path_buf()
+    } else {
+        match std::fs::canonicalize(path) {
+            Ok(real) => real,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => path.to_path_buf(),
+            Err(e) => return Err(io_error(&e)),
+        }
     };
     let before = read_current(&target)?;
     let mut lines = split_lines(&before);
@@ -373,6 +408,9 @@ fn edit_file(
     temp.as_file().sync_all().map_err(|e| io_error(&e))?;
     if let Ok(meta) = std::fs::metadata(&target) {
         let _ = std::fs::set_permissions(temp.path(), meta.permissions());
+    }
+    if protect_from_symlink {
+        refuse_symlink(&target)?;
     }
     if read_current(&target)? != before {
         return Err(IgnoreError::Changed);

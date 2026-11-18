@@ -443,3 +443,57 @@ async fn a_rule_built_from_a_path_matches_exactly_that_path() {
         .is_err()
     );
 }
+
+#[tokio::test]
+async fn a_symlinked_ignore_file_is_never_written_through() {
+    let f = fixture().await;
+    let outside = tempfile::tempdir().unwrap();
+    let victim = outside.path().join("victim");
+    std::fs::write(&victim, "precious\n").unwrap();
+    std::os::unix::fs::symlink(&victim, f.path().join(".gitignore")).unwrap();
+    std::fs::create_dir_all(f.path().join(".git/info")).unwrap();
+    let _ = std::fs::remove_file(f.path().join(".git/info/exclude"));
+    std::os::unix::fs::symlink(&victim, f.path().join(".git/info/exclude")).unwrap();
+
+    for scope in [IgnoreScope::Directory("".into()), IgnoreScope::Exclude] {
+        let added = f.git.add_ignore_rule(&f.info, &scope, "x").await;
+        assert!(
+            matches!(added, Err(IgnoreError::Symlink(_))),
+            "{scope:?}: {added:?}"
+        );
+        let removed = f.git.remove_ignore_rule(&f.info, &scope, "precious").await;
+        assert!(
+            matches!(removed, Err(IgnoreError::Symlink(_))),
+            "{scope:?}: {removed:?}"
+        );
+    }
+    assert_eq!(std::fs::read_to_string(&victim).unwrap(), "precious\n");
+    assert!(
+        std::fs::symlink_metadata(f.path().join(".gitignore"))
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "the link itself was left in place"
+    );
+}
+
+#[tokio::test]
+async fn the_global_file_comes_from_the_user_configuration_never_from_the_repository() {
+    let f = fixture().await;
+    let elsewhere = tempfile::tempdir().unwrap();
+    let hijack = elsewhere.path().join("hijacked");
+    f.git_out(&[
+        "config",
+        "--local",
+        "core.excludesFile",
+        hijack.to_str().unwrap(),
+    ]);
+    let written = f
+        .git
+        .add_ignore_rule(&f.info, &IgnoreScope::Global, "*.swp")
+        .await
+        .unwrap();
+    assert_eq!(written, f.global, "the user-level file is the one written");
+    assert!(!hijack.exists(), "the repository-level path is not used");
+    assert_eq!(std::fs::read_to_string(&f.global).unwrap(), "*.swp\n");
+}
