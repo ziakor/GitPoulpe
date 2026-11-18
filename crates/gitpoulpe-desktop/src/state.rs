@@ -187,6 +187,9 @@ pub struct State {
     pub tags: crate::tags::TagsState,
     pub remotes: crate::remotes::RemotesState,
     pub init: crate::initialize::InitState,
+    pub conflicts: crate::conflicts::ConflictsState,
+    pub operation_kind: Option<gitpoulpe_core::OperationKind>,
+    pub(crate) probe_request: u64,
     pub clone: crate::cloning::CloneState,
     pub engine_git: Option<Git>,
     pub form: ProfileForm,
@@ -307,6 +310,9 @@ impl State {
             tags: crate::tags::TagsState::default(),
             remotes: crate::remotes::RemotesState::default(),
             init: crate::initialize::InitState::default(),
+            conflicts: crate::conflicts::ConflictsState::default(),
+            operation_kind: None,
+            probe_request: 0,
             clone: crate::cloning::CloneState::default(),
             engine_git: None,
             form: ProfileForm::default(),
@@ -585,6 +591,8 @@ impl State {
                 self.branches = crate::branches::BranchesState::default();
                 self.tags = crate::tags::TagsState::default();
                 self.remotes = crate::remotes::RemotesState::default();
+                self.conflicts = crate::conflicts::ConflictsState::default();
+                self.operation_kind = None;
                 self.writing = false;
                 self.positions.clear();
                 self.pending_anchor = None;
@@ -594,6 +602,7 @@ impl State {
                 self.screen = Screen::Ready;
                 self.refilter();
                 self.request_identity();
+                self.probe_operation();
                 true
             }
             Event::Refreshed {
@@ -751,6 +760,16 @@ impl State {
                 percent,
             } => self.apply_clone_progress(request, phase, percent),
             Event::CloneDone { request, result } => self.apply_clone_done(request, result),
+            Event::OperationProbed { request, kind } => self.apply_operation_probed(request, kind),
+            Event::ConflictsLoaded { request, result } => {
+                self.apply_conflicts_loaded(request, result)
+            }
+            Event::ConflictVersionsLoaded { request, result } => {
+                self.apply_conflict_versions(request, result)
+            }
+            Event::ConflictFinished { request, result } => {
+                self.apply_conflict_finished(request, result)
+            }
             Event::SshScanned { request, result } => self.apply_ssh_scanned(request, result),
             Event::SshTrusted { request, result } => self.apply_ssh_trusted(request, result),
             Event::TagsListed { request, result } => self.apply_tags_listed(request, result),
@@ -1351,6 +1370,14 @@ impl State {
         let announce = self.notice.is_none();
         self.relocate(anchor, &old_paths, announce);
         self.reload_history_if_head_moved();
+        self.probe_operation();
+        if self.conflicts.open && !self.conflicts.busy {
+            if self.conflicts.loading {
+                self.conflicts.reload_pending = true;
+            } else {
+                self.reload_conflicts();
+            }
+        }
         if self.notice.is_none() && (request != 0 || events_lost) {
             self.notice = Some(if events_lost {
                 "Des événements ont été perdus : le dépôt a été relu en entier.".to_owned()
@@ -1779,6 +1806,7 @@ impl State {
         self.close_branches();
         self.close_tags();
         self.close_remotes();
+        self.close_conflicts();
         let selected = self
             .active_profile()
             .or_else(|| self.book.profiles.first())
@@ -2081,7 +2109,7 @@ impl State {
                     match reason {
                         CommitRefusal::EmptyMessage => "Écris un message de commit.",
                         CommitRefusal::EmptyIndex => "Rien n'est indexé : indexe des changements avant de créer le commit.",
-                        CommitRefusal::Conflicts => "Des conflits ne sont pas résolus : la résolution n'est pas encore disponible, aucun commit n'a été créé.",
+                        CommitRefusal::Conflicts => "Des conflits ne sont pas résolus : ouvrez « Résoudre » pour les traiter, aucun commit n'a été créé.",
                         CommitRefusal::Stale => "L'index ou le dernier commit a changé depuis son affichage : l'état a été relu, vérifie puis recommence. Ton message est conservé.",
                         CommitRefusal::NoCommit => "Il n'y a aucun commit à amender.",
                         CommitRefusal::NothingToAmend => "Rien à amender : le message est inchangé et aucun changement n'est indexé.",
@@ -2130,6 +2158,7 @@ impl State {
         self.close_branches();
         self.close_tags();
         self.close_remotes();
+        self.close_conflicts();
         self.start_history();
     }
 
@@ -2259,6 +2288,7 @@ impl State {
         }
         self.close_tags();
         self.close_remotes();
+        self.close_conflicts();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::CommitInspect {

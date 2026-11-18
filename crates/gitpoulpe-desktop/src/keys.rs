@@ -6,7 +6,8 @@ use crate::view::row_key;
 const LINES_PER_KEY: usize = 3;
 const SIDEWAYS_STEP: f32 = 96.0;
 
-const TEXT_INPUTS: [&str; 15] = [
+const TEXT_INPUTS: [&str; 16] = [
+    "cf-result",
     "clone-url",
     "clone-name",
     "rm-new-name",
@@ -135,6 +136,14 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         s.close_profiles();
         return true;
     }
+    if s.conflicts.open && event.key == Key::Escape {
+        if s.conflicts.confirm_abort || s.conflicts.markers_pending {
+            s.conflict_cancel_abort();
+        } else {
+            s.close_conflicts();
+        }
+        return true;
+    }
     if s.remotes.open && event.key == Key::Escape {
         if s.remotes.confirm_remove.is_some() {
             s.remote_cancel_remove();
@@ -194,7 +203,8 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         || s.ignored.open
         || s.branches.open
         || s.tags.open
-        || s.remotes.open;
+        || s.remotes.open
+        || s.conflicts.open;
     match &event.key {
         Key::Text(text) if reading && !typing => match text.as_str() {
             "/" => tx.focus("filter", true),

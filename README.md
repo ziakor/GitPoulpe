@@ -98,6 +98,14 @@ Git runs as an external program, without a shell, with the repository's filters,
 - The clone is made in a hidden temporary folder next to the destination and moved into place only when it succeeded: a failure or a cancellation (which stops Git and the processes it started) leaves no partial folder, and the same form can be submitted again. An existing destination is accepted only when it is an empty folder; a non-empty one is refused before any network access and left untouched.
 - A URL carrying credentials is refused, since Git would write them to the repository configuration; authentication goes through the SSH and HTTPS mechanisms described above. The URL rules of the remote screen apply (no `ext::` helpers, no option disguised as a host).
 
+## Resolving conflicts
+
+- When a merge, rebase, cherry-pick or revert is in progress, a banner above the file list names it and shows the number of conflicted files; "Résoudre" opens the resolution screen. The Git operation itself is started elsewhere; this screen handles what it leaves behind.
+- Each conflicted file shows its kind (modified on both sides, added on both, deleted on one side and modified on the other…), the common base, and both versions named after the operation: in a merge "votre branche main" against "la branche fusionnée feature"; in a rebase the sides are swapped by Git, so they are named "la base du rebase" and "votre commit rejoué <commit>".
+- A file is resolved by keeping one side (for a deletion conflict, accepting the deletion or keeping the modified file), or by writing the result in the editable box, which starts from Git's merged text. A result that still contains conflict markers is refused unless you confirm. A result is never written through a symbolic link or outside the repository. Binary files only offer the choice between the two versions.
+- Resolved files stay listed. If one is modified again after its resolution, it is shown as "à valider de nouveau" and continuing stays blocked until it is validated again.
+- "Continuer" is offered only when no file is in conflict and none is stale; it runs `git commit` (merge) or `git <operation> --continue` with your profile identity, hooks included, and the screen reports new conflicts if the operation stops again. "Abandonner" asks first, copies the files you had worked on to `.git/gitpoulpe-backup/<time>-<operation>/`, then runs `git <operation> --abort`; untracked files are untouched.
+
 ## Committing
 
 - Write a message in the box at the bottom of the file list, then "Créer le commit" or Ctrl+Enter. The commit contains exactly the staged content shown, with the effective identity of the repository's profile (or your Git configuration when it has none). The box also shows who will be the author and whether the profile's signing key is usable.

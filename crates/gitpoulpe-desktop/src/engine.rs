@@ -6,15 +6,16 @@ use std::sync::{Arc, Mutex};
 
 use gitpoulpe_core::{
     AmendInfo, AmendRequest, Branch, BranchLoss, ChangeEntry, Commit, CommitDetail, CommitOutcome,
-    CommitRange, CommitRequest, DiffLine, DiffSide, DocumentMeta, Generation, IgnoreReason,
-    IgnoreScope, OpenError, Profile, RangeError, ReadError, Remote, RemoteImpact, SessionId,
-    SessionInfo, StageOutcome, StatusSnapshot, Tag, WriteError, WriteJob, mask_url,
+    CommitRange, CommitRequest, ConflictFile, ConflictVersions, DiffLine, DiffSide, DocumentMeta,
+    Generation, IgnoreReason, IgnoreScope, OpenError, Operation, OperationKind, Profile,
+    RangeError, ReadError, Remote, RemoteImpact, Resolution, SessionId, SessionInfo, StageOutcome,
+    StatusSnapshot, Tag, WriteError, WriteJob, mask_url,
 };
 use gitpoulpe_git::{
-    BranchError, CacheConfig, Cancel, CloneError, DeleteMode, DiffCache, DiffError, DiffReader,
-    FetchOutcome, Git, HistoryError, HistoryStream, HostKey, Identity, IdentityError, IgnoreError,
-    IgnoredList, InspectError, MAX_WAIT, NetError, QUIET_PERIOD, RemoteCheck, RepoWatcher, Signal,
-    SigningCheck, check_signing, coalesce,
+    BranchError, CacheConfig, Cancel, CloneError, ConflictError, ConflictSide, DeleteMode,
+    DiffCache, DiffError, DiffReader, FetchOutcome, Git, HistoryError, HistoryStream, HostKey,
+    Identity, IdentityError, IgnoreError, IgnoredList, InspectError, MAX_WAIT, NetError,
+    QUIET_PERIOD, RemoteCheck, RepoWatcher, Signal, SigningCheck, check_signing, coalesce,
 };
 use rune::Waker;
 use std::time::Duration;
@@ -77,6 +78,39 @@ pub enum RemoteOp {
         name: String,
         expected: Vec<String>,
     },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ConflictOp {
+    Side {
+        path: PathBuf,
+        side: ConflictSide,
+    },
+    Content {
+        path: PathBuf,
+        content: String,
+        allow_markers: bool,
+    },
+    Revalidate {
+        path: PathBuf,
+    },
+    Continue {
+        profile: Option<Box<Profile>>,
+    },
+    Abort,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConflictSnapshot {
+    pub operation: Option<Operation>,
+    pub files: Vec<ConflictFile>,
+    pub states: Vec<(PathBuf, Resolution)>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConflictDone {
+    pub message: String,
+    pub finished: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -198,6 +232,22 @@ pub enum Command {
         url: String,
         parent: PathBuf,
         name: String,
+    },
+    OperationProbe {
+        request: u64,
+    },
+    ConflictLoad {
+        request: u64,
+        remembered: Vec<PathBuf>,
+    },
+    ConflictVersions {
+        request: u64,
+        path: PathBuf,
+    },
+    ConflictOp {
+        request: u64,
+        op: ConflictOp,
+        remembered: Vec<PathBuf>,
     },
     NetCancel,
     InitPrepare {
@@ -373,6 +423,22 @@ pub enum Event {
     FetchDone {
         request: u64,
         result: Result<FetchOutcome, NetError>,
+    },
+    OperationProbed {
+        request: u64,
+        kind: Option<OperationKind>,
+    },
+    ConflictsLoaded {
+        request: u64,
+        result: Result<Box<ConflictSnapshot>, String>,
+    },
+    ConflictVersionsLoaded {
+        request: u64,
+        result: Result<Box<ConflictVersions>, String>,
+    },
+    ConflictFinished {
+        request: u64,
+        result: Result<ConflictDone, String>,
     },
     CloneProgress {
         request: u64,
@@ -801,6 +867,78 @@ async fn run(
                             shared.emit(Event::CloneDone { request, result });
                         });
                     }
+                    Command::OperationProbe { request } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let kind = shared
+                                .git
+                                .operation_state(&current.info)
+                                .await
+                                .ok()
+                                .flatten()
+                                .map(|o| o.kind);
+                            shared.emit(Event::OperationProbed { request, kind });
+                        });
+                    }
+                    Command::ConflictLoad {
+                        request,
+                        remembered,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = async {
+                                let operation = shared.git.operation_state(&current.info).await?;
+                                let files = shared.git.list_conflicts(&current.info).await?;
+                                let states = if operation.is_some() {
+                                    shared
+                                        .git
+                                        .resolution_states(&current.info, &remembered)
+                                        .await?
+                                } else {
+                                    Vec::new()
+                                };
+                                Ok::<_, ConflictError>(Box::new(ConflictSnapshot {
+                                    operation,
+                                    files,
+                                    states,
+                                }))
+                            }
+                            .await
+                            .map_err(|e| e.to_string());
+                            shared.emit(Event::ConflictsLoaded { request, result });
+                        });
+                    }
+                    Command::ConflictVersions { request, path } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .conflict_versions(&current.info, &path)
+                                .await
+                                .map(Box::new)
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::ConflictVersionsLoaded { request, result });
+                        });
+                    }
+                    Command::ConflictOp {
+                        request,
+                        op,
+                        remembered,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        tokio::spawn(conflict_op(shared.clone(), current, request, op, remembered));
+                    }
                     Command::NetCancel => {
                         if let Some(cancel) = net_cancel.take() {
                             cancel.cancel();
@@ -1159,6 +1297,67 @@ async fn remote_op(shared: Arc<Shared>, session: Arc<Session>, request: u64, op:
     shared.emit(Event::RemoteDone {
         request,
         result: result.map_err(|e| e.to_string()),
+    });
+}
+
+async fn conflict_op(
+    shared: Arc<Shared>,
+    session: Arc<Session>,
+    request: u64,
+    op: ConflictOp,
+    remembered: Vec<PathBuf>,
+) {
+    let _guard = session.writer.lock().await;
+    let git = &shared.git;
+    let info = &session.info;
+    let done = |message: String| ConflictDone {
+        message,
+        finished: false,
+    };
+    let result: Result<ConflictDone, ConflictError> = match &op {
+        ConflictOp::Side { path, side } => git
+            .resolve_with_side(info, path, *side)
+            .await
+            .map(|()| done(format!("{} résolu.", path.display()))),
+        ConflictOp::Content {
+            path,
+            content,
+            allow_markers,
+        } => git
+            .resolve_with_content(info, path, content.as_bytes(), *allow_markers)
+            .await
+            .map(|()| done(format!("{} résolu.", path.display()))),
+        ConflictOp::Revalidate { path } => git
+            .revalidate_resolved(info, path)
+            .await
+            .map(|()| done(format!("{} validé de nouveau.", path.display()))),
+        ConflictOp::Continue { profile } => git
+            .continue_operation(info, profile.as_deref(), &remembered)
+            .await
+            .map(|o| ConflictDone {
+                message: o.message,
+                finished: o.finished,
+            }),
+        ConflictOp::Abort => git.abort_operation(info, &remembered).await.map(|report| {
+            ConflictDone {
+                message: match &report.backup {
+                    Some(dir) => format!(
+                        "Opération abandonnée, l'état d'avant est rétabli. {} fichier(s) de votre travail de résolution sont conservés dans {}.",
+                        report.saved,
+                        dir.display()
+                    ),
+                    None => "Opération abandonnée, l'état d'avant est rétabli.".to_owned(),
+                },
+                finished: true,
+            }
+        }),
+    };
+    shared.emit(Event::ConflictFinished {
+        request,
+        result: result.map_err(|e| match e {
+            ConflictError::MarkersRemain => "MARKERS".to_owned(),
+            other => other.to_string(),
+        }),
     });
 }
 

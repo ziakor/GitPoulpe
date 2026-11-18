@@ -12,6 +12,7 @@ mod amending;
 mod branching;
 mod cloning;
 mod committing;
+mod conflicting;
 mod history;
 mod ignoring;
 mod initializing;

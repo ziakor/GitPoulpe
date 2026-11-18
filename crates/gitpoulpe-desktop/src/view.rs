@@ -57,6 +57,8 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
         crate::tags_view::tags_screen(s)
     } else if s.remotes.open {
         crate::remotes_view::remotes_screen(s)
+    } else if s.conflicts.open {
+        crate::conflicts_view::conflicts_screen(s)
     } else {
         body
     };
@@ -386,14 +388,80 @@ fn divider(s: &State) -> El {
         })
 }
 
+fn operation_banner(s: &State) -> Option<El> {
+    let p = s.palette;
+    let kind = s.operation_kind?;
+    let conflicts = s
+        .repo
+        .as_ref()
+        .map_or(0, |r| r.snapshot.conflicts().count());
+    let message = if conflicts > 0 {
+        format!(
+            "{} en cours · {conflicts} fichier(s) en conflit",
+            capitalized(kind.caption())
+        )
+    } else {
+        format!("{} en cours", capitalized(kind.caption()))
+    };
+    Some(
+        row()
+            .key("operation-banner")
+            .w_full()
+            .center_y()
+            .gap(12.0)
+            .px(20.0)
+            .py(8.0)
+            .fill(p.panel)
+            .border(1.0, p.line)
+            .child(
+                text(message)
+                    .font(theme::BODY_STRONG)
+                    .color(p.red)
+                    .grow(1.0)
+                    .truncate(),
+            )
+            .child(
+                el().key("conflicts-open")
+                    .role("button")
+                    .label("Résoudre")
+                    .focusable(true)
+                    .focus_ring(2.0, 2.0, p.accent)
+                    .h(30.0)
+                    .px(12.0)
+                    .center()
+                    .radius(3.0)
+                    .fill(p.accent)
+                    .hover(p.hover)
+                    .on_press(|s: &mut State| s.open_conflicts())
+                    .child(text("Résoudre").font(theme::BODY_STRONG).color(p.on_accent)),
+            ),
+    )
+}
+
+fn capitalized(word: &str) -> String {
+    let mut chars = word.chars();
+    chars
+        .next()
+        .map_or_else(String::new, |c| c.to_uppercase().chain(chars).collect())
+}
+
 fn workspace(s: &State) -> El {
-    row()
+    let body = row()
         .w_full()
         .grow(1.0)
         .min_h(0.0)
         .child(left_pane(s))
         .child(divider(s))
-        .child(right_pane(s))
+        .child(right_pane(s));
+    match operation_banner(s) {
+        Some(banner) => col()
+            .w_full()
+            .grow(1.0)
+            .min_h(0.0)
+            .child(banner)
+            .child(body),
+        None => body,
+    }
 }
 
 fn tab(s: &State, kind: ViewKind, label: &'static str) -> El {

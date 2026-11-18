@@ -71,6 +71,7 @@ impl State {
         self.close_branches();
         self.close_tags();
         self.close_remotes();
+        self.close_conflicts();
         self.profiles_open = false;
         self.ignored.open = true;
         self.ignored.target = None;
