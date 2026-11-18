@@ -23,6 +23,7 @@ mod publishing;
 mod reflogging;
 mod remoting;
 mod resetting;
+mod sequencing;
 mod staging;
 mod stashing;
 mod tagging;

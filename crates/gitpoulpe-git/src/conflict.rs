@@ -520,6 +520,43 @@ impl Git {
         })
     }
 
+    pub async fn skip_operation(
+        &self,
+        info: &SessionInfo,
+    ) -> Result<ContinueOutcome, ConflictError> {
+        let operation = self
+            .operation_state(info)
+            .await?
+            .ok_or(ConflictError::NoOperation)?;
+        if !matches!(
+            operation.kind,
+            OperationKind::CherryPick | OperationKind::Revert | OperationKind::Rebase
+        ) {
+            return Err(ConflictError::Refused(
+                "cette opération ne permet pas de passer un commit".to_owned(),
+            ));
+        }
+        let env: Vec<(OsString, OsString)> = vec![
+            ("GIT_EDITOR".into(), "true".into()),
+            ("GIT_SEQUENCE_EDITOR".into(), "true".into()),
+        ];
+        let out = self
+            .exec(info, &[operation.kind.git_name(), "--skip"], &env, None)
+            .await?;
+        let still = self.operation_state(info).await?.is_some();
+        if !out.ok() && !still {
+            return Err(ConflictError::Refused(out.stderr));
+        }
+        Ok(ContinueOutcome {
+            finished: !still,
+            message: if still {
+                "Commit passé ; l'opération continue avec le suivant.".to_owned()
+            } else {
+                format!("Commit passé ; {} terminé.", operation.kind.caption())
+            },
+        })
+    }
+
     pub async fn abort_operation(
         &self,
         info: &SessionInfo,

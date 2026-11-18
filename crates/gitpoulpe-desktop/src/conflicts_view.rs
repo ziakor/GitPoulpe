@@ -411,6 +411,17 @@ fn footer(s: &State) -> El {
             c.remaining()
         )
     };
+    let skippable = c.operation.as_ref().is_some_and(|o| {
+        matches!(
+            o.kind,
+            gitpoulpe_core::OperationKind::CherryPick
+                | gitpoulpe_core::OperationKind::Revert
+                | gitpoulpe_core::OperationKind::Rebase
+        )
+    });
+    let skip = skippable.then(|| {
+        action(s, "cf-skip", "Passer ce commit", false).on_press(|s: &mut State| s.conflict_skip())
+    });
     bar.child(
         row()
             .w_full()
@@ -424,6 +435,7 @@ fn footer(s: &State) -> El {
                     .grow(1.0)
                     .wrap(),
             )
+            .children(skip)
             .child(go)
             .child(
                 action(s, "cf-abort", &format!("Abandonner la {caption}"), false)

@@ -269,6 +269,10 @@ impl State {
         }
     }
 
+    pub fn conflict_skip(&mut self) {
+        self.send_conflict_op(ConflictOp::Skip);
+    }
+
     pub fn conflict_continue(&mut self) {
         if !self.conflicts.ready() {
             return;

@@ -7,18 +7,19 @@ use std::sync::{Arc, Mutex};
 use gitpoulpe_core::{
     AmendInfo, AmendRequest, Branch, BranchLoss, ChangeEntry, Commit, CommitDetail, CommitOutcome,
     CommitRange, CommitRequest, ConflictFile, ConflictVersions, DiffLine, DiffSide, DocumentMeta,
-    Generation, IgnoreReason, IgnoreScope, MergeMode, MergeOutcome, MergePreview, OpenError,
-    Operation, OperationKind, Profile, PushMode, PushOutcome, PushPreview, RangeError, ReadError,
-    ReflogEntry, ReflogInspect, Remote, RemoteImpact, ResetMode, ResetOutcome, ResetPreview,
-    Resolution, SessionId, SessionInfo, StageOutcome, Stash, StashApplied, StashDetail, StashScope,
-    StatusSnapshot, Tag, WriteError, WriteJob, mask_url,
+    EmptyPolicy, Generation, IgnoreReason, IgnoreScope, MergeMode, MergeOutcome, MergePreview,
+    OpenError, Operation, OperationKind, Profile, PushMode, PushOutcome, PushPreview, RangeError,
+    ReadError, ReflogEntry, ReflogInspect, Remote, RemoteImpact, ResetMode, ResetOutcome,
+    ResetPreview, Resolution, SequenceKind, SequenceOutcome, SequencePreview, SessionId,
+    SessionInfo, StageOutcome, Stash, StashApplied, StashDetail, StashScope, StatusSnapshot, Tag,
+    WriteError, WriteJob, mask_url,
 };
 use gitpoulpe_git::{
     BranchError, CacheConfig, Cancel, CloneError, ConflictError, ConflictSide, DeleteMode,
     DiffCache, DiffError, DiffReader, FetchOutcome, Git, HistoryError, HistoryStream, HostKey,
     Identity, IdentityError, IgnoreError, IgnoredList, InspectError, MAX_WAIT, NetError,
-    PushRequest, QUIET_PERIOD, RemoteCheck, RepoWatcher, Signal, SigningCheck, StashError,
-    check_signing, coalesce,
+    PushRequest, QUIET_PERIOD, RemoteCheck, RepoWatcher, SequenceRequest, Signal, SigningCheck,
+    StashError, check_signing, coalesce,
 };
 use rune::Waker;
 use std::time::Duration;
@@ -97,6 +98,7 @@ pub enum ConflictOp {
     Revalidate {
         path: PathBuf,
     },
+    Skip,
     Continue {
         profile: Option<Box<Profile>>,
     },
@@ -340,6 +342,20 @@ pub enum Command {
         mode: ResetMode,
         expected_head: String,
         confirmed: bool,
+    },
+    SequencePreview {
+        request: u64,
+        kind: SequenceKind,
+        oids: Vec<String>,
+    },
+    Sequence {
+        request: u64,
+        kind: SequenceKind,
+        oids: Vec<String>,
+        mainline: Option<u32>,
+        empty: EmptyPolicy,
+        expected_head: String,
+        profile: Option<Box<Profile>>,
     },
     NetCancel,
     InitPrepare {
@@ -590,6 +606,14 @@ pub enum Event {
     ResetFinished {
         request: u64,
         result: Result<ResetOutcome, String>,
+    },
+    SequencePreviewed {
+        request: u64,
+        result: Result<Box<SequencePreview>, String>,
+    },
+    SequenceFinished {
+        request: u64,
+        result: Result<SequenceOutcome, String>,
     },
     CloneProgress {
         request: u64,
@@ -1367,6 +1391,58 @@ async fn run(
                             shared.emit(Event::ResetFinished { request, result });
                         });
                     }
+                    Command::SequencePreview {
+                        request,
+                        kind,
+                        oids,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .sequence_preview(&current.info, kind, &oids)
+                                .await
+                                .map(Box::new)
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::SequencePreviewed { request, result });
+                        });
+                    }
+                    Command::Sequence {
+                        request,
+                        kind,
+                        oids,
+                        mainline,
+                        empty,
+                        expected_head,
+                        profile,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let _guard = current.writer.lock().await;
+                            let result = shared
+                                .git
+                                .run_sequence(
+                                    &current.info,
+                                    &SequenceRequest {
+                                        kind,
+                                        oids: &oids,
+                                        mainline,
+                                        empty,
+                                        expected_head: &expected_head,
+                                    },
+                                    profile.as_deref(),
+                                )
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::SequenceFinished { request, result });
+                        });
+                    }
                     Command::NetCancel => {
                         if let Some(cancel) = net_cancel.take() {
                             cancel.cancel();
@@ -1766,6 +1842,10 @@ async fn conflict_op(
                 message: o.message,
                 finished: o.finished,
             }),
+        ConflictOp::Skip => git.skip_operation(info).await.map(|o| ConflictDone {
+            message: o.message,
+            finished: o.finished,
+        }),
         ConflictOp::Abort => git.abort_operation(info, &remembered).await.map(|report| {
             ConflictDone {
                 message: match &report.backup {

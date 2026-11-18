@@ -141,6 +141,13 @@ Git runs as an external program, without a shell, with the repository's filters,
 - A `hard` reset that would erase unsaved changes lists those files and needs a second, explicit confirmation; the git layer refuses it without that confirmation. It refuses as well when the branch moved since the preview, when the target is not a full commit id of this repository, and during a merge, rebase, cherry-pick, revert or unresolved conflicts.
 - Before moving anything, the previous tip is pinned under `refs/gitpoulpe/recovery/<time>-<id>-head` (it survives the expiry of the reflog and garbage collection), and the tracked unsaved changes of a destructive `hard` reset are snapshotted with `git stash create` under `…-work`. Limits that the screen states: untracked files are not touched and ignored files are not saved. Resets are recorded in the per-repository journal.
 
+## Cherry-pick and revert
+
+- On a commit of the history, "Ajouter au cherry-pick" and "Annuler ce commit (revert)" build a queue: the commits are listed in the order they will be applied, and can be moved or removed before running. The preview shows the target branch, the number of commits and the files with local changes.
+- Cherry-pick applies the commits in the announced order. Choose what happens to a commit that has become empty: ignore it (default), keep it empty, or stop. Revert creates the inverse commits and leaves the history in place.
+- A merge commit has several parents, so its parent is chosen explicitly (nothing is preselected) and merge commits are only accepted together, never mixed with ordinary commits.
+- A conflict in the middle of the sequence stops it and opens the resolution screen above, which names the sides after the operation; the remaining commits are kept by Git, "Continuer" resumes them, "Passer ce commit" drops the current one and "Abandonner" restores the branch as it was before the sequence. Local changes that would be overwritten stop the run untouched. The commits use your profile identity and signing; an operation already in progress or a branch that moved since the preview blocks the run.
+
 ## Committing
 
 - Write a message in the box at the bottom of the file list, then "Créer le commit" or Ctrl+Enter. The commit contains exactly the staged content shown, with the effective identity of the repository's profile (or your Git configuration when it has none). The box also shows who will be the author and whether the profile's signing key is usable.

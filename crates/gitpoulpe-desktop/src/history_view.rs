@@ -161,6 +161,177 @@ fn results(s: &State) -> El {
     }
 }
 
+fn sequence_card(s: &State) -> Option<El> {
+    use gitpoulpe_core::{EmptyPolicy, SequenceKind};
+    let p = s.palette;
+    let state = s.sequencing.state.as_ref()?;
+    let (title, verb) = match state.kind {
+        SequenceKind::CherryPick => ("Cherry-pick : commits à reprendre", "Appliquer"),
+        SequenceKind::Revert => ("Revert : commits à inverser", "Créer les commits inverses"),
+    };
+    let mut card = col()
+        .key("sequence-card")
+        .w_full()
+        .gap(6.0)
+        .px(12.0)
+        .py(10.0)
+        .radius(3.0)
+        .border(1.0, p.line)
+        .child(
+            text(title.to_owned())
+                .font(theme::BODY_STRONG)
+                .color(p.text)
+                .wrap(),
+        )
+        .child(
+            text("Ils seront appliqués dans cet ordre, du premier au dernier :".to_owned())
+                .font(theme::SMALL)
+                .color(p.muted)
+                .wrap(),
+        );
+    for (index, (oid, subject)) in state.queue.iter().enumerate() {
+        let short: String = oid.chars().take(8).collect();
+        card = card.child(
+            row()
+                .gap(6.0)
+                .center_y()
+                .child(
+                    text(format!("{}. {short} {subject}", index + 1))
+                        .key(format!("seq-item{index}"))
+                        .font(theme::PATH_SMALL)
+                        .color(p.text)
+                        .grow(1.0)
+                        .truncate(),
+                )
+                .child(
+                    action(s, &format!("seq-up{index}"), "↑", false)
+                        .on_press(move |s: &mut State| s.sequence_move_up(index)),
+                )
+                .child(
+                    action(s, &format!("seq-del{index}"), "×", false)
+                        .on_press(move |s: &mut State| s.sequence_remove(index)),
+                ),
+        );
+    }
+    if let Some(error) = &state.error {
+        card = card.child(
+            text(error.clone())
+                .key("seq-error")
+                .font(theme::SMALL)
+                .color(p.red)
+                .wrap(),
+        );
+    }
+    let Some(preview) = &state.preview else {
+        if state.error.is_none() {
+            card = card.child(
+                text("Calcul de l'aperçu…".to_owned())
+                    .font(theme::SMALL)
+                    .color(p.muted),
+            );
+        }
+        return Some(card.child(
+            action(s, "seq-close", "Fermer", false).on_press(|s: &mut State| s.sequence_close()),
+        ));
+    };
+    card = card.child(
+        text(format!(
+            "Sur {} · {} commit(s){}.",
+            preview.branch.as_deref().unwrap_or("HEAD détaché"),
+            preview.commits.len(),
+            if preview.local_changes.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    " · {} fichier(s) avec modifications locales",
+                    preview.local_changes.len()
+                )
+            }
+        ))
+        .key("seq-summary")
+        .font(theme::SMALL)
+        .color(p.muted)
+        .wrap(),
+    );
+    if preview.merges > 0 {
+        let parents = preview.commits.iter().map(|c| c.parents).min().unwrap_or(2);
+        let mut choices = row().gap(6.0);
+        for parent in 1..=parents as u32 {
+            choices = choices.child(
+                action(
+                    s,
+                    &format!("seq-parent{parent}"),
+                    &format!("Parent {parent}"),
+                    state.mainline == Some(parent),
+                )
+                .on_press(move |s: &mut State| s.sequence_set_mainline(parent)),
+            );
+        }
+        card = card
+            .child(
+                text("Commit de fusion : choisissez explicitement le parent à garder comme référence (les fusions ne se mélangent pas avec d'autres commits).".to_owned())
+                    .key("seq-merge")
+                    .font(theme::SMALL)
+                    .color(p.red)
+                    .wrap(),
+            )
+            .child(choices);
+    }
+    if state.kind == SequenceKind::CherryPick {
+        card = card
+            .child(
+                text("Si un commit devient vide :".to_owned())
+                    .font(theme::SMALL)
+                    .color(p.muted),
+            )
+            .child(
+                row()
+                    .gap(6.0)
+                    .child(
+                        action(
+                            s,
+                            "seq-empty-drop",
+                            "l'ignorer",
+                            state.empty == EmptyPolicy::Drop,
+                        )
+                        .on_press(|s: &mut State| s.sequence_set_empty(EmptyPolicy::Drop)),
+                    )
+                    .child(
+                        action(
+                            s,
+                            "seq-empty-keep",
+                            "le garder vide",
+                            state.empty == EmptyPolicy::Keep,
+                        )
+                        .on_press(|s: &mut State| s.sequence_set_empty(EmptyPolicy::Keep)),
+                    )
+                    .child(
+                        action(
+                            s,
+                            "seq-empty-stop",
+                            "m'arrêter",
+                            state.empty == EmptyPolicy::Stop,
+                        )
+                        .on_press(|s: &mut State| s.sequence_set_empty(EmptyPolicy::Stop)),
+                    ),
+            );
+    }
+    Some(
+        card.child(
+            action(
+                s,
+                "seq-run",
+                if state.busy { "En cours…" } else { verb },
+                true,
+            )
+            .on_press(|s: &mut State| s.sequence_run()),
+        )
+        .child(
+            action(s, "seq-close", "Fermer", false).on_press(|s: &mut State| s.sequence_close()),
+        ),
+    )
+}
+
 fn reset_card(s: &State, oid: &str) -> Option<El> {
     use gitpoulpe_core::ResetMode;
     let p = s.palette;
@@ -429,6 +600,7 @@ fn detail(s: &State) -> El {
     let oid = commit.oid.clone();
     let tag_oid = commit.oid.clone();
     let reset_oid = commit.oid.clone();
+    let reset_subject = commit.subject.clone();
     panel
         .child(
             el().key("tag-commit")
@@ -474,6 +646,21 @@ fn detail(s: &State) -> El {
             action(s, "reset-here", "Repositionner la branche ici…", false)
                 .on_press(move |s: &mut State| s.reset_ask(&target))
         })
+        .child({
+            let (o, subject) = (reset_oid.clone(), reset_subject.clone());
+            action(s, "pick-add", "Ajouter au cherry-pick", false).on_press(move |s: &mut State| {
+                s.sequence_add(gitpoulpe_core::SequenceKind::CherryPick, &o, &subject)
+            })
+        })
+        .child({
+            let (o, subject) = (reset_oid.clone(), reset_subject.clone());
+            action(s, "revert-add", "Annuler ce commit (revert)", false).on_press(
+                move |s: &mut State| {
+                    s.sequence_add(gitpoulpe_core::SequenceKind::Revert, &o, &subject)
+                },
+            )
+        })
+        .children(sequence_card(s))
         .children(reset_card(s, &reset_oid))
 }
 

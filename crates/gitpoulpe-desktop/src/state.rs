@@ -190,6 +190,7 @@ pub struct State {
     pub conflicts: crate::conflicts::ConflictsState,
     pub stashes: crate::stashes::StashesState,
     pub resetting: crate::resetting::ResetSlot,
+    pub sequencing: crate::sequencing::SequenceSlot,
     pub reflog: crate::reflogs::ReflogState,
     pub publishing: crate::publishing::PublishSlot,
     pub operation_kind: Option<gitpoulpe_core::OperationKind>,
@@ -317,6 +318,7 @@ impl State {
             conflicts: crate::conflicts::ConflictsState::default(),
             stashes: crate::stashes::StashesState::default(),
             resetting: crate::resetting::ResetSlot::default(),
+            sequencing: crate::sequencing::SequenceSlot::default(),
             reflog: crate::reflogs::ReflogState::default(),
             publishing: crate::publishing::PublishSlot::default(),
             operation_kind: None,
@@ -602,6 +604,7 @@ impl State {
                 self.conflicts = crate::conflicts::ConflictsState::default();
                 self.stashes = crate::stashes::StashesState::default();
                 self.resetting = crate::resetting::ResetSlot::default();
+                self.sequencing = crate::sequencing::SequenceSlot::default();
                 self.reflog = crate::reflogs::ReflogState::default();
                 self.publishing = crate::publishing::PublishSlot::default();
                 self.operation_kind = None;
@@ -816,6 +819,12 @@ impl State {
                 self.apply_reset_previewed(request, result)
             }
             Event::ResetFinished { request, result } => self.apply_reset_finished(request, result),
+            Event::SequencePreviewed { request, result } => {
+                self.apply_sequence_previewed(request, result)
+            }
+            Event::SequenceFinished { request, result } => {
+                self.apply_sequence_finished(request, result)
+            }
             Event::SshScanned { request, result } => self.apply_ssh_scanned(request, result),
             Event::SshTrusted { request, result } => self.apply_ssh_trusted(request, result),
             Event::TagsListed { request, result } => self.apply_tags_listed(request, result),
