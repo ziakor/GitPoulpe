@@ -75,6 +75,7 @@ impl State {
         self.close_tags();
         self.close_remotes();
         self.close_conflicts();
+        self.close_stashes();
         self.profiles_open = false;
         self.branches.open = true;
         self.reload_branches();

@@ -6,7 +6,8 @@ use crate::view::row_key;
 const LINES_PER_KEY: usize = 3;
 const SIDEWAYS_STEP: f32 = 96.0;
 
-const TEXT_INPUTS: [&str; 16] = [
+const TEXT_INPUTS: [&str; 17] = [
+    "stash-message",
     "cf-result",
     "clone-url",
     "clone-name",
@@ -136,6 +137,14 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         s.close_profiles();
         return true;
     }
+    if s.stashes.open && event.key == Key::Escape {
+        if s.stashes.confirm_drop.is_some() {
+            s.stash_cancel_drop();
+        } else {
+            s.close_stashes();
+        }
+        return true;
+    }
     if s.conflicts.open && event.key == Key::Escape {
         if s.conflicts.confirm_abort || s.conflicts.markers_pending {
             s.conflict_cancel_abort();
@@ -204,7 +213,8 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         || s.branches.open
         || s.tags.open
         || s.remotes.open
-        || s.conflicts.open;
+        || s.conflicts.open
+        || s.stashes.open;
     match &event.key {
         Key::Text(text) if reading && !typing => match text.as_str() {
             "/" => tx.focus("filter", true),

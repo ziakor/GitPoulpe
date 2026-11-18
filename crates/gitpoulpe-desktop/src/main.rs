@@ -18,6 +18,8 @@ mod profiles_view;
 mod remotes;
 mod remotes_view;
 mod shell;
+mod stashes;
+mod stashes_view;
 mod state;
 mod tags;
 mod tags_view;

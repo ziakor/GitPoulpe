@@ -21,6 +21,7 @@ mod merging;
 mod profiles;
 mod remoting;
 mod staging;
+mod stashing;
 mod tagging;
 
 use crate::state::{Screen, State, ViewKind, path_from_args};

@@ -113,6 +113,14 @@ Git runs as an external program, without a shell, with the repository's filters,
 - Local changes are never overwritten: Git refuses a merge that would, and GitPoulpe reports the files and changes nothing. "Mettre mon travail local de côté" runs the merge with `--autostash`; if putting the work back conflicts, the work stays in `git stash list`, which the result message says.
 - A merge that conflicts opens the resolution screen above; the merge can then be continued or abandoned from there. Merges are recorded in the per-repository journal.
 
+## Stash
+
+- "Réserve" on the branch screen lists the stashes (message, branch, date) and, for the selected one, its files: modified ones, whether they were staged, and the untracked files it holds.
+- "Mettre de côté" creates a stash with a message and a scope you choose: tracked changes (default), plus untracked files, keeping the index in place, or only the staged changes (which excludes the other options). It refuses when there is nothing to stash for that scope, and during a merge, rebase, cherry-pick, revert or unresolved conflicts. The stash is created with your profile identity.
+- A stash is always addressed by its identity, never by its position in the list, so a list that changed behind the screen cannot make an action hit another stash. "Appliquer" keeps the stash, "Appliquer et retirer" removes it only once the application succeeded, and "Restaurer l'index" re-stages what was staged.
+- An application that conflicts keeps the stash and opens the resolution screen ("application du stash"), where the files can be resolved; nothing is aborted or deleted for you.
+- Deleting a stash is explicit: it names the stash and shows the `git stash store -m <message> <id>` command that brings it back, which works as long as Git has not cleaned its unreachable objects.
+
 ## Committing
 
 - Write a message in the box at the bottom of the file list, then "Créer le commit" or Ctrl+Enter. The commit contains exactly the staged content shown, with the effective identity of the repository's profile (or your Git configuration when it has none). The box also shows who will be the author and whether the profile's signing key is usable.

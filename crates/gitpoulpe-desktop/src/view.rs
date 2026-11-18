@@ -59,6 +59,8 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
         crate::remotes_view::remotes_screen(s)
     } else if s.conflicts.open {
         crate::conflicts_view::conflicts_screen(s)
+    } else if s.stashes.open {
+        crate::stashes_view::stashes_screen(s)
     } else {
         body
     };

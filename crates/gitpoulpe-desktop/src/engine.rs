@@ -9,13 +9,15 @@ use gitpoulpe_core::{
     CommitRange, CommitRequest, ConflictFile, ConflictVersions, DiffLine, DiffSide, DocumentMeta,
     Generation, IgnoreReason, IgnoreScope, MergeMode, MergeOutcome, MergePreview, OpenError,
     Operation, OperationKind, Profile, RangeError, ReadError, Remote, RemoteImpact, Resolution,
-    SessionId, SessionInfo, StageOutcome, StatusSnapshot, Tag, WriteError, WriteJob, mask_url,
+    SessionId, SessionInfo, StageOutcome, Stash, StashApplied, StashDetail, StashScope,
+    StatusSnapshot, Tag, WriteError, WriteJob, mask_url,
 };
 use gitpoulpe_git::{
     BranchError, CacheConfig, Cancel, CloneError, ConflictError, ConflictSide, DeleteMode,
     DiffCache, DiffError, DiffReader, FetchOutcome, Git, HistoryError, HistoryStream, HostKey,
     Identity, IdentityError, IgnoreError, IgnoredList, InspectError, MAX_WAIT, NetError,
-    QUIET_PERIOD, RemoteCheck, RepoWatcher, Signal, SigningCheck, check_signing, coalesce,
+    QUIET_PERIOD, RemoteCheck, RepoWatcher, Signal, SigningCheck, StashError, check_signing,
+    coalesce,
 };
 use rune::Waker;
 use std::time::Duration;
@@ -111,6 +113,30 @@ pub struct ConflictSnapshot {
 pub struct ConflictDone {
     pub message: String,
     pub finished: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StashOp {
+    Create {
+        message: Option<String>,
+        scope: StashScope,
+        profile: Option<Box<Profile>>,
+    },
+    Apply {
+        oid: String,
+        pop: bool,
+        restore_index: bool,
+    },
+    Drop {
+        oid: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StashDone {
+    pub message: String,
+    pub conflicts: bool,
+    pub journal: Option<(String, Option<String>, Option<String>, String)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -260,6 +286,17 @@ pub enum Command {
         expected_head: String,
         autostash: bool,
         profile: Option<Box<Profile>>,
+    },
+    StashList {
+        request: u64,
+    },
+    StashDetail {
+        request: u64,
+        oid: String,
+    },
+    StashOp {
+        request: u64,
+        op: StashOp,
     },
     NetCancel,
     InitPrepare {
@@ -459,6 +496,19 @@ pub enum Event {
     MergeFinished {
         request: u64,
         result: Result<MergeOutcome, String>,
+    },
+    StashesListed {
+        request: u64,
+        result: Result<Vec<Stash>, String>,
+    },
+    StashDetailed {
+        request: u64,
+        oid: String,
+        result: Result<StashDetail, String>,
+    },
+    StashFinished {
+        request: u64,
+        result: Result<StashDone, String>,
     },
     CloneProgress {
         request: u64,
@@ -1003,6 +1053,44 @@ async fn run(
                             shared.emit(Event::MergeFinished { request, result });
                         });
                     }
+                    Command::StashList { request } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .list_stashes(&current.info)
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::StashesListed { request, result });
+                        });
+                    }
+                    Command::StashDetail { request, oid } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .stash_detail(&current.info, &oid)
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::StashDetailed {
+                                request,
+                                oid,
+                                result,
+                            });
+                        });
+                    }
+                    Command::StashOp { request, op } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        tokio::spawn(stash_op(shared.clone(), current, request, op));
+                    }
                     Command::NetCancel => {
                         if let Some(cancel) = net_cancel.take() {
                             cancel.cancel();
@@ -1422,6 +1510,81 @@ async fn conflict_op(
             ConflictError::MarkersRemain => "MARKERS".to_owned(),
             other => other.to_string(),
         }),
+    });
+}
+
+async fn stash_op(shared: Arc<Shared>, session: Arc<Session>, request: u64, op: StashOp) {
+    let _guard = session.writer.lock().await;
+    let git = &shared.git;
+    let info = &session.info;
+    let result: Result<StashDone, StashError> = match &op {
+        StashOp::Create {
+            message,
+            scope,
+            profile,
+        } => git
+            .create_stash(info, message.as_deref(), *scope, profile.as_deref())
+            .await
+            .map(|stash| StashDone {
+                message: format!(
+                    "Travail mis de côté dans stash@{{0}} ({}).",
+                    if stash.message.is_empty() {
+                        "sans message".to_owned()
+                    } else {
+                        stash.message.clone()
+                    }
+                ),
+                conflicts: false,
+                journal: Some(("stash-create".into(), None, Some(stash.oid), stash.message)),
+            }),
+        StashOp::Apply {
+            oid,
+            pop,
+            restore_index,
+        } => git
+            .apply_stash(info, oid, *pop, *restore_index)
+            .await
+            .map(|applied| match applied {
+                StashApplied::Clean { dropped } => StashDone {
+                    message: if dropped {
+                        "Stash appliqué puis retiré de la liste.".to_owned()
+                    } else {
+                        "Stash appliqué ; il reste dans la liste.".to_owned()
+                    },
+                    conflicts: false,
+                    journal: Some((
+                        if *pop { "stash-pop" } else { "stash-apply" }.into(),
+                        Some(oid.clone()),
+                        None,
+                        String::new(),
+                    )),
+                },
+                StashApplied::Conflicts { files } => StashDone {
+                    message: format!(
+                        "L'application a produit des conflits dans {} fichier(s). Le stash est conservé : résolvez les conflits, il ne sera supprimé que par vous.",
+                        files.len()
+                    ),
+                    conflicts: true,
+                    journal: Some((
+                        "stash-apply-conflict".into(),
+                        Some(oid.clone()),
+                        None,
+                        String::new(),
+                    )),
+                },
+            }),
+        StashOp::Drop { oid } => git.drop_stash(info, oid).await.map(|stash| StashDone {
+            message: format!(
+                "Stash supprimé. Pour le rétablir : {}",
+                crate::shell::restore_stash(&stash.message, &stash.oid)
+            ),
+            conflicts: false,
+            journal: Some(("stash-drop".into(), Some(stash.oid), None, stash.message)),
+        }),
+    };
+    shared.emit(Event::StashFinished {
+        request,
+        result: result.map_err(|e| e.to_string()),
     });
 }
 

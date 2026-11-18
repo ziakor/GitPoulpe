@@ -385,6 +385,18 @@ fn footer(s: &State) -> El {
                 ),
         );
     }
+    if c.operation.as_ref().map(|o| o.kind) == Some(gitpoulpe_core::OperationKind::StashApply) {
+        return bar.child(
+            text(
+                "Le stash est conservé. Une fois les fichiers résolus, ils sont simplement indexés ; supprimez le stash vous-même depuis la réserve quand vous n'en avez plus besoin."
+                    .to_owned(),
+            )
+            .key("cf-stash-hint")
+            .font(theme::SMALL)
+            .color(p.muted)
+            .wrap(),
+        );
+    }
     let go = if c.ready() {
         action(s, "cf-continue", &format!("Continuer la {caption}"), true)
             .on_press(|s: &mut State| s.conflict_continue())

@@ -188,6 +188,7 @@ pub struct State {
     pub remotes: crate::remotes::RemotesState,
     pub init: crate::initialize::InitState,
     pub conflicts: crate::conflicts::ConflictsState,
+    pub stashes: crate::stashes::StashesState,
     pub operation_kind: Option<gitpoulpe_core::OperationKind>,
     pub(crate) probe_request: u64,
     pub clone: crate::cloning::CloneState,
@@ -311,6 +312,7 @@ impl State {
             remotes: crate::remotes::RemotesState::default(),
             init: crate::initialize::InitState::default(),
             conflicts: crate::conflicts::ConflictsState::default(),
+            stashes: crate::stashes::StashesState::default(),
             operation_kind: None,
             probe_request: 0,
             clone: crate::cloning::CloneState::default(),
@@ -592,6 +594,7 @@ impl State {
                 self.tags = crate::tags::TagsState::default();
                 self.remotes = crate::remotes::RemotesState::default();
                 self.conflicts = crate::conflicts::ConflictsState::default();
+                self.stashes = crate::stashes::StashesState::default();
                 self.operation_kind = None;
                 self.writing = false;
                 self.positions.clear();
@@ -774,6 +777,13 @@ impl State {
                 self.apply_merge_previewed(request, result)
             }
             Event::MergeFinished { request, result } => self.apply_merge_finished(request, result),
+            Event::StashesListed { request, result } => self.apply_stashes_listed(request, result),
+            Event::StashDetailed {
+                request,
+                oid,
+                result,
+            } => self.apply_stash_detailed(request, &oid, result),
+            Event::StashFinished { request, result } => self.apply_stash_finished(request, result),
             Event::SshScanned { request, result } => self.apply_ssh_scanned(request, result),
             Event::SshTrusted { request, result } => self.apply_ssh_trusted(request, result),
             Event::TagsListed { request, result } => self.apply_tags_listed(request, result),
@@ -1811,6 +1821,7 @@ impl State {
         self.close_tags();
         self.close_remotes();
         self.close_conflicts();
+        self.close_stashes();
         let selected = self
             .active_profile()
             .or_else(|| self.book.profiles.first())
@@ -2163,6 +2174,7 @@ impl State {
         self.close_tags();
         self.close_remotes();
         self.close_conflicts();
+        self.close_stashes();
         self.start_history();
     }
 
@@ -2293,6 +2305,7 @@ impl State {
         self.close_tags();
         self.close_remotes();
         self.close_conflicts();
+        self.close_stashes();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::CommitInspect {

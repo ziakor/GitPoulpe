@@ -13,6 +13,10 @@ pub fn restore_branch(name: &str, tip: &str) -> String {
     format!("git branch -- {} {tip}", quote(name))
 }
 
+pub fn restore_stash(message: &str, oid: &str) -> String {
+    format!("git stash store -m {} {oid}", quote(message))
+}
+
 pub fn restore_remote(name: &str, url: &str) -> String {
     if gitpoulpe_core::url_has_secret(url) {
         return format!(

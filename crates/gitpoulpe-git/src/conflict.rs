@@ -197,6 +197,13 @@ impl Git {
                 ),
             }));
         }
+        if !self.unmerged(info).await?.is_empty() {
+            return Ok(Some(Operation {
+                kind: OperationKind::StashApply,
+                ours_label: "vos fichiers actuels".to_owned(),
+                theirs_label: "le stash appliqué".to_owned(),
+            }));
+        }
         Ok(None)
     }
 
@@ -475,6 +482,11 @@ impl Git {
             };
             return Err(ConflictError::NotReady(why));
         }
+        if operation.kind == OperationKind::StashApply {
+            return Err(ConflictError::NotReady(
+                "il n'y a rien à continuer : une fois les fichiers résolus, ils sont simplement indexés".to_owned(),
+            ));
+        }
         let mut env: Vec<(OsString, OsString)> = profile.map(profile_env).unwrap_or_default();
         env.push(("GIT_EDITOR".into(), "true".into()));
         env.push(("GIT_SEQUENCE_EDITOR".into(), "true".into()));
@@ -517,6 +529,11 @@ impl Git {
             .operation_state(info)
             .await?
             .ok_or(ConflictError::NoOperation)?;
+        if operation.kind == OperationKind::StashApply {
+            return Err(ConflictError::Refused(
+                "l'application d'un stash ne s'abandonne pas : le stash reste intact, résolvez les fichiers ou restaurez-les vous-même".to_owned(),
+            ));
+        }
         let worktree = info.worktree.as_deref().ok_or(ExecError::NoWorktree)?;
         let mut paths: Vec<PathBuf> = self.unmerged(info).await?.into_keys().collect();
         for path in remembered {

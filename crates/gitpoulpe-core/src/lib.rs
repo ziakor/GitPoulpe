@@ -11,6 +11,7 @@ mod profile;
 mod remote;
 mod session;
 mod split;
+mod stash;
 mod status;
 mod tag;
 mod write;
@@ -38,6 +39,7 @@ pub use profile::{Profile, ProfileBook, ProfileError, SigningPreference};
 pub use remote::{Remote, RemoteImpact, mask_url, url_has_secret};
 pub use session::{RepoKind, SessionInfo, SessionState, StaleSnapshot};
 pub use split::{SplitCells, SplitIndex, SplitIndexBuilder, SplitRow, SplitUnit, split_rows};
+pub use stash::{Stash, StashApplied, StashDetail, StashFile, StashScope};
 pub use status::{BranchInfo, ChangeEntry, EntryKind, StatusCode, StatusSnapshot, display_label};
 pub use tag::Tag;
 pub use write::{

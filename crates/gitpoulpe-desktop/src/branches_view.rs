@@ -465,6 +465,10 @@ pub fn branches_screen(s: &State) -> El {
                 .truncate(),
         )
         .child(
+            action(s, "branches-stashes", "Réserve", false)
+                .on_press(|s: &mut State| s.open_stashes()),
+        )
+        .child(
             action(s, "branches-remotes", "Remotes", false)
                 .on_press(|s: &mut State| s.open_remotes()),
         )

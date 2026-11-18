@@ -22,6 +22,7 @@ mod process;
 mod remote;
 mod ssh;
 mod stage;
+mod stash;
 mod status;
 mod tag;
 mod watch;
@@ -50,6 +51,7 @@ pub use parse::{ParseError, StatusParser};
 pub use remote::{RemoteError, validate_remote_url};
 pub use ssh::{HostKey, RemoteCheck};
 pub use stage::stamp_of;
+pub use stash::StashError;
 pub use tag::TagError;
 pub use watch::{MAX_WAIT, QUIET_PERIOD, RepoWatcher, Signal, WatchError, coalesce, is_relevant};
 

@@ -6,6 +6,7 @@ pub enum OperationKind {
     Rebase,
     CherryPick,
     Revert,
+    StashApply,
 }
 
 impl OperationKind {
@@ -15,6 +16,7 @@ impl OperationKind {
             Self::Rebase => "rebase",
             Self::CherryPick => "cherry-pick",
             Self::Revert => "revert",
+            Self::StashApply => "stash",
         }
     }
 
@@ -24,6 +26,7 @@ impl OperationKind {
             Self::Rebase => "rebase",
             Self::CherryPick => "cherry-pick",
             Self::Revert => "revert",
+            Self::StashApply => "application du stash",
         }
     }
 }
