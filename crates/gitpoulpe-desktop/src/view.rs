@@ -329,6 +329,7 @@ fn view_hint(view: ViewKind) -> &'static str {
         ViewKind::Staged => {
             "Modifications ajoutées à l'index : elles feront partie du prochain commit."
         }
+        ViewKind::Commit => "Changements apportés par ce commit.",
     }
 }
 
@@ -400,15 +401,17 @@ fn left_pane(s: &State) -> El {
                 .px(16.0)
                 .py(12.0)
                 .gap(10.0)
-                .child(
+                .child(if s.view == ViewKind::Commit {
+                    commit_card(s)
+                } else {
                     row()
                         .w_full()
                         .gap(8.0)
                         .role("tablist")
                         .focus_group()
                         .child(tab(s, ViewKind::Unstaged, "Non indexés"))
-                        .child(tab(s, ViewKind::Staged, "Indexés")),
-                )
+                        .child(tab(s, ViewKind::Staged, "Indexés"))
+                })
                 .child(
                     text(view_hint(s.view))
                         .font(theme::SMALL)
@@ -435,7 +438,100 @@ fn left_pane(s: &State) -> El {
                 })
                 .child(list),
         )
-        .child(commit_box(s))
+        .child(if s.view == ViewKind::Commit {
+            el().h(0.0)
+        } else {
+            commit_box(s)
+        })
+}
+
+fn commit_card(s: &State) -> El {
+    let p = s.palette;
+    let Some(inspected) = &s.inspected else {
+        return el().h(0.0);
+    };
+    let detail = &inspected.detail;
+    let short: String = detail.commit.oid.chars().take(8).collect();
+    let mut card = col()
+        .w_full()
+        .gap(6.0)
+        .child(
+            text(detail.commit.subject.clone())
+                .font(theme::BODY_STRONG)
+                .color(p.text)
+                .wrap(),
+        )
+        .child(
+            text(format!(
+                "{short} · {} <{}> · {} UTC",
+                detail.commit.author,
+                detail.author_email,
+                crate::history_state::format_date(detail.commit.timestamp)
+            ))
+            .font(theme::SMALL)
+            .color(p.muted)
+            .wrap(),
+        );
+    let body: Vec<&str> = detail.message.lines().skip(1).collect();
+    if !body.is_empty() {
+        card = card.child(
+            text(body.join("\n").trim().to_owned())
+                .font(theme::SMALL)
+                .color(p.muted)
+                .wrap()
+                .max_lines(6),
+        );
+    }
+    let parents = &detail.commit.parents;
+    card = card.child(match parents.len() {
+        0 => text("Premier commit : comparé à un arbre vide.".to_owned())
+            .font(theme::SMALL)
+            .color(p.accent)
+            .wrap(),
+        1 => text(format!(
+            "Comparé au parent {}.",
+            parents[0].chars().take(8).collect::<String>()
+        ))
+        .font(theme::SMALL)
+        .color(p.muted)
+        .wrap(),
+        _ => text("Commit de fusion : choisis le parent de comparaison.".to_owned())
+            .font(theme::SMALL)
+            .color(p.accent)
+            .wrap(),
+    });
+    if parents.len() > 1 {
+        let mut choices = row().w_full().gap(6.0);
+        for (index, parent) in parents.iter().enumerate() {
+            let selected = inspected.base_index == index;
+            let caption = format!(
+                "Parent {} · {}",
+                index + 1,
+                parent.chars().take(8).collect::<String>()
+            );
+            choices = choices.child(
+                stage_button(
+                    s,
+                    format!("parent-{index}"),
+                    caption.clone(),
+                    caption,
+                    selected,
+                )
+                .on_press(move |s: &mut State| s.choose_parent(index)),
+            );
+        }
+        card = card.child(choices);
+    }
+    card.child(
+        stage_button(
+            s,
+            "commit-back".to_owned(),
+            "Quitter l'inspection du commit".to_owned(),
+            "← Quitter l'inspection".to_owned(),
+            false,
+        )
+        .on_press(|s: &mut State| s.leave_commit()),
+    )
 }
 
 fn commit_box(s: &State) -> El {
@@ -689,10 +785,10 @@ fn status_of(entry: &ChangeEntry, view: ViewKind) -> (&'static str, &'static str
     if entry.kind == EntryKind::Untracked {
         return ("Non suivi", "?");
     }
-    let code = if view == ViewKind::Staged {
-        entry.index
-    } else {
+    let code = if view == ViewKind::Unstaged {
         entry.worktree
+    } else {
+        entry.index
     };
     match code {
         StatusCode::Added => ("Ajouté", "A"),
@@ -1046,6 +1142,9 @@ fn header_row(s: &State, index: usize, entry: &ChangeEntry) -> El {
 }
 
 fn header_action(s: &State, index: usize, entry: &ChangeEntry, label: &str) -> El {
+    if s.view == ViewKind::Commit {
+        return el().w(0.0);
+    }
     let staging = s.view == ViewKind::Unstaged;
     let eligible = if staging {
         entry.is_unstaged()
@@ -1233,6 +1332,7 @@ fn partial_entry(s: &State, index: usize) -> Option<&ChangeEntry> {
     let allowed = match s.view {
         ViewKind::Unstaged => entry.worktree == StatusCode::Modified,
         ViewKind::Staged => matches!(entry.index, StatusCode::Modified | StatusCode::Added),
+        ViewKind::Commit => false,
     };
     let text = s.doc(index)?.meta.as_ref()?.kind == Some(DocumentKind::Text);
     (allowed && text).then_some(entry)

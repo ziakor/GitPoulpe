@@ -6,6 +6,7 @@ mod diff;
 mod diff_parse;
 mod history;
 mod identity;
+mod inspect;
 mod open;
 mod parse;
 mod process;
@@ -23,6 +24,7 @@ pub use identity::{
     Identity, IdentityError, SigningCheck, check_signing, check_signing_with_env, profile_env,
     signing_config,
 };
+pub use inspect::InspectError;
 pub use parse::{ParseError, StatusParser};
 pub use stage::stamp_of;
 pub use watch::{MAX_WAIT, QUIET_PERIOD, RepoWatcher, Signal, WatchError, coalesce, is_relevant};

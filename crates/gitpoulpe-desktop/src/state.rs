@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 use crate::history_state::{HistoryState, SearchState};
 use crate::profiles::{IdentityShown, PROFILES_KEY, ProfileForm, SigningKind};
 use gitpoulpe_core::{
-    AmendInfo, AmendRequest, CommitFailureKind, CommitOutcome, CommitRefusal, CommitRequest,
-    JournalEntry, Profile, ProfileBook, push_journal,
+    AmendInfo, AmendRequest, CommitDetail, CommitFailureKind, CommitOutcome, CommitRefusal,
+    CommitRequest, JournalEntry, Profile, ProfileBook, push_journal,
 };
 use gitpoulpe_core::{
     BuildState, ChangeEntry, DiffLine, DiffSide, DocumentKind, DocumentMeta, Generation, HunkLines,
@@ -46,6 +46,7 @@ const PREFETCH_AFTER: usize = 8;
 pub enum ViewKind {
     Unstaged,
     Staged,
+    Commit,
 }
 
 impl ViewKind {
@@ -53,8 +54,16 @@ impl ViewKind {
         match self {
             Self::Unstaged => DiffSide::Unstaged,
             Self::Staged => DiffSide::Staged,
+            Self::Commit => DiffSide::Commit,
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InspectedCommit {
+    pub detail: CommitDetail,
+    pub entries: Vec<ChangeEntry>,
+    pub base_index: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -154,6 +163,9 @@ pub struct State {
     pub marks_version: u32,
     pub line_pick: Option<LinePick>,
     pub history_open: bool,
+    pub inspected: Option<InspectedCommit>,
+    inspect_request: u64,
+    pub return_to_history: bool,
     pub history: HistoryState,
     history_request: u64,
     pub search_text: TextEdit,
@@ -264,6 +276,9 @@ impl State {
             marks_version: 0,
             line_pick: None,
             history_open: false,
+            inspected: None,
+            inspect_request: 0,
+            return_to_history: false,
             history: HistoryState::default(),
             history_request: 0,
             search_text: TextEdit::new(""),
@@ -366,6 +381,11 @@ impl State {
     }
 
     pub fn entries(&self) -> &[ChangeEntry] {
+        if self.view == ViewKind::Commit
+            && let Some(inspected) = &self.inspected
+        {
+            return &inspected.entries;
+        }
         self.repo
             .as_ref()
             .map_or(&[], |repo| &repo.snapshot.entries)
@@ -387,10 +407,23 @@ impl State {
         match view {
             ViewKind::Unstaged => entry.is_unstaged() || entry.is_conflict(),
             ViewKind::Staged => entry.is_staged(),
+            ViewKind::Commit => true,
         }
     }
 
     pub fn set_view(&mut self, view: ViewKind) {
+        if self.view == ViewKind::Commit && view != ViewKind::Commit {
+            self.leave_commit();
+            if view == ViewKind::Commit {
+                return;
+            }
+            self.return_to_history = false;
+            self.history_open = false;
+            if view != self.view {
+                self.set_view(view);
+            }
+            return;
+        }
         if self.view != view {
             if let Some(anchor) = self.capture_anchor() {
                 self.positions.insert(self.view, anchor);
@@ -553,6 +586,46 @@ impl State {
                 } else {
                     WatchStatus::Unavailable(reason)
                 };
+                true
+            }
+            Event::CommitInspected {
+                request,
+                generation,
+                detail,
+                base_index,
+                entries,
+            } => {
+                if request != self.inspect_request {
+                    return false;
+                }
+                if let Some(repo) = self.repo.as_mut() {
+                    repo.generation = generation;
+                }
+                if self.view != ViewKind::Commit {
+                    self.return_to_history = self.history_open;
+                }
+                self.history_open = false;
+                self.inspected = Some(InspectedCommit {
+                    detail: *detail,
+                    entries,
+                    base_index,
+                });
+                self.view = ViewKind::Commit;
+                self.docs.clear();
+                self.marked.clear();
+                self.clear_pick();
+                self.current = None;
+                self.pinned = None;
+                self.stick_end = false;
+                self.notice = None;
+                self.refilter();
+                true
+            }
+            Event::CommitInspectFailed { request, message } => {
+                if request != self.inspect_request {
+                    return false;
+                }
+                self.notice = Some(format!("Impossible d'inspecter ce commit : {message}"));
                 true
             }
             Event::HistoryPage {
@@ -735,6 +808,7 @@ impl State {
         Some(match side {
             DiffSide::Unstaged => ViewKind::Unstaged,
             DiffSide::Staged => ViewKind::Staged,
+            DiffSide::Commit => ViewKind::Commit,
         })
     }
 
@@ -1355,8 +1429,10 @@ impl State {
     }
 
     pub fn can_mark(&self, position: usize) -> bool {
-        self.entry_at(position)
-            .is_some_and(|(_, entry)| Self::in_view(entry, self.view) && !entry.is_conflict())
+        self.view != ViewKind::Commit
+            && self
+                .entry_at(position)
+                .is_some_and(|(_, entry)| Self::in_view(entry, self.view) && !entry.is_conflict())
     }
 
     pub fn toggle_mark(&mut self, position: usize) {
@@ -1478,6 +1554,7 @@ impl State {
         match self.view {
             ViewKind::Unstaged => self.stage_paths(paths),
             ViewKind::Staged => self.unstage_paths(paths),
+            ViewKind::Commit => {}
         }
     }
 
@@ -1512,6 +1589,7 @@ impl State {
         self.submit(match self.view {
             ViewKind::Unstaged => WriteJob::StageHunk { target, hunk },
             ViewKind::Staged => WriteJob::UnstageHunk { target, hunk },
+            ViewKind::Commit => return,
         });
     }
 
@@ -1568,6 +1646,7 @@ impl State {
         self.submit(match self.view {
             ViewKind::Unstaged => WriteJob::StageLines { target, selection },
             ViewKind::Staged => WriteJob::UnstageLines { target, selection },
+            ViewKind::Commit => return,
         });
     }
 }
@@ -2082,6 +2161,48 @@ impl State {
                     request: self.history.request,
                 });
             }
+        }
+    }
+}
+
+impl State {
+    pub fn open_commit(&mut self, oid: String, parent_index: usize) {
+        if self.repo.is_none() {
+            return;
+        }
+        self.inspect_request += 1;
+        if let Some(engine) = &self.engine {
+            engine.send(Command::CommitInspect {
+                request: self.inspect_request,
+                oid,
+                parent_index,
+            });
+        }
+    }
+
+    pub fn choose_parent(&mut self, parent_index: usize) {
+        let Some(oid) = self.inspected.as_ref().map(|i| i.detail.commit.oid.clone()) else {
+            return;
+        };
+        self.open_commit(oid, parent_index);
+    }
+
+    pub fn leave_commit(&mut self) {
+        if self.view != ViewKind::Commit {
+            return;
+        }
+        self.inspected = None;
+        self.view = ViewKind::Unstaged;
+        self.docs.clear();
+        self.current = None;
+        self.pinned = None;
+        self.refilter();
+        if let Some(engine) = &self.engine {
+            engine.send(Command::CommitLeave);
+        }
+        self.refresh();
+        if std::mem::take(&mut self.return_to_history) {
+            self.open_history();
         }
     }
 }

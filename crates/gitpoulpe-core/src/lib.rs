@@ -14,11 +14,11 @@ pub use commit::{
     JOURNAL_LIMIT, JournalEntry, Signature, SignatureKind, push_journal,
 };
 pub use diff::{
-    BuildState, DiffKey, DiffLine, DiffLineKind, DiffSide, DocumentKind, DocumentMeta, FileRef,
-    Hunk, RangeData, RangeError,
+    BuildState, CommitRange, DiffKey, DiffLine, DiffLineKind, DiffSide, DocumentKind, DocumentMeta,
+    FileRef, Hunk, RangeData, RangeError,
 };
 pub use error::{Diagnostic, OpenError, ReadError};
-pub use history::{Commit, GraphLayout, GraphRow, glyphs};
+pub use history::{Commit, CommitDetail, GraphLayout, GraphRow, glyphs};
 pub use identity::{Generation, RepoId, RequestId, SessionId};
 pub use profile::{Profile, ProfileBook, ProfileError, SigningPreference};
 pub use session::{RepoKind, SessionInfo, SessionState, StaleSnapshot};

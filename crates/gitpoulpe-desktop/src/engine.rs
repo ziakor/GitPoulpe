@@ -5,14 +5,14 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 use gitpoulpe_core::{
-    AmendInfo, AmendRequest, ChangeEntry, Commit, CommitOutcome, CommitRequest, DiffLine, DiffSide,
-    DocumentMeta, Generation, OpenError, Profile, RangeError, ReadError, SessionId, SessionInfo,
-    StageOutcome, StatusSnapshot, WriteError, WriteJob,
+    AmendInfo, AmendRequest, ChangeEntry, Commit, CommitDetail, CommitOutcome, CommitRange,
+    CommitRequest, DiffLine, DiffSide, DocumentMeta, Generation, OpenError, Profile, RangeError,
+    ReadError, SessionId, SessionInfo, StageOutcome, StatusSnapshot, WriteError, WriteJob,
 };
 use gitpoulpe_git::{
-    CacheConfig, Cancel, DiffCache, DiffReader, Git, HistoryError, HistoryStream, Identity,
-    IdentityError, MAX_WAIT, QUIET_PERIOD, RepoWatcher, Signal, SigningCheck, check_signing,
-    coalesce,
+    CacheConfig, Cancel, DiffCache, DiffError, DiffReader, Git, HistoryError, HistoryStream,
+    Identity, IdentityError, InspectError, MAX_WAIT, QUIET_PERIOD, RepoWatcher, Signal,
+    SigningCheck, check_signing, coalesce,
 };
 use rune::Waker;
 use std::time::Duration;
@@ -69,6 +69,12 @@ pub enum Command {
         request: u64,
     },
     SearchClose,
+    CommitInspect {
+        request: u64,
+        oid: String,
+        parent_index: usize,
+    },
+    CommitLeave,
     Amend {
         request: u64,
         job: Box<AmendRequest>,
@@ -115,6 +121,17 @@ pub enum Event {
     AmendInfo {
         request: u64,
         info: Option<AmendInfo>,
+    },
+    CommitInspected {
+        request: u64,
+        generation: Generation,
+        detail: Box<CommitDetail>,
+        base_index: usize,
+        entries: Vec<ChangeEntry>,
+    },
+    CommitInspectFailed {
+        request: u64,
+        message: String,
     },
     HistoryPage {
         request: u64,
@@ -227,6 +244,7 @@ struct Session {
     info: SessionInfo,
     generation: Mutex<Generation>,
     writer: tokio::sync::Mutex<()>,
+    commit: Mutex<Option<CommitRange>>,
 }
 
 impl Session {
@@ -235,6 +253,7 @@ impl Session {
             info,
             generation: Mutex::new(generation),
             writer: tokio::sync::Mutex::new(()),
+            commit: Mutex::new(None),
         }
     }
 
@@ -386,6 +405,27 @@ async fn run(
                         }
                     }
                     Command::SearchClose => search = None,
+                    Command::CommitInspect {
+                        request,
+                        oid,
+                        parent_index,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        tokio::spawn(inspect_commit(
+                            shared.clone(),
+                            current,
+                            request,
+                            oid,
+                            parent_index,
+                        ));
+                    }
+                    Command::CommitLeave => {
+                        if let Some(current) = &session {
+                            *current.commit.lock().unwrap() = None;
+                        }
+                    }
                     Command::Amend { request, job } => {
                         let Some(current) = session.clone() else {
                             continue;
@@ -619,6 +659,51 @@ async fn history_page(shared: Arc<Shared>, request: u64, handle: HistoryHandle) 
     }
 }
 
+async fn inspect_commit(
+    shared: Arc<Shared>,
+    session: Arc<Session>,
+    request: u64,
+    oid: String,
+    parent_index: usize,
+) {
+    let outcome = async {
+        let detail = shared.git.commit_detail(&session.info, &oid).await?;
+        let parents = &detail.commit.parents;
+        let base_index = parent_index.min(parents.len().saturating_sub(1));
+        let base = match parents.get(base_index) {
+            Some(parent) => parent.clone(),
+            None => shared.git.empty_tree(&session.info).await?,
+        };
+        let entries = shared
+            .git
+            .commit_files(&session.info, &detail.commit.oid, &base)
+            .await?;
+        Ok::<_, InspectError>((detail, base, base_index, entries))
+    }
+    .await;
+    match outcome {
+        Ok((detail, base, base_index, entries)) => {
+            *session.commit.lock().unwrap() = Some(CommitRange {
+                oid: detail.commit.oid.clone(),
+                base,
+            });
+            let generation = session.bump();
+            shared.reader.retire_before(session.info.id, generation);
+            shared.emit(Event::CommitInspected {
+                request,
+                generation,
+                detail: Box::new(detail),
+                base_index,
+                entries,
+            });
+        }
+        Err(error) => shared.emit(Event::CommitInspectFailed {
+            request,
+            message: error.to_string(),
+        }),
+    }
+}
+
 const SEARCH_PAGE: usize = 50;
 
 async fn search_open(
@@ -725,10 +810,22 @@ async fn read(
     range: Range<u64>,
 ) {
     let generation = session.generation();
-    let document = match shared
-        .reader
-        .open_document(&session.info, generation, side, &entry)
-    {
+    let opened = if side == DiffSide::Commit {
+        let range = session.commit.lock().unwrap().clone();
+        match range {
+            Some(range) => {
+                shared
+                    .reader
+                    .open_commit_document(&session.info, generation, &range, &entry)
+            }
+            None => Err(DiffError::NotInThisView),
+        }
+    } else {
+        shared
+            .reader
+            .open_document(&session.info, generation, side, &entry)
+    };
+    let document = match opened {
         Ok(document) => document,
         Err(error) => {
             return shared.emit(Event::ReadFailed {

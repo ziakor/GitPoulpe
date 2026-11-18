@@ -11,6 +11,7 @@ mod acceptance;
 mod amending;
 mod committing;
 mod history;
+mod inspecting;
 mod profiles;
 mod staging;
 

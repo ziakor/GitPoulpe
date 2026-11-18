@@ -10,6 +10,13 @@ use crate::split::SplitIndex;
 pub enum DiffSide {
     Unstaged,
     Staged,
+    Commit,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct CommitRange {
+    pub oid: String,
+    pub base: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -25,6 +32,7 @@ pub struct DiffKey {
     pub generation: Generation,
     pub side: DiffSide,
     pub file: FileRef,
+    pub range: Option<CommitRange>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

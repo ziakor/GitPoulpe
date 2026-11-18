@@ -228,7 +228,26 @@ fn detail(s: &State) -> El {
                 .wrap(),
         );
     }
-    panel
+    let oid = commit.oid.clone();
+    panel.child(
+        el().key("inspect-commit")
+            .role("button")
+            .label("Inspecter ce commit")
+            .focusable(true)
+            .focus_ring(2.0, 2.0, p.accent)
+            .h(32.0)
+            .px(12.0)
+            .center()
+            .radius(3.0)
+            .fill(p.accent)
+            .hover(p.hover)
+            .on_press(move |s: &mut State| s.open_commit(oid.clone(), 0))
+            .child(
+                text("Inspecter ce commit".to_owned())
+                    .font(theme::BODY_STRONG)
+                    .color(p.on_accent),
+            ),
+    )
 }
 
 fn message(s: &State, title: &str, detail: &str) -> El {

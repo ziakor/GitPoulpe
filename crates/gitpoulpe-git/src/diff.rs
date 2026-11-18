@@ -8,9 +8,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use gitpoulpe_core::{
-    BuildState, ChangeEntry, Diagnostic, DiffKey, DiffLine, DiffSide, DocumentKind, DocumentMeta,
-    EntryKind, FileRef, Generation, Hunk, RangeData, RangeError, ReadError, SessionId, SessionInfo,
-    SplitIndex, SplitIndexBuilder,
+    BuildState, ChangeEntry, CommitRange, Diagnostic, DiffKey, DiffLine, DiffSide, DocumentKind,
+    DocumentMeta, EntryKind, FileRef, Generation, Hunk, RangeData, RangeError, ReadError,
+    SessionId, SessionInfo, SplitIndex, SplitIndexBuilder,
 };
 use tokio::sync::watch;
 
@@ -50,6 +50,7 @@ struct Request {
     original: Option<PathBuf>,
     untracked: bool,
     conflict: bool,
+    range: Option<CommitRange>,
 }
 
 impl Request {
@@ -68,6 +69,17 @@ impl Request {
             spec.extend_from_slice(path.as_os_str().as_bytes());
             OsString::from_vec(spec)
         };
+        if let Some(range) = &self.range {
+            args.push(OsString::from("-M"));
+            args.push(OsString::from(range.base.clone()));
+            args.push(OsString::from(range.oid.clone()));
+            args.push(OsString::from("--"));
+            args.push(literal(&self.path));
+            if let Some(original) = &self.original {
+                args.push(literal(original));
+            }
+            return args;
+        }
         if self.untracked {
             args.extend(["--no-index", "--", "/dev/null"].map(OsString::from));
             args.push(self.path.clone().into_os_string());
@@ -508,15 +520,44 @@ impl DiffReader {
         side: DiffSide,
         entry: &ChangeEntry,
     ) -> Result<DiffDocument, DiffError> {
-        let worktree = info.worktree.as_ref().ok_or(DiffError::NoWorktree)?;
         let conflict = entry.kind == EntryKind::Unmerged;
         let visible = match side {
             DiffSide::Unstaged => entry.is_unstaged(),
             DiffSide::Staged => entry.is_staged(),
+            DiffSide::Commit => false,
         };
         if !visible && !conflict {
             return Err(DiffError::NotInThisView);
         }
+        self.open_inner(info, generation, side, entry, None)
+    }
+
+    pub fn open_commit_document(
+        &self,
+        info: &SessionInfo,
+        generation: Generation,
+        range: &CommitRange,
+        entry: &ChangeEntry,
+    ) -> Result<DiffDocument, DiffError> {
+        self.open_inner(
+            info,
+            generation,
+            DiffSide::Commit,
+            entry,
+            Some(range.clone()),
+        )
+    }
+
+    fn open_inner(
+        &self,
+        info: &SessionInfo,
+        generation: Generation,
+        side: DiffSide,
+        entry: &ChangeEntry,
+        range: Option<CommitRange>,
+    ) -> Result<DiffDocument, DiffError> {
+        let worktree = info.worktree.as_ref().ok_or(DiffError::NoWorktree)?;
+        let conflict = entry.kind == EntryKind::Unmerged;
         for protected in [worktree, &info.git_dir, &info.common_dir] {
             if let Ok(protected) = std::fs::canonicalize(protected)
                 && self.cache.root().starts_with(&protected)
@@ -533,6 +574,7 @@ impl DiffReader {
                 path: entry.path.clone(),
                 original_path: entry.original_path.clone(),
             },
+            range: range.clone(),
         };
         let mut documents = self.documents.lock().unwrap();
         if let Some(existing) = documents.get(&key)
@@ -554,6 +596,7 @@ impl DiffReader {
                 original: entry.original_path.clone(),
                 untracked: entry.kind == EntryKind::Untracked,
                 conflict,
+                range,
             },
             cancel: Cancel::new(),
             retired: AtomicBool::new(false),

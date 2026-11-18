@@ -8,6 +8,14 @@ pub struct Commit {
     pub refs: Vec<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommitDetail {
+    pub commit: Commit,
+    pub author_email: String,
+    pub committer: String,
+    pub message: String,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct GraphRow {
     pub column: usize,

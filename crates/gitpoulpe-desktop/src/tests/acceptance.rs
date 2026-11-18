@@ -53,6 +53,7 @@ fn paths_of(state: &State, view: ViewKind) -> Vec<String> {
         .filter(|e| match view {
             ViewKind::Unstaged => e.is_unstaged() || e.is_conflict(),
             ViewKind::Staged => e.is_staged(),
+            ViewKind::Commit => false,
         })
         .map(|e| e.path.to_string_lossy().into_owned())
         .collect();
