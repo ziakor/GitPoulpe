@@ -11,10 +11,10 @@ use gitpoulpe_core::{
     SessionInfo, StageOutcome, StatusSnapshot, Tag, WriteError, WriteJob, mask_url,
 };
 use gitpoulpe_git::{
-    BranchError, CacheConfig, Cancel, DeleteMode, DiffCache, DiffError, DiffReader, FetchOutcome,
-    Git, HistoryError, HistoryStream, HostKey, Identity, IdentityError, IgnoreError, IgnoredList,
-    InspectError, MAX_WAIT, NetError, QUIET_PERIOD, RemoteCheck, RepoWatcher, Signal, SigningCheck,
-    check_signing, coalesce,
+    BranchError, CacheConfig, Cancel, CloneError, DeleteMode, DiffCache, DiffError, DiffReader,
+    FetchOutcome, Git, HistoryError, HistoryStream, HostKey, Identity, IdentityError, IgnoreError,
+    IgnoredList, InspectError, MAX_WAIT, NetError, QUIET_PERIOD, RemoteCheck, RepoWatcher, Signal,
+    SigningCheck, check_signing, coalesce,
 };
 use rune::Waker;
 use std::time::Duration;
@@ -193,6 +193,12 @@ pub enum Command {
         request: u64,
         remote: String,
     },
+    Clone {
+        request: u64,
+        url: String,
+        parent: PathBuf,
+        name: String,
+    },
     NetCancel,
     InitPrepare {
         request: u64,
@@ -367,6 +373,15 @@ pub enum Event {
     FetchDone {
         request: u64,
         result: Result<FetchOutcome, NetError>,
+    },
+    CloneProgress {
+        request: u64,
+        phase: String,
+        percent: u8,
+    },
+    CloneDone {
+        request: u64,
+        result: Result<PathBuf, CloneError>,
     },
     SshScanned {
         request: u64,
@@ -756,6 +771,34 @@ async fn run(
                                 })
                                 .await;
                             shared.emit(Event::FetchDone { request, result });
+                        });
+                    }
+                    Command::Clone {
+                        request,
+                        url,
+                        parent,
+                        name,
+                    } => {
+                        let cancel = Cancel::new();
+                        net_cancel = Some(cancel.clone());
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let mut last = (String::new(), 101u8);
+                            let result = shared
+                                .git
+                                .clone_repository(&url, &parent, &name, &cancel, |progress| {
+                                    let key = (progress.phase.clone(), progress.percent);
+                                    if key != last {
+                                        shared.emit(Event::CloneProgress {
+                                            request,
+                                            phase: progress.phase,
+                                            percent: progress.percent,
+                                        });
+                                        last = key;
+                                    }
+                                })
+                                .await;
+                            shared.emit(Event::CloneDone { request, result });
                         });
                     }
                     Command::NetCancel => {

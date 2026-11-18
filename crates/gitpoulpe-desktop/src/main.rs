@@ -1,5 +1,7 @@
 mod branches;
 mod branches_view;
+mod cloning;
+mod cloning_view;
 mod engine;
 mod history_state;
 mod history_view;

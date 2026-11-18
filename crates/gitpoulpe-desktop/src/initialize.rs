@@ -30,6 +30,7 @@ impl Default for InitState {
 impl State {
     pub fn begin_init(&mut self, path: PathBuf) {
         self.profiles_open = false;
+        self.clone.open = false;
         self.init.open = true;
         self.init.path = path.clone();
         self.init.branch = TextEdit::new("main");

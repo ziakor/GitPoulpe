@@ -6,7 +6,9 @@ use crate::view::row_key;
 const LINES_PER_KEY: usize = 3;
 const SIDEWAYS_STEP: f32 = 96.0;
 
-const TEXT_INPUTS: [&str; 13] = [
+const TEXT_INPUTS: [&str; 15] = [
+    "clone-url",
+    "clone-name",
     "rm-new-name",
     "rm-new-url",
     "rm-url",
@@ -41,6 +43,18 @@ pub fn init_dialog(tx: &mut Tx) {
     };
     tx.open_folder(options, |s: &mut State, result, _| match result {
         Ok(Some(path)) => s.begin_init(path),
+        Ok(None) => {}
+        Err(error) => s.notice = Some(format!("Sélecteur de dossier indisponible : {error}")),
+    });
+}
+
+pub fn clone_parent_dialog(tx: &mut Tx) {
+    let options = FileDialogOptions {
+        title: "Dossier de destination du clone".into(),
+        ..Default::default()
+    };
+    tx.open_folder(options, |s: &mut State, result, _| match result {
+        Ok(Some(path)) => s.set_clone_parent(path),
         Ok(None) => {}
         Err(error) => s.notice = Some(format!("Sélecteur de dossier indisponible : {error}")),
     });
@@ -109,6 +123,10 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         return copy_selection(s, tx);
     }
     s.notice = None;
+    if s.clone.open && event.key == Key::Escape {
+        s.close_clone();
+        return true;
+    }
     if s.init.open && event.key == Key::Escape {
         s.cancel_init();
         return true;
@@ -171,6 +189,7 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
     let free = tx.focused().is_none() || tx.focused() == Some("viewport");
     let typing = tx.focused().is_some_and(|key| TEXT_INPUTS.contains(&key))
         || s.init.open
+        || s.clone.open
         || s.profiles_open
         || s.ignored.open
         || s.branches.open

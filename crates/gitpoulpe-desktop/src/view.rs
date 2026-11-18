@@ -41,7 +41,9 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
             message_screen(&p, "Impossible d'ouvrir ce dépôt", &detail, true, here)
         }
     };
-    let body = if s.init.open {
+    let body = if s.clone.open {
+        crate::cloning_view::clone_screen(s)
+    } else if s.init.open {
         crate::initialize_view::init_screen(s)
     } else if s.profiles_open {
         crate::profiles_view::profiles_screen(s)
@@ -305,6 +307,23 @@ fn init_button(p: &Palette, here: Option<std::path::PathBuf>) -> El {
         .child(text(caption).font(theme::BODY).color(p.text))
 }
 
+fn clone_button(p: &Palette) -> El {
+    el().key("clone")
+        .role("button")
+        .label("Cloner un dépôt")
+        .focusable(true)
+        .focus_ring(2.0, 2.0, p.accent)
+        .h(32.0)
+        .px(12.0)
+        .center()
+        .radius(3.0)
+        .fill(p.raised)
+        .border(1.0, p.line)
+        .hover(p.hover)
+        .on_press(|s: &mut State| s.begin_clone())
+        .child(text("Cloner un dépôt…").font(theme::BODY).color(p.text))
+}
+
 fn message_screen(
     p: &Palette,
     title: &str,
@@ -323,12 +342,14 @@ fn message_screen(
             .wrap(),
     );
     if with_open {
-        let mut actions = row().gap(8.0).child(open_button(p, here.is_none()));
+        let mut first = row().gap(8.0).child(open_button(p, here.is_none()));
+        first = first.child(clone_button(p));
+        let mut second = row().gap(8.0);
         if here.is_some() {
-            actions = actions.child(init_button(p, here.clone()));
+            second = second.child(init_button(p, here.clone()));
         }
-        actions = actions.child(init_button(p, None));
-        card = card.child(actions);
+        second = second.child(init_button(p, None));
+        card = card.child(col().gap(8.0).child(first).child(second));
     }
     col().w_full().grow(1.0).center().child(card)
 }

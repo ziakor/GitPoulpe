@@ -92,6 +92,12 @@ Git runs as an external program, without a shell, with the repository's filters,
 - "Récupérer (fetch)" on a remote updates its remote-tracking branches and tags (`git fetch`), with the progress of the transfer, a cancel button and a summary of what changed. It works over SSH and HTTPS as described above, and the remote-tracking branches then show in the history graph.
 - Fetching never touches your working tree, your index or your local branches. An interrupted, cancelled or failed fetch leaves the known references as they were (Git updates them only once the objects have arrived) and can simply be launched again. Submodules are not fetched and Git's automatic maintenance is not started.
 
+## Cloning
+
+- "Cloner un dépôt…" on the welcome screen: the URL, a destination folder (chosen with the folder dialog) and the folder name (proposed from the URL). The transfer shows its progress and can be cancelled, then the cloned repository opens on the branch the remote designates.
+- The clone is made in a hidden temporary folder next to the destination and moved into place only when it succeeded: a failure or a cancellation (which stops Git and the processes it started) leaves no partial folder, and the same form can be submitted again. An existing destination is accepted only when it is an empty folder; a non-empty one is refused before any network access and left untouched.
+- A URL carrying credentials is refused, since Git would write them to the repository configuration; authentication goes through the SSH and HTTPS mechanisms described above. The URL rules of the remote screen apply (no `ext::` helpers, no option disguised as a host).
+
 ## Committing
 
 - Write a message in the box at the bottom of the file list, then "Créer le commit" or Ctrl+Enter. The commit contains exactly the staged content shown, with the effective identity of the repository's profile (or your Git configuration when it has none). The box also shows who will be the author and whether the profile's signing key is usable.

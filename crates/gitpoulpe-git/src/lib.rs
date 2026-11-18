@@ -1,6 +1,7 @@
 mod branch;
 mod cache;
 mod cancel;
+mod clone;
 mod commit;
 mod diagnostics;
 mod diff;
@@ -25,6 +26,7 @@ mod watch;
 pub use branch::{BranchError, DeleteMode};
 pub use cache::{CacheConfig, CacheStats, DiffCache};
 pub use cancel::Cancel;
+pub use clone::{CloneError, repository_name_from_url, valid_directory_name};
 pub use diagnostics::filter_diagnostic;
 pub use diff::{DiffDocument, DiffError, DiffReader};
 pub use diff_parse::{DiffParseError, DiffParser, DiffSummary};
