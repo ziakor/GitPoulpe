@@ -189,6 +189,7 @@ pub struct State {
     pub init: crate::initialize::InitState,
     pub conflicts: crate::conflicts::ConflictsState,
     pub stashes: crate::stashes::StashesState,
+    pub undo_screen: crate::undos::UndoScreen,
     pub resetting: crate::resetting::ResetSlot,
     pub sequencing: crate::sequencing::SequenceSlot,
     pub reflog: crate::reflogs::ReflogState,
@@ -222,7 +223,7 @@ pub struct State {
     pub window_width: f32,
     follow: Option<usize>,
     pub list_width: f32,
-    prefs: Prefs,
+    pub(crate) prefs: Prefs,
     pub(crate) engine: Option<Engine>,
     events: Receiver<Event>,
     waker: WakerSlot,
@@ -317,6 +318,7 @@ impl State {
             init: crate::initialize::InitState::default(),
             conflicts: crate::conflicts::ConflictsState::default(),
             stashes: crate::stashes::StashesState::default(),
+            undo_screen: crate::undos::UndoScreen::default(),
             resetting: crate::resetting::ResetSlot::default(),
             sequencing: crate::sequencing::SequenceSlot::default(),
             reflog: crate::reflogs::ReflogState::default(),
@@ -603,6 +605,7 @@ impl State {
                 self.remotes = crate::remotes::RemotesState::default();
                 self.conflicts = crate::conflicts::ConflictsState::default();
                 self.stashes = crate::stashes::StashesState::default();
+                self.undo_screen = crate::undos::UndoScreen::default();
                 self.resetting = crate::resetting::ResetSlot::default();
                 self.sequencing = crate::sequencing::SequenceSlot::default();
                 self.reflog = crate::reflogs::ReflogState::default();
@@ -825,6 +828,12 @@ impl State {
             Event::SequenceFinished { request, result } => {
                 self.apply_sequence_finished(request, result)
             }
+            Event::UndoFinished {
+                request,
+                id,
+                direction,
+                result,
+            } => self.apply_undo_finished(request, id, direction, result),
             Event::SshScanned { request, result } => self.apply_ssh_scanned(request, result),
             Event::SshTrusted { request, result } => self.apply_ssh_trusted(request, result),
             Event::TagsListed { request, result } => self.apply_tags_listed(request, result),
@@ -1864,6 +1873,7 @@ impl State {
         self.close_conflicts();
         self.close_stashes();
         self.close_reflog();
+        self.close_undo();
         let selected = self
             .active_profile()
             .or_else(|| self.book.profiles.first())
@@ -2071,6 +2081,8 @@ impl State {
         detail: String,
     ) {
         let Some(key) = self.repo_key() else { return };
+        let (before_copy, after_copy, detail_copy) =
+            (before.clone(), after.clone(), detail.clone());
         let prefs_key = format!("journal:{key}");
         let mut journal: Vec<JournalEntry> = self.prefs.get(&prefs_key).unwrap_or_default();
         let at = std::time::SystemTime::now()
@@ -2087,6 +2099,7 @@ impl State {
             },
         );
         let _ = self.prefs.set(&prefs_key, &journal);
+        self.record_undo(action, &before_copy, &after_copy, &detail_copy);
     }
 
     #[cfg(test)]
@@ -2218,6 +2231,7 @@ impl State {
         self.close_conflicts();
         self.close_stashes();
         self.close_reflog();
+        self.close_undo();
         self.start_history();
     }
 
@@ -2350,6 +2364,7 @@ impl State {
         self.close_conflicts();
         self.close_stashes();
         self.close_reflog();
+        self.close_undo();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::CommitInspect {

@@ -138,6 +138,10 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         s.close_profiles();
         return true;
     }
+    if s.undo_screen.open && event.key == Key::Escape {
+        s.close_undo();
+        return true;
+    }
     if s.reflog.open && event.key == Key::Escape {
         s.close_reflog();
         return true;
@@ -220,7 +224,8 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         || s.remotes.open
         || s.conflicts.open
         || s.stashes.open
-        || s.reflog.open;
+        || s.reflog.open
+        || s.undo_screen.open;
     match &event.key {
         Key::Text(text) if reading && !typing => match text.as_str() {
             "/" => tx.focus("filter", true),

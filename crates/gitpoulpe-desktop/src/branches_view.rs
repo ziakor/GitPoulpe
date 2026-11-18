@@ -655,6 +655,10 @@ pub fn branches_screen(s: &State) -> El {
                 .truncate(),
         )
         .child(
+            action(s, "branches-undo", "Annuler/refaire", false)
+                .on_press(|s: &mut State| s.open_undo()),
+        )
+        .child(
             action(s, "branches-reflog", "Reflog", false).on_press(|s: &mut State| s.open_reflog()),
         )
         .child(

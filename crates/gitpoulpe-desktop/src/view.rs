@@ -63,6 +63,8 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
         crate::stashes_view::stashes_screen(s)
     } else if s.reflog.open {
         crate::reflogs_view::reflog_screen(s)
+    } else if s.undo_screen.open {
+        crate::undos_view::undo_screen(s)
     } else {
         body
     };

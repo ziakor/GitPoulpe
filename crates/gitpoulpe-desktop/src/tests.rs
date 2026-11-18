@@ -27,6 +27,7 @@ mod sequencing;
 mod staging;
 mod stashing;
 mod tagging;
+mod undoing;
 
 use crate::state::{Screen, State, ViewKind, path_from_args};
 use crate::view::view;

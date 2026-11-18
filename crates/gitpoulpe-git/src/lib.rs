@@ -29,6 +29,7 @@ mod stage;
 mod stash;
 mod status;
 mod tag;
+mod undo;
 mod watch;
 
 pub use branch::{BranchError, DeleteMode};
@@ -61,6 +62,7 @@ pub use ssh::{HostKey, RemoteCheck};
 pub use stage::stamp_of;
 pub use stash::StashError;
 pub use tag::TagError;
+pub use undo::UndoError;
 pub use watch::{MAX_WAIT, QUIET_PERIOD, RepoWatcher, Signal, WatchError, coalesce, is_relevant};
 
 use std::ffi::OsString;

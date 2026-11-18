@@ -148,6 +148,13 @@ Git runs as an external program, without a shell, with the repository's filters,
 - A merge commit has several parents, so its parent is chosen explicitly (nothing is preselected) and merge commits are only accepted together, never mixed with ordinary commits.
 - A conflict in the middle of the sequence stops it and opens the resolution screen above, which names the sides after the operation; the remaining commits are kept by Git, "Continuer" resumes them, "Passer ce commit" drops the current one and "Abandonner" restores the branch as it was before the sequence. Local changes that would be overwritten stop the run untouched. The commits use your profile identity and signing; an operation already in progress or a branch that moved since the preview blocks the run.
 
+## Undo and redo
+
+- "Annuler/refaire" on the branch screen lists the operations GitPoulpe performed on this repository (kept in its preferences, outside the repository). Only the ones whose inverse is defined offer "Annuler": a commit, an amend, a merge, a cherry-pick, a revert or a reset (the branch goes back to where it was), the creation, deletion or renaming of a branch, and the creation or deletion of a tag. A push, a stash operation or a change to the remotes are listed as not reversible, with the reason.
+- The state is read again before every undo or redo: the branch or reference must still be exactly where the operation left it (or, for redo, where it started), the name must be free, and no merge, rebase or conflict may be in progress. If another tool changed anything, nothing is touched and the message says what was expected and what was found.
+- Moving the current branch back uses `git reset --keep`, so unrelated local changes survive and an undo that would overwrite local work is refused; a branch that is not checked out is moved with a compare-and-swap `update-ref`; a branch checked out in another worktree is left alone. The undo of a hard reset cannot bring back unsaved changes (they are in `refs/gitpoulpe/recovery`), and the screen says so.
+- An operation is recorded only once it succeeded, so an interruption between the operation and its record leaves the repository consistent: the operation is simply not offered for undo (the reflog still has it). Operations finished after resolving conflicts are not recorded.
+
 ## Committing
 
 - Write a message in the box at the bottom of the file list, then "Créer le commit" or Ctrl+Enter. The commit contains exactly the staged content shown, with the effective identity of the repository's profile (or your Git configuration when it has none). The box also shows who will be the author and whether the profile's signing key is usable.

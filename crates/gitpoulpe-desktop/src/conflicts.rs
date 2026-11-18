@@ -124,6 +124,7 @@ impl State {
         self.close_remotes();
         self.close_stashes();
         self.close_reflog();
+        self.close_undo();
         self.profiles_open = false;
         self.conflicts.open = true;
         self.reload_conflicts();

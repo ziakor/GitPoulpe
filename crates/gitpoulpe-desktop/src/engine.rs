@@ -12,7 +12,7 @@ use gitpoulpe_core::{
     ReadError, ReflogEntry, ReflogInspect, Remote, RemoteImpact, ResetMode, ResetOutcome,
     ResetPreview, Resolution, SequenceKind, SequenceOutcome, SequencePreview, SessionId,
     SessionInfo, StageOutcome, Stash, StashApplied, StashDetail, StashScope, StatusSnapshot, Tag,
-    WriteError, WriteJob, mask_url,
+    UndoDirection, UndoRecord, WriteError, WriteJob, mask_url,
 };
 use gitpoulpe_git::{
     BranchError, CacheConfig, Cancel, CloneError, ConflictError, ConflictSide, DeleteMode,
@@ -357,6 +357,11 @@ pub enum Command {
         expected_head: String,
         profile: Option<Box<Profile>>,
     },
+    UndoRedo {
+        request: u64,
+        record: Box<UndoRecord>,
+        direction: UndoDirection,
+    },
     NetCancel,
     InitPrepare {
         request: u64,
@@ -614,6 +619,12 @@ pub enum Event {
     SequenceFinished {
         request: u64,
         result: Result<SequenceOutcome, String>,
+    },
+    UndoFinished {
+        request: u64,
+        id: u64,
+        direction: UndoDirection,
+        result: Result<(), String>,
     },
     CloneProgress {
         request: u64,
@@ -1443,6 +1454,30 @@ async fn run(
                             shared.emit(Event::SequenceFinished { request, result });
                         });
                     }
+                    Command::UndoRedo {
+                        request,
+                        record,
+                        direction,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let _guard = current.writer.lock().await;
+                            let result = shared
+                                .git
+                                .undo_redo(&current.info, &record, direction)
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::UndoFinished {
+                                request,
+                                id: record.id,
+                                direction,
+                                result,
+                            });
+                        });
+                    }
                     Command::NetCancel => {
                         if let Some(cancel) = net_cancel.take() {
                             cancel.cancel();
@@ -1995,14 +2030,21 @@ async fn branch_op(shared: Arc<Shared>, session: Arc<Session>, request: u64, op:
     let git = &shared.git;
     let info = &session.info;
     let result: Result<BranchDone, BranchError> = match &op {
-        BranchOp::Create { name } => {
-            git.create_branch(info, name, None)
-                .await
-                .map(|()| BranchDone {
+        BranchOp::Create { name } => match git.create_branch(info, name, None).await {
+            Ok(()) => {
+                let tip = git
+                    .list_branches(info)
+                    .await
+                    .ok()
+                    .and_then(|all| all.into_iter().find(|b| &b.name == name))
+                    .map(|b| b.oid);
+                Ok(BranchDone {
                     message: format!("Branche {name} créée à partir de HEAD."),
-                    journal: Some(("branch-create".into(), None, None, name.clone())),
+                    journal: Some(("branch-create".into(), None, tip, name.clone())),
                 })
-        }
+            }
+            Err(error) => Err(error),
+        },
         BranchOp::Switch { name } => {
             git.switch_branch(info, name)
                 .await
@@ -2018,8 +2060,8 @@ async fn branch_op(shared: Arc<Shared>, session: Arc<Session>, request: u64, op:
                     message: format!("Branche {old} renommée en {new}."),
                     journal: Some((
                         "branch-rename".into(),
-                        None,
-                        None,
+                        Some(old.clone()),
+                        Some(new.clone()),
                         format!("{old} -> {new}"),
                     )),
                 })

@@ -77,6 +77,7 @@ impl State {
         self.close_conflicts();
         self.close_stashes();
         self.close_reflog();
+        self.close_undo();
         self.profiles_open = false;
         self.branches.open = true;
         self.reload_branches();

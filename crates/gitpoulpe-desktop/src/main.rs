@@ -29,6 +29,8 @@ mod state;
 mod tags;
 mod tags_view;
 mod theme;
+mod undos;
+mod undos_view;
 mod view;
 mod widgets;
 
