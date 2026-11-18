@@ -43,6 +43,8 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
         crate::history_view::history_screen(s)
     } else if s.ignored.open {
         crate::ignored_view::ignored_screen(s)
+    } else if s.branches.open {
+        crate::branches_view::branches_screen(s)
     } else {
         body
     };
@@ -118,7 +120,23 @@ fn top_bar(s: &State) -> El {
                     .color(p.text)
                     .truncate(),
             )
-            .child(text(branch).font(theme::SMALL).color(p.accent).truncate());
+            .child(
+                el().key("branch-name")
+                    .role("button")
+                    .label("Gérer les branches")
+                    .focusable(true)
+                    .focus_ring(2.0, 2.0, p.accent)
+                    .hover(p.hover)
+                    .radius(3.0)
+                    .on_press(|s: &mut State| {
+                        if s.branches.open {
+                            s.close_branches();
+                        } else {
+                            s.open_branches();
+                        }
+                    })
+                    .child(text(branch).font(theme::SMALL).color(p.accent).truncate()),
+            );
     }
     let theme_toggle = el()
         .key("theme")

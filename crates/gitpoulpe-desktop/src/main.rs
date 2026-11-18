@@ -1,3 +1,5 @@
+mod branches;
+mod branches_view;
 mod engine;
 mod history_state;
 mod history_view;

@@ -1,3 +1,4 @@
+mod branch;
 mod commit;
 mod diff;
 mod error;
@@ -10,6 +11,7 @@ mod split;
 mod status;
 mod write;
 
+pub use branch::{Branch, BranchLoss, LOSS_LIST_LIMIT, LostCommit};
 pub use commit::{
     AmendInfo, AmendRequest, CommitFailureKind, CommitOutcome, CommitRefusal, CommitRequest,
     JOURNAL_LIMIT, JournalEntry, Signature, SignatureKind, push_journal,

@@ -41,6 +41,14 @@ Git runs as an external program, without a shell, with the repository's filters,
 - Untracked files have an "Ignorer…" button on their header that opens the same screen on that file.
 - Paths that are not valid UTF-8 cannot be turned into a rule automatically.
 
+## Branches
+
+- Click the branch name in the top bar to manage local branches: create one from `HEAD`, switch to one, rename one, delete one. Names are validated with `git check-ref-format` before any Git call, and a branch name can never be read as an option.
+- Switching uses `git switch --no-guess`: Git itself refuses when a local change or an untracked file would be overwritten, and its message is shown. Compatible local changes travel with the switch, as with Git.
+- A branch checked out in another worktree is shown with that worktree's path and offers neither a switch nor a deletion.
+- Deleting a branch that is fully merged is immediate. Deleting one that is not merged first lists the commits no other branch reaches (up to 100) and the command to bring the branch back; only then can it be forced, and only if the branch still points at the commit that was listed. The tip of every deleted branch is also written to the per-repository journal.
+- Remote-tracking branches and tags are not touched by this screen.
+
 ## Committing
 
 - Write a message in the box at the bottom of the file list, then "Créer le commit" or Ctrl+Enter. The commit contains exactly the staged content shown, with the effective identity of the repository's profile (or your Git configuration when it has none). The box also shows who will be the author and whether the profile's signing key is usable.

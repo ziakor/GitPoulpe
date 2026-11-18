@@ -183,6 +183,7 @@ pub struct State {
     pub identity_shown: Option<IdentityShown>,
     pub profiles_open: bool,
     pub ignored: crate::ignored::IgnoredState,
+    pub branches: crate::branches::BranchesState,
     pub form: ProfileForm,
     identity_request: u64,
     signing_request: u64,
@@ -297,6 +298,7 @@ impl State {
             identity_shown: None,
             profiles_open: false,
             ignored: crate::ignored::IgnoredState::default(),
+            branches: crate::branches::BranchesState::default(),
             form: ProfileForm::default(),
             identity_request: 0,
             signing_request: 0,
@@ -560,6 +562,7 @@ impl State {
                 self.history_open = false;
                 self.history = HistoryState::default();
                 self.ignored = crate::ignored::IgnoredState::default();
+                self.branches = crate::branches::BranchesState::default();
                 self.writing = false;
                 self.positions.clear();
                 self.pending_anchor = None;
@@ -695,6 +698,15 @@ impl State {
                 self.finish_commit(result);
                 true
             }
+            Event::BranchesListed { request, result } => {
+                self.apply_branches_listed(request, result)
+            }
+            Event::BranchDone { request, result } => self.apply_branch_done(request, result),
+            Event::BranchNeedsConfirmation {
+                request,
+                name,
+                loss,
+            } => self.apply_branch_needs_confirmation(request, name, *loss),
             Event::IgnoreListed { request, result } => self.apply_ignore_listed(request, result),
             Event::IgnoreReasoned {
                 request,
@@ -1707,6 +1719,7 @@ impl State {
     pub fn open_profiles(&mut self) {
         self.profiles_open = true;
         self.close_ignored();
+        self.close_branches();
         let selected = self
             .active_profile()
             .or_else(|| self.book.profiles.first())
@@ -1906,7 +1919,7 @@ impl State {
         }
     }
 
-    fn record_journal(
+    pub(crate) fn record_journal(
         &mut self,
         action: &str,
         before: Option<String>,
@@ -2055,6 +2068,7 @@ impl State {
         self.history_open = true;
         self.profiles_open = false;
         self.close_ignored();
+        self.close_branches();
         self.start_history();
     }
 

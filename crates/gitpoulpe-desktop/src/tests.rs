@@ -9,6 +9,7 @@ use tempfile::TempDir;
 
 mod acceptance;
 mod amending;
+mod branching;
 mod committing;
 mod history;
 mod ignoring;
@@ -1388,6 +1389,7 @@ fn every_control_stays_inside_the_window_at_the_smallest_supported_size() {
         "open",
         "history",
         "ignored",
+        "branch-name",
         "profiles",
         "refresh",
         "theme",

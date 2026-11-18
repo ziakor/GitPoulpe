@@ -5,15 +5,15 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 use gitpoulpe_core::{
-    AmendInfo, AmendRequest, ChangeEntry, Commit, CommitDetail, CommitOutcome, CommitRange,
-    CommitRequest, DiffLine, DiffSide, DocumentMeta, Generation, IgnoreReason, IgnoreScope,
-    OpenError, Profile, RangeError, ReadError, SessionId, SessionInfo, StageOutcome,
+    AmendInfo, AmendRequest, Branch, BranchLoss, ChangeEntry, Commit, CommitDetail, CommitOutcome,
+    CommitRange, CommitRequest, DiffLine, DiffSide, DocumentMeta, Generation, IgnoreReason,
+    IgnoreScope, OpenError, Profile, RangeError, ReadError, SessionId, SessionInfo, StageOutcome,
     StatusSnapshot, WriteError, WriteJob,
 };
 use gitpoulpe_git::{
-    CacheConfig, Cancel, DiffCache, DiffError, DiffReader, Git, HistoryError, HistoryStream,
-    Identity, IdentityError, IgnoreError, IgnoredList, InspectError, MAX_WAIT, QUIET_PERIOD,
-    RepoWatcher, Signal, SigningCheck, check_signing, coalesce,
+    BranchError, CacheConfig, Cancel, DeleteMode, DiffCache, DiffError, DiffReader, Git,
+    HistoryError, HistoryStream, Identity, IdentityError, IgnoreError, IgnoredList, InspectError,
+    MAX_WAIT, QUIET_PERIOD, RepoWatcher, Signal, SigningCheck, check_signing, coalesce,
 };
 use rune::Waker;
 use std::time::Duration;
@@ -28,6 +28,20 @@ const SHUTDOWN_WAIT: Duration = Duration::from_secs(3);
 pub enum IgnoreEdit {
     Add { scope: IgnoreScope, rule: String },
     Remove { scope: IgnoreScope, rule: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BranchOp {
+    Create { name: String },
+    Switch { name: String },
+    Rename { old: String, new: String },
+    Delete { name: String, mode: DeleteMode },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BranchDone {
+    pub message: String,
+    pub journal: Option<(String, Option<String>, Option<String>, String)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -108,6 +122,13 @@ pub enum Command {
         request: u64,
         edit: IgnoreEdit,
     },
+    BranchList {
+        request: u64,
+    },
+    BranchOp {
+        request: u64,
+        op: BranchOp,
+    },
     Shutdown(std::sync::mpsc::Sender<()>),
     Read {
         generation: Generation,
@@ -182,6 +203,19 @@ pub enum Event {
     WatchState {
         available: bool,
         reason: String,
+    },
+    BranchesListed {
+        request: u64,
+        result: Result<Vec<Branch>, String>,
+    },
+    BranchDone {
+        request: u64,
+        result: Result<BranchDone, String>,
+    },
+    BranchNeedsConfirmation {
+        request: u64,
+        name: String,
+        loss: Box<BranchLoss>,
     },
     IgnoreListed {
         request: u64,
@@ -473,6 +507,26 @@ async fn run(
                             shared.emit(Event::AmendInfo { request, info });
                         });
                     }
+                    Command::BranchList { request } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .list_branches(&current.info)
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::BranchesListed { request, result });
+                        });
+                    }
+                    Command::BranchOp { request, op } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        tokio::spawn(branch_op(shared.clone(), current, request, op));
+                    }
                     Command::IgnoreList { request } => {
                         let Some(current) = session.clone() else {
                             continue;
@@ -656,6 +710,72 @@ async fn open(
         .await
         .map_err(describe_read_error)?;
     Ok((info, snapshot))
+}
+
+fn short(oid: &str) -> String {
+    oid.chars().take(8).collect()
+}
+
+async fn branch_op(shared: Arc<Shared>, session: Arc<Session>, request: u64, op: BranchOp) {
+    let _guard = session.writer.lock().await;
+    let git = &shared.git;
+    let info = &session.info;
+    let result: Result<BranchDone, BranchError> = match &op {
+        BranchOp::Create { name } => {
+            git.create_branch(info, name, None)
+                .await
+                .map(|()| BranchDone {
+                    message: format!("Branche {name} créée à partir de HEAD."),
+                    journal: Some(("branch-create".into(), None, None, name.clone())),
+                })
+        }
+        BranchOp::Switch { name } => {
+            git.switch_branch(info, name)
+                .await
+                .map(|(before, after)| BranchDone {
+                    message: format!("Sur la branche {name}."),
+                    journal: Some(("switch".into(), before, Some(after), name.clone())),
+                })
+        }
+        BranchOp::Rename { old, new } => {
+            git.rename_branch(info, old, new)
+                .await
+                .map(|()| BranchDone {
+                    message: format!("Branche {old} renommée en {new}."),
+                    journal: Some((
+                        "branch-rename".into(),
+                        None,
+                        None,
+                        format!("{old} -> {new}"),
+                    )),
+                })
+        }
+        BranchOp::Delete { name, mode } => match git.delete_branch(info, name, mode).await {
+            Ok(tip) => Ok(BranchDone {
+                message: format!(
+                    "Branche {name} supprimée (elle pointait sur {}). Pour la rétablir : git branch {name} {tip}",
+                    short(&tip)
+                ),
+                journal: Some(("branch-delete".into(), Some(tip), None, name.clone())),
+            }),
+            Err(BranchError::NotMerged) => match git.branch_loss(info, name).await {
+                Ok(loss) => {
+                    shared.emit(Event::BranchNeedsConfirmation {
+                        request,
+                        name: name.clone(),
+                        loss: Box::new(loss),
+                    });
+                    return;
+                }
+                Err(other) => Err(other),
+            },
+            Err(other) => Err(other),
+        },
+    };
+    shared.emit(Event::BranchDone {
+        request,
+        result: result.map_err(|e| e.to_string()),
+    });
 }
 
 async fn ignore_edit(shared: Arc<Shared>, session: Arc<Session>, request: u64, edit: IgnoreEdit) {

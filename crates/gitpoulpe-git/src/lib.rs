@@ -1,3 +1,4 @@
+mod branch;
 mod cache;
 mod cancel;
 mod commit;
@@ -15,6 +16,7 @@ mod stage;
 mod status;
 mod watch;
 
+pub use branch::{BranchError, DeleteMode};
 pub use cache::{CacheConfig, CacheStats, DiffCache};
 pub use cancel::Cancel;
 pub use diagnostics::filter_diagnostic;

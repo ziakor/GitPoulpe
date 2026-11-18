@@ -95,6 +95,14 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         s.close_profiles();
         return true;
     }
+    if s.branches.open && event.key == Key::Escape {
+        if s.branches.confirm.is_some() {
+            s.branch_cancel_delete();
+        } else {
+            s.close_branches();
+        }
+        return true;
+    }
     if s.ignored.open && event.key == Key::Escape {
         s.close_ignored();
         return true;
@@ -125,7 +133,8 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
     let free = tx.focused().is_none() || tx.focused() == Some("viewport");
     let typing = tx.focused().is_some_and(|key| TEXT_INPUTS.contains(&key))
         || s.profiles_open
-        || s.ignored.open;
+        || s.ignored.open
+        || s.branches.open;
     match &event.key {
         Key::Text(text) if reading && !typing => match text.as_str() {
             "/" => tx.focus("filter", true),
