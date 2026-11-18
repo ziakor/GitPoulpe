@@ -54,6 +54,7 @@ fn main() {
             state.apply_follow(tx);
             state.apply_copy(tx);
             state.apply_anchor(tx);
+            state.apply_reveal(tx);
             changed
         }),
         scenes: &[

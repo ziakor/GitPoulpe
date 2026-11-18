@@ -341,3 +341,232 @@ async fn dropping_the_stream_stops_the_git_process() {
     }
     panic!("the log process was left running");
 }
+
+fn searchable_history(dir: &Path, commits: usize) {
+    let authors = ["Ada Lovelace", "Grace Hopper", "Linus T"];
+    let mut stream = String::new();
+    for n in 1..=commits {
+        let author = authors[n % authors.len()];
+        let subject = if n % 50 == 0 {
+            format!("FIX parser edge case {n}")
+        } else {
+            format!("change {n}")
+        };
+        let body = if n % 70 == 0 {
+            format!("\n\nDetails: mentions Needle42 in commit {n}")
+        } else {
+            String::new()
+        };
+        let message = format!("{subject}{body}");
+        stream.push_str(&format!(
+            "commit refs/heads/main\nmark :{n}\ncommitter {author} <a{n}@example.com> {} +0000\ndata {}\n{message}\n",
+            1_700_000_000 + n,
+            message.len()
+        ));
+        stream.push_str(&format!(
+            "author {author} <a{n}@example.com> {} +0000\n",
+            1_700_000_000 + n
+        ));
+        let _ = &stream;
+    }
+    let _ = stream;
+    let mut real = String::new();
+    for n in 1..=commits {
+        let author = authors[n % authors.len()];
+        let subject = if n % 50 == 0 {
+            format!("FIX parser edge case {n}")
+        } else {
+            format!("change {n}")
+        };
+        let body = if n % 70 == 0 {
+            format!("\n\nDetails: mentions Needle42 in commit {n}")
+        } else {
+            String::new()
+        };
+        let message = format!("{subject}{body}");
+        real.push_str(&format!(
+            "commit refs/heads/main\nmark :{n}\nauthor {author} <a{n}@example.com> {t} +0000\ncommitter {author} <a{n}@example.com> {t} +0000\ndata {len}\n{message}\n",
+            t = 1_700_000_000 + n,
+            len = message.len()
+        ));
+        if n > 1 {
+            real.push_str(&format!("from :{}\n", n - 1));
+        }
+        real.push_str(&format!("M 100644 inline f.txt\ndata 2\n{}\n\n", n % 10));
+    }
+    use std::io::Write;
+    let mut child = Command::new("git")
+        .current_dir(dir)
+        .args(["fast-import", "--quiet"])
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(real.as_bytes())
+        .unwrap();
+    assert!(child.wait().unwrap().success());
+}
+
+async fn search_all(
+    git: &Git,
+    info: &SessionInfo,
+    text: &str,
+) -> Result<Vec<Commit>, HistoryError> {
+    let mut stream = git.search(info, text).await?;
+    let mut all = Vec::new();
+    loop {
+        let page = stream.next_page(25).await?;
+        let done = page.len() < 25 || stream.is_exhausted();
+        all.extend(page);
+        if done {
+            return Ok(all);
+        }
+    }
+}
+
+#[tokio::test]
+async fn the_search_finds_commits_by_message_body_author_and_identifier_prefix() {
+    const TOTAL: usize = 2_000;
+    let repo = init_repo();
+    let dir = repo.path();
+    searchable_history(dir, TOTAL);
+    let git = Git::new();
+    let info = open(&git, dir).await;
+    let everything = read_all(&git, &info, 5000).await.unwrap();
+    assert_eq!(everything.len(), TOTAL);
+
+    let fixes = search_all(&git, &info, "FIX Parser").await.unwrap();
+    assert_eq!(fixes.len(), (1..=TOTAL).filter(|n| n % 50 == 0).count());
+    assert!(
+        fixes
+            .iter()
+            .all(|c| c.subject.starts_with("FIX parser edge case"))
+    );
+
+    let needle = search_all(&git, &info, "needle42").await.unwrap();
+    assert_eq!(
+        needle.len(),
+        (1..=TOTAL).filter(|n| n % 70 == 0).count(),
+        "the body of the message is searched too"
+    );
+
+    let hopper = search_all(&git, &info, "hopper").await.unwrap();
+    assert_eq!(hopper.len(), (1..=TOTAL).filter(|n| n % 3 == 1).count());
+    assert!(hopper.iter().all(|c| c.author == "Grace Hopper"));
+
+    let positions: HashMap<&str, usize> = everything
+        .iter()
+        .enumerate()
+        .map(|(i, c)| (c.oid.as_str(), i))
+        .collect();
+    let order: Vec<usize> = hopper.iter().map(|c| positions[c.oid.as_str()]).collect();
+    assert!(
+        order.windows(2).all(|w| w[0] < w[1]),
+        "results keep the history order"
+    );
+
+    let mut by_prefix: HashMap<String, Vec<&Commit>> = HashMap::new();
+    for commit in &everything {
+        by_prefix
+            .entry(commit.oid[..4].to_owned())
+            .or_default()
+            .push(commit);
+    }
+    let (prefix, colliding) = by_prefix
+        .iter()
+        .find(|(_, commits)| commits.len() >= 2)
+        .expect("2000 commits contain two ids sharing four hexadecimal digits");
+    let found = search_all(&git, &info, prefix).await.unwrap();
+    assert!(
+        colliding
+            .iter()
+            .all(|c| found.iter().any(|f| f.oid == c.oid)),
+        "every commit sharing the prefix {prefix} is returned, none is guessed"
+    );
+    let one = search_all(&git, &info, &colliding[0].oid).await.unwrap();
+    assert_eq!(one.len(), 1);
+    assert_eq!(one[0].oid, colliding[0].oid);
+    let p3 = colliding[0].oid[..3].to_owned();
+    let short = search_all(&git, &info, &p3).await.unwrap();
+    let by_text: Vec<&str> = everything
+        .iter()
+        .filter(|c| c.subject.to_lowercase().contains(&p3) || c.author.to_lowercase().contains(&p3))
+        .map(|c| c.oid.as_str())
+        .collect();
+    let mut got: Vec<&str> = short.iter().map(|c| c.oid.as_str()).collect();
+    let mut want = by_text.clone();
+    got.sort_unstable();
+    want.sort_unstable();
+    assert_eq!(
+        got, want,
+        "three digits are not an identifier search: only the text matches, never the oid prefix"
+    );
+    assert!(
+        everything
+            .iter()
+            .any(|c| c.oid.starts_with(&p3) && !by_text.contains(&c.oid.as_str())),
+        "the check is meaningful: some commits start with {p3} without containing it in their text"
+    );
+}
+
+#[tokio::test]
+async fn a_search_without_a_match_is_an_empty_result_not_an_error_or_an_empty_repository() {
+    let repo = init_repo();
+    searchable_history(repo.path(), 60);
+    let git = Git::new();
+    let info = open(&git, repo.path()).await;
+    let none = search_all(&git, &info, "no such text anywhere")
+        .await
+        .unwrap();
+    assert!(none.is_empty());
+
+    let empty = init_repo();
+    let info = open(&git, empty.path()).await;
+    let none = search_all(&git, &info, "anything").await.unwrap();
+    assert!(
+        none.is_empty(),
+        "even without any commit a search just finds nothing"
+    );
+}
+
+#[tokio::test]
+async fn a_gigantic_record_is_cut_instead_of_filling_the_memory_and_the_next_records_still_parse() {
+    let tools = tempfile::tempdir().unwrap();
+    let script = tools.path().join("giant-git");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\ncase \"$*\" in *rev-parse*) exit 1;; esac\nprintf 'aaaa\\037\\037Ada\\0371700000001\\037'\nhead -c 6000000 /dev/zero | tr '\\0' 'x'\nprintf '\\037\\037\\000'\nprintf 'bbbb\\037aaaa\\037Grace\\0371700000002\\037second\\037\\000'\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let git = Git::with_program(script);
+    let repo = init_repo();
+    commit(repo.path(), "something");
+    let real = Git::new();
+    let info = open(&real, repo.path()).await;
+
+    let mut stream = git.history(&info).await.unwrap();
+    let page = stream.next_page(10).await.unwrap();
+    assert_eq!(page.len(), 2, "both records were parsed");
+    assert_eq!(page[0].oid, "aaaa");
+    assert!(
+        page[0].subject.len() <= 1024 * 1024,
+        "the giant subject was cut to {} bytes",
+        page[0].subject.len()
+    );
+    assert!(
+        page[0].subject.len() > 1000,
+        "the beginning of the subject is kept"
+    );
+    assert_eq!(
+        (
+            page[1].oid.as_str(),
+            page[1].parents.clone(),
+            page[1].subject.as_str()
+        ),
+        ("bbbb", vec!["aaaa".to_owned()], "second")
+    );
+}

@@ -5,7 +5,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::history_state::HistoryState;
+use crate::history_state::{HistoryState, SearchState};
 use crate::profiles::{IdentityShown, PROFILES_KEY, ProfileForm, SigningKind};
 use gitpoulpe_core::{
     AmendInfo, AmendRequest, CommitFailureKind, CommitOutcome, CommitRefusal, CommitRequest,
@@ -156,6 +156,9 @@ pub struct State {
     pub history_open: bool,
     pub history: HistoryState,
     history_request: u64,
+    pub search_text: TextEdit,
+    pub search: SearchState,
+    pub pending_reveal: Option<String>,
     pub book: ProfileBook,
     pub commit_message: TextEdit,
     pub commit_report: Option<String>,
@@ -263,6 +266,9 @@ impl State {
             history_open: false,
             history: HistoryState::default(),
             history_request: 0,
+            search_text: TextEdit::new(""),
+            search: SearchState::default(),
+            pending_reveal: None,
             book: prefs.get::<ProfileBook>(PROFILES_KEY).unwrap_or_default(),
             commit_message: TextEdit::new(""),
             commit_report: None,
@@ -569,6 +575,24 @@ impl State {
                     return false;
                 }
                 self.history.fail(no_commits, message);
+                true
+            }
+            Event::SearchPage {
+                request,
+                commits,
+                done,
+            } => {
+                if request != self.search.request {
+                    return false;
+                }
+                self.search.push_page(commits, done);
+                true
+            }
+            Event::SearchFailed { request, message } => {
+                if request != self.search.request {
+                    return false;
+                }
+                self.search.fail(message);
                 true
             }
             Event::AmendInfo { request, info } => {
@@ -1960,6 +1984,9 @@ impl State {
         }
         self.history_open = false;
         self.history = HistoryState::default();
+        self.search_text = TextEdit::new("");
+        self.search.clear();
+        self.pending_reveal = None;
         if let Some(engine) = &self.engine {
             engine.send(Command::HistoryClose);
         }
@@ -1988,6 +2015,73 @@ impl State {
     pub fn reload_history_if_head_moved(&mut self) {
         if self.history_open && self.history.head != self.head_oid() {
             self.start_history();
+        }
+    }
+}
+
+impl State {
+    pub fn search_changed(&mut self) {
+        let text = self.search_text.text.trim().to_owned();
+        if text.is_empty() {
+            self.search.clear();
+            if let Some(engine) = &self.engine {
+                engine.send(Command::SearchClose);
+            }
+            return;
+        }
+        let request = self.search.request + 1;
+        self.search.restart(request);
+        if let Some(engine) = &self.engine {
+            engine.send(Command::SearchOpen { request, text });
+        }
+    }
+
+    pub fn search_active(&self) -> bool {
+        !self.search_text.text.trim().is_empty()
+    }
+
+    pub fn search_visible(&mut self, rows: std::ops::Range<usize>) -> bool {
+        if !self.search.needs_more(rows.end) {
+            return false;
+        }
+        self.search.loading = true;
+        if let Some(engine) = &self.engine {
+            engine.send(Command::SearchMore {
+                request: self.search.request,
+            });
+        }
+        false
+    }
+
+    pub fn reveal_commit(&mut self, oid: String) {
+        self.search_text = TextEdit::new("");
+        self.search_changed();
+        self.pending_reveal = Some(oid);
+    }
+
+    pub fn apply_reveal(&mut self, tx: &mut Tx) {
+        let Some(oid) = self.pending_reveal.clone() else {
+            return;
+        };
+        if let Some(index) = self.history.commits.iter().position(|c| c.oid == oid) {
+            self.pending_reveal = None;
+            self.history.selected = Some(index);
+            self.history.version += 1;
+            tx.scroll_key_to(format!("hk{index}"), 120.0);
+            return;
+        }
+        if self.history.done {
+            self.pending_reveal = None;
+            self.notice = Some("Ce commit n'est plus dans l'historique affiché.".to_owned());
+            return;
+        }
+        if !self.history.loading {
+            self.history.loading = true;
+            if let Some(engine) = &self.engine {
+                engine.send(Command::HistoryMore {
+                    request: self.history.request,
+                });
+            }
         }
     }
 }

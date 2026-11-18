@@ -67,6 +67,72 @@ impl HistoryState {
     }
 }
 
+#[derive(Default)]
+pub struct SearchState {
+    pub request: u64,
+    pub results: Vec<Commit>,
+    pub done: bool,
+    pub loading: bool,
+    pub status: SearchStatus,
+    pub version: u32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum SearchStatus {
+    #[default]
+    Idle,
+    Loading,
+    Ready,
+    NoResults,
+    Failed(String),
+}
+
+impl SearchState {
+    pub fn restart(&mut self, request: u64) {
+        let version = self.version + 1;
+        *self = Self {
+            request,
+            loading: true,
+            status: SearchStatus::Loading,
+            version,
+            ..Self::default()
+        };
+    }
+
+    pub fn clear(&mut self) {
+        let version = self.version + 1;
+        let request = self.request + 1;
+        *self = Self {
+            request,
+            version,
+            ..Self::default()
+        };
+    }
+
+    pub fn push_page(&mut self, commits: Vec<Commit>, done: bool) {
+        self.results.extend(commits);
+        self.done = done;
+        self.loading = false;
+        self.status = if self.results.is_empty() && done {
+            SearchStatus::NoResults
+        } else {
+            SearchStatus::Ready
+        };
+        self.version += 1;
+    }
+
+    pub fn fail(&mut self, message: String) {
+        self.loading = false;
+        self.done = true;
+        self.status = SearchStatus::Failed(message);
+        self.version += 1;
+    }
+
+    pub fn needs_more(&self, last_visible: usize) -> bool {
+        !self.done && !self.loading && last_visible + 20 >= self.results.len()
+    }
+}
+
 pub fn format_date(timestamp: i64) -> String {
     let days = timestamp.div_euclid(86_400);
     let seconds = timestamp.rem_euclid(86_400);

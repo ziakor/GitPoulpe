@@ -61,6 +61,14 @@ pub enum Command {
         request: u64,
     },
     HistoryClose,
+    SearchOpen {
+        request: u64,
+        text: String,
+    },
+    SearchMore {
+        request: u64,
+    },
+    SearchClose,
     Amend {
         request: u64,
         job: Box<AmendRequest>,
@@ -116,6 +124,15 @@ pub enum Event {
     HistoryFailed {
         request: u64,
         no_commits: bool,
+        message: String,
+    },
+    SearchPage {
+        request: u64,
+        commits: Vec<Commit>,
+        done: bool,
+    },
+    SearchFailed {
+        request: u64,
         message: String,
     },
     Identity {
@@ -287,6 +304,7 @@ async fn run(
     });
     let mut session: Option<Arc<Session>> = None;
     let mut history: Option<HistoryHandle> = None;
+    let mut search: Option<HistoryHandle> = None;
     let mut watcher: Option<RepoWatcher> = None;
     let mut signals: Option<UnboundedReceiver<Signal>> = None;
     let watched = Arc::new(std::sync::Mutex::new(HashSet::new()));
@@ -305,6 +323,7 @@ async fn run(
                 match command {
                     Command::Open { request, path } => {
                         history = None;
+                        search = None;
                         watcher = None;
                         signals = None;
                         if let Some(previous) = session.take() {
@@ -349,7 +368,24 @@ async fn run(
                             tokio::spawn(history_page(shared.clone(), request, handle));
                         }
                     }
-                    Command::HistoryClose => history = None,
+                    Command::HistoryClose => {
+                        history = None;
+                        search = None;
+                    }
+                    Command::SearchOpen { request, text } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let handle = HistoryHandle::default();
+                        search = Some(handle.clone());
+                        tokio::spawn(search_open(shared.clone(), current, request, text, handle));
+                    }
+                    Command::SearchMore { request } => {
+                        if let Some(handle) = search.clone() {
+                            tokio::spawn(search_page(shared.clone(), request, handle));
+                        }
+                    }
+                    Command::SearchClose => search = None,
                     Command::Amend { request, job } => {
                         let Some(current) = session.clone() else {
                             continue;
@@ -580,6 +616,48 @@ async fn history_page(shared: Arc<Shared>, request: u64, handle: HistoryHandle) 
             });
         }
         Err(error) => emit_history_error(&shared, request, error),
+    }
+}
+
+const SEARCH_PAGE: usize = 50;
+
+async fn search_open(
+    shared: Arc<Shared>,
+    session: Arc<Session>,
+    request: u64,
+    text: String,
+    handle: HistoryHandle,
+) {
+    match shared.git.search(&session.info, &text).await {
+        Ok(stream) => {
+            *handle.lock().await = Some(stream);
+            search_page(shared, request, handle).await;
+        }
+        Err(error) => shared.emit(Event::SearchFailed {
+            request,
+            message: error.to_string(),
+        }),
+    }
+}
+
+async fn search_page(shared: Arc<Shared>, request: u64, handle: HistoryHandle) {
+    let mut guard = handle.lock().await;
+    let Some(stream) = guard.as_mut() else {
+        return;
+    };
+    match stream.next_page(SEARCH_PAGE).await {
+        Ok(commits) => {
+            let done = commits.len() < SEARCH_PAGE || stream.is_exhausted();
+            shared.emit(Event::SearchPage {
+                request,
+                commits,
+                done,
+            });
+        }
+        Err(error) => shared.emit(Event::SearchFailed {
+            request,
+            message: error.to_string(),
+        }),
     }
 }
 

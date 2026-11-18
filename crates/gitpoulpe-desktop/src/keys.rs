@@ -6,9 +6,10 @@ use crate::view::row_key;
 const LINES_PER_KEY: usize = 3;
 const SIDEWAYS_STEP: f32 = 96.0;
 
-const TEXT_INPUTS: [&str; 6] = [
+const TEXT_INPUTS: [&str; 7] = [
     "filter",
     "commit-message",
+    "history-search",
     "pf-label",
     "pf-name",
     "pf-email",

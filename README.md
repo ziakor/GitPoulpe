@@ -29,6 +29,7 @@ Git runs as an external program, without a shell, with the repository's filters,
 
 - "Historique" button in the top bar: the commits of all branches, tags and remote-tracking branches plus HEAD, in Git's topological order, with a lane graph (branches, merges, octopus merges), references, author and UTC date. Only the first 200 commits are read; scrolling near the end reads the next page, so a very long history is never loaded at once and rendering stays bounded to what is on screen.
 - Click a commit to see its details; selecting never blocks scrolling. `Escape` closes the history. The list reloads when the repository's current commit changes (for example after you commit).
+- Search: the box above the history looks for a commit by message (subject and body), author or the beginning of its identifier (four hexadecimal digits at least; every commit sharing the prefix is listed, none is guessed). Matching ignores case. Results are read progressively in history order, a newer query cancels the previous one and its late answers are discarded, and "searching", "no result" and "error" are different states. Choosing a result opens that commit in the history, loading the pages in between if needed.
 - A repository without any commit and a Git failure are different states, so a failure never looks like an empty history.
 
 ## Committing
