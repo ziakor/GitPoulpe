@@ -118,7 +118,7 @@ fn parse_status(out: &ExecOut) -> (Vec<PathBuf>, Vec<PathBuf>, usize, usize) {
 }
 
 impl Git {
-    async fn in_dir(&self, dir: &Path, args: &[&str]) -> Result<ExecOut, WorktreeError> {
+    pub(crate) async fn in_dir(&self, dir: &Path, args: &[&str]) -> Result<ExecOut, WorktreeError> {
         let args: Vec<OsString> = args.iter().map(OsString::from).collect();
         let refs: Vec<&OsStr> = args.iter().map(OsString::as_os_str).collect();
         let mut stdout = Vec::new();

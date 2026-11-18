@@ -30,6 +30,7 @@ mod resetting;
 mod sequencing;
 mod staging;
 mod stashing;
+mod submoduling;
 mod tagging;
 mod undoing;
 mod worktreeing;

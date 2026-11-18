@@ -186,6 +186,15 @@ Git runs as an external program, without a shell, with the repository's filters,
 - With the tool, "Récupérer", "Télécharger" and "Envoyer" run `git lfs fetch`, `pull` and `push` through the same network layer as the other remote operations (your SSH and credential setup, repository-supplied helpers ignored), with progress, a cancel button that stops the tool and its children, and distinct messages for access refused, repository or object not found, server error and network failure, with secrets masked in the output.
 - Limit: the transfers are tested against a stand-in `git-lfs` program (the real tool is not available on the development machine), so the exact progress lines of a real server remain to be confirmed.
 
+## Submodules
+
+The **Submodules** button on the branches screen lists every submodule, nested ones included, with the commit the repository expects, the commit actually checked out, how far ahead or behind it is, and any local changes.
+
+- **Initialise** registers a submodule; **Update** puts it on the expected commit and shows progress, with a cancel button.
+- A submodule with uncommitted changes is never updated. If it holds commits that no branch contains, the update asks for confirmation first and keeps them under `refs/gitpoulpe/recovery/` inside the submodule.
+- URLs are shown with credentials masked. URLs using `ext::` or `fd::` transports, or starting with a dash, are refused and never handed to Git.
+- **Open** loads the submodule as a repository of its own.
+
 ## Committing
 
 - Write a message in the box at the bottom of the file list, then "Créer le commit" or Ctrl+Enter. The commit contains exactly the staged content shown, with the effective identity of the repository's profile (or your Git configuration when it has none). The box also shows who will be the author and whether the profile's signing key is usable.

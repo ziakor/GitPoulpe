@@ -32,6 +32,8 @@ mod shell;
 mod stashes;
 mod stashes_view;
 mod state;
+mod submodule_screen;
+mod submodule_screen_view;
 mod tags;
 mod tags_view;
 mod theme;

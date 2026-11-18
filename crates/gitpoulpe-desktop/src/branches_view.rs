@@ -811,6 +811,10 @@ pub fn branches_screen(s: &State) -> El {
                 .grow(1.0)
                 .truncate(),
         )
+        .child(
+            action(s, "branches-submodules", "Submodules", false)
+                .on_press(|s: &mut State| s.open_submodules()),
+        )
         .child(action(s, "branches-lfs", "LFS", false).on_press(|s: &mut State| s.open_lfs()))
         .child(action(s, "branches-hooks", "Hooks", false).on_press(|s: &mut State| s.open_hooks()))
         .child(

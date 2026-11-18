@@ -13,15 +13,15 @@ use gitpoulpe_core::{
     ReadError, RebaseOutcome, RebasePlanInfo, ReflogEntry, ReflogInspect, Remote, RemoteImpact,
     ResetMode, ResetOutcome, ResetPreview, Resolution, SequenceKind, SequenceOutcome,
     SequencePreview, SessionId, SessionInfo, StageOutcome, Stash, StashApplied, StashDetail,
-    StashScope, StatusSnapshot, Tag, UndoDirection, UndoRecord, Worktree, WorktreeRemoval,
-    WriteError, WriteJob, mask_url,
+    StashScope, StatusSnapshot, Submodule, Tag, UndoDirection, UndoRecord, Worktree,
+    WorktreeRemoval, WriteError, WriteJob, mask_url,
 };
 use gitpoulpe_git::{
     BranchChoice, BranchError, CacheConfig, Cancel, CloneError, ConflictError, ConflictSide,
     DeleteMode, DiffCache, DiffError, DiffReader, FetchOutcome, Git, HistoryError, HistoryStream,
     HookError, HostKey, Identity, IdentityError, IgnoreError, IgnoredList, InspectError, MAX_WAIT,
     NetError, PullRequest, PushRequest, QUIET_PERIOD, RemoteCheck, RepoWatcher, SequenceRequest,
-    Signal, SigningCheck, StashError, WorktreeError, check_signing, coalesce,
+    Signal, SigningCheck, StashError, SubmoduleError, WorktreeError, check_signing, coalesce,
 };
 use rune::Waker;
 use std::time::Duration;
@@ -435,6 +435,15 @@ pub enum Command {
         kind: LfsTransfer,
         branch: String,
     },
+    SubmoduleList {
+        request: u64,
+    },
+    SubmoduleRun {
+        request: u64,
+        path: PathBuf,
+        init_only: bool,
+        confirm: bool,
+    },
     NetCancel,
     InitPrepare {
         request: u64,
@@ -754,6 +763,19 @@ pub enum Event {
     LfsFinished {
         request: u64,
         result: Result<(), String>,
+    },
+    SubmodulesListed {
+        request: u64,
+        result: Result<(PathBuf, Vec<Submodule>), String>,
+    },
+    SubmoduleProgress {
+        request: u64,
+        phase: String,
+        percent: u8,
+    },
+    SubmoduleFinished {
+        request: u64,
+        result: Result<String, SubmoduleError>,
     },
     CloneProgress {
         request: u64,
@@ -1848,6 +1870,79 @@ async fn run(
                                 .await
                                 .map_err(|e| e.to_string());
                             shared.emit(Event::LfsFinished { request, result });
+                        });
+                    }
+                    Command::SubmoduleList { request } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let root = current
+                                .info
+                                .worktree
+                                .clone()
+                                .unwrap_or_else(|| current.info.git_dir.clone());
+                            let result = shared
+                                .git
+                                .list_submodules(&current.info)
+                                .await
+                                .map(|list| (root, list))
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::SubmodulesListed { request, result });
+                        });
+                    }
+                    Command::SubmoduleRun {
+                        request,
+                        path,
+                        init_only,
+                        confirm,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let cancel = Cancel::new();
+                        net_cancel = Some(cancel.clone());
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let _guard = current.writer.lock().await;
+                            let mut last = (String::new(), 101u8);
+                            let result = if init_only {
+                                shared
+                                    .git
+                                    .init_submodule(&current.info, &path)
+                                    .await
+                                    .map(|()| format!("{} initialisé.", path.display()))
+                            } else {
+                                shared
+                                    .git
+                                    .update_submodule(&current.info, &path, confirm, &cancel, |p| {
+                                        let key = (p.phase.clone(), p.percent);
+                                        if key != last {
+                                            shared.emit(Event::SubmoduleProgress {
+                                                request,
+                                                phase: p.phase,
+                                                percent: p.percent,
+                                            });
+                                            last = key;
+                                        }
+                                    })
+                                    .await
+                                    .map(|u| {
+                                        let mut message = format!(
+                                            "{} est sur le commit attendu {}.",
+                                            u.path.display(),
+                                            u.to.chars().take(10).collect::<String>()
+                                        );
+                                        if let Some(marker) = u.marker {
+                                            message.push_str(&format!(
+                                                " Les commits locaux sont gardés sous {marker} dans le submodule."
+                                            ));
+                                        }
+                                        message
+                                    })
+                            };
+                            shared.emit(Event::SubmoduleFinished { request, result });
                         });
                     }
                     Command::NetCancel => {

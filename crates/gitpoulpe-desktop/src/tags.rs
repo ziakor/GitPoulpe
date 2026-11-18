@@ -63,6 +63,7 @@ impl State {
         self.close_worktrees();
         self.close_hooks();
         self.close_lfs();
+        self.close_submodules();
         self.profiles_open = false;
         self.tags.open = true;
         self.tags.target = target;

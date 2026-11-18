@@ -191,6 +191,7 @@ pub struct State {
     pub stashes: crate::stashes::StashesState,
     pub hooks: crate::hook_screen::HooksState,
     pub lfs: crate::lfs_screen::LfsState,
+    pub submodules: crate::submodule_screen::SubmodulesState,
     pub worktrees: crate::worktrees::WorktreesState,
     pub undo_screen: crate::undos::UndoScreen,
     pub resetting: crate::resetting::ResetSlot,
@@ -325,6 +326,7 @@ impl State {
             stashes: crate::stashes::StashesState::default(),
             hooks: crate::hook_screen::HooksState::default(),
             lfs: crate::lfs_screen::LfsState::default(),
+            submodules: crate::submodule_screen::SubmodulesState::default(),
             worktrees: crate::worktrees::WorktreesState::default(),
             undo_screen: crate::undos::UndoScreen::default(),
             resetting: crate::resetting::ResetSlot::default(),
@@ -617,6 +619,7 @@ impl State {
                 self.stashes = crate::stashes::StashesState::default();
                 self.hooks = crate::hook_screen::HooksState::default();
                 self.lfs = crate::lfs_screen::LfsState::default();
+                self.submodules = crate::submodule_screen::SubmodulesState::default();
                 self.worktrees = crate::worktrees::WorktreesState::default();
                 self.undo_screen = crate::undos::UndoScreen::default();
                 self.resetting = crate::resetting::ResetSlot::default();
@@ -883,6 +886,17 @@ impl State {
                 percent,
             } => self.apply_lfs_progress(request, phase, percent),
             Event::LfsFinished { request, result } => self.apply_lfs_finished(request, result),
+            Event::SubmodulesListed { request, result } => {
+                self.apply_submodules_listed(request, result)
+            }
+            Event::SubmoduleProgress {
+                request,
+                phase,
+                percent,
+            } => self.apply_submodule_progress(request, phase, percent),
+            Event::SubmoduleFinished { request, result } => {
+                self.apply_submodule_finished(request, result)
+            }
             Event::SshScanned { request, result } => self.apply_ssh_scanned(request, result),
             Event::SshTrusted { request, result } => self.apply_ssh_trusted(request, result),
             Event::TagsListed { request, result } => self.apply_tags_listed(request, result),
@@ -1926,6 +1940,7 @@ impl State {
         self.close_worktrees();
         self.close_hooks();
         self.close_lfs();
+        self.close_submodules();
         let selected = self
             .active_profile()
             .or_else(|| self.book.profiles.first())
@@ -2287,6 +2302,7 @@ impl State {
         self.close_worktrees();
         self.close_hooks();
         self.close_lfs();
+        self.close_submodules();
         self.start_history();
     }
 
@@ -2423,6 +2439,7 @@ impl State {
         self.close_worktrees();
         self.close_hooks();
         self.close_lfs();
+        self.close_submodules();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::CommitInspect {

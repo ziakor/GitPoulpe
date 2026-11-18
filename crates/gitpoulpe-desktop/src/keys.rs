@@ -141,6 +141,10 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         s.close_profiles();
         return true;
     }
+    if s.submodules.open && event.key == Key::Escape {
+        s.close_submodules();
+        return true;
+    }
     if s.lfs.open && event.key == Key::Escape {
         s.close_lfs();
         return true;
@@ -251,7 +255,8 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         || s.undo_screen.open
         || s.worktrees.open
         || s.hooks.open
-        || s.lfs.open;
+        || s.lfs.open
+        || s.submodules.open;
     match &event.key {
         Key::Text(text) if reading && !typing => match text.as_str() {
             "/" => tx.focus("filter", true),
