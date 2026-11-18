@@ -17,6 +17,7 @@ mod history;
 mod ignoring;
 mod initializing;
 mod inspecting;
+mod merging;
 mod profiles;
 mod remoting;
 mod staging;

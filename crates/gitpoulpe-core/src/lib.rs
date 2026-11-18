@@ -5,6 +5,7 @@ mod error;
 mod history;
 mod identity;
 mod ignore;
+mod merge;
 mod operation;
 mod profile;
 mod remote;
@@ -29,6 +30,7 @@ pub use identity::{Generation, RepoId, RequestId, SessionId};
 pub use ignore::{
     IgnoreReason, IgnoreRuleError, IgnoreScope, IgnoreSource, is_plain_relative, rule_for_path,
 };
+pub use merge::{MergeKind, MergeMode, MergeOutcome, MergePreview};
 pub use operation::{
     ConflictFile, ConflictKind, ConflictVersions, Operation, OperationKind, Resolution, Version,
 };

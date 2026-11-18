@@ -50,3 +50,23 @@ pub fn field(s: &State, key: &str, label: &str, edit: &TextEdit, placeholder: &s
             false
         })
 }
+
+pub fn toggle(s: &State, key: &str, caption: &str, on: bool) -> El {
+    let p = s.palette;
+    el().key(key.to_owned())
+        .role("checkbox")
+        .label(caption.to_owned())
+        .focusable(true)
+        .focus_ring(2.0, 2.0, p.accent)
+        .min_h(28.0)
+        .px(8.0)
+        .py(4.0)
+        .radius(3.0)
+        .hover(p.hover)
+        .child(
+            text(format!("{} {caption}", if on { "[x]" } else { "[ ]" }))
+                .font(theme::SMALL)
+                .color(p.text)
+                .wrap(),
+        )
+}

@@ -106,6 +106,13 @@ Git runs as an external program, without a shell, with the repository's filters,
 - Resolved files stay listed. If one is modified again after its resolution, it is shown as "à valider de nouveau" and continuing stays blocked until it is validated again.
 - "Continuer" is offered only when no file is in conflict and none is stale; it runs `git commit` (merge) or `git <operation> --continue` with your profile identity, hooks included, and the screen reports new conflicts if the operation stops again. "Abandonner" asks first, copies the files you had worked on to `.git/gitpoulpe-backup/<time>-<operation>/`, then runs `git <operation> --abort`; untracked files are untouched.
 
+## Merging
+
+- On the branch screen, select a branch other than the current one and choose "Fusionner dans « <current> »…". A preview shows both branches by name, whether Git will fast-forward, create a merge commit or has nothing to do, how many commits each side brings, the files predicted to conflict (computed with `git merge-tree`, without touching your work) and the files with local changes.
+- The merge only runs if the current branch is still where the preview saw it, if no other operation (merge, rebase, cherry-pick, revert) is in progress and if the source exists. "Toujours créer un commit de fusion" forces a merge commit even when a fast-forward is possible. The merge commit uses your profile identity (and signing), hooks run as configured, and the message is Git's usual `Merge branch '<name>'`.
+- Local changes are never overwritten: Git refuses a merge that would, and GitPoulpe reports the files and changes nothing. "Mettre mon travail local de côté" runs the merge with `--autostash`; if putting the work back conflicts, the work stays in `git stash list`, which the result message says.
+- A merge that conflicts opens the resolution screen above; the merge can then be continued or abandoned from there. Merges are recorded in the per-repository journal.
+
 ## Committing
 
 - Write a message in the box at the bottom of the file list, then "Créer le commit" or Ctrl+Enter. The commit contains exactly the staged content shown, with the effective identity of the repository's profile (or your Git configuration when it has none). The box also shows who will be the author and whether the profile's signing key is usable.

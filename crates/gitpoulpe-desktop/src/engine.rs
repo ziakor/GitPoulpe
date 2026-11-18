@@ -7,9 +7,9 @@ use std::sync::{Arc, Mutex};
 use gitpoulpe_core::{
     AmendInfo, AmendRequest, Branch, BranchLoss, ChangeEntry, Commit, CommitDetail, CommitOutcome,
     CommitRange, CommitRequest, ConflictFile, ConflictVersions, DiffLine, DiffSide, DocumentMeta,
-    Generation, IgnoreReason, IgnoreScope, OpenError, Operation, OperationKind, Profile,
-    RangeError, ReadError, Remote, RemoteImpact, Resolution, SessionId, SessionInfo, StageOutcome,
-    StatusSnapshot, Tag, WriteError, WriteJob, mask_url,
+    Generation, IgnoreReason, IgnoreScope, MergeMode, MergeOutcome, MergePreview, OpenError,
+    Operation, OperationKind, Profile, RangeError, ReadError, Remote, RemoteImpact, Resolution,
+    SessionId, SessionInfo, StageOutcome, StatusSnapshot, Tag, WriteError, WriteJob, mask_url,
 };
 use gitpoulpe_git::{
     BranchError, CacheConfig, Cancel, CloneError, ConflictError, ConflictSide, DeleteMode,
@@ -249,6 +249,18 @@ pub enum Command {
         op: ConflictOp,
         remembered: Vec<PathBuf>,
     },
+    MergePreview {
+        request: u64,
+        source: String,
+    },
+    Merge {
+        request: u64,
+        source: String,
+        mode: MergeMode,
+        expected_head: String,
+        autostash: bool,
+        profile: Option<Box<Profile>>,
+    },
     NetCancel,
     InitPrepare {
         request: u64,
@@ -439,6 +451,14 @@ pub enum Event {
     ConflictFinished {
         request: u64,
         result: Result<ConflictDone, String>,
+    },
+    MergePreviewed {
+        request: u64,
+        result: Result<Box<MergePreview>, String>,
+    },
+    MergeFinished {
+        request: u64,
+        result: Result<MergeOutcome, String>,
     },
     CloneProgress {
         request: u64,
@@ -938,6 +958,50 @@ async fn run(
                             continue;
                         };
                         tokio::spawn(conflict_op(shared.clone(), current, request, op, remembered));
+                    }
+                    Command::MergePreview { request, source } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .merge_preview(&current.info, &source)
+                                .await
+                                .map(Box::new)
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::MergePreviewed { request, result });
+                        });
+                    }
+                    Command::Merge {
+                        request,
+                        source,
+                        mode,
+                        expected_head,
+                        autostash,
+                        profile,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let _guard = current.writer.lock().await;
+                            let result = shared
+                                .git
+                                .merge_branch(
+                                    &current.info,
+                                    &source,
+                                    mode,
+                                    &expected_head,
+                                    autostash,
+                                    profile.as_deref(),
+                                )
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::MergeFinished { request, result });
+                        });
                     }
                     Command::NetCancel => {
                         if let Some(cancel) = net_cancel.take() {

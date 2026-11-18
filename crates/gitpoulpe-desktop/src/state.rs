@@ -770,6 +770,10 @@ impl State {
             Event::ConflictFinished { request, result } => {
                 self.apply_conflict_finished(request, result)
             }
+            Event::MergePreviewed { request, result } => {
+                self.apply_merge_previewed(request, result)
+            }
+            Event::MergeFinished { request, result } => self.apply_merge_finished(request, result),
             Event::SshScanned { request, result } => self.apply_ssh_scanned(request, result),
             Event::SshTrusted { request, result } => self.apply_ssh_trusted(request, result),
             Event::TagsListed { request, result } => self.apply_tags_listed(request, result),

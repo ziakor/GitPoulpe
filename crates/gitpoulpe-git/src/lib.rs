@@ -14,6 +14,7 @@ mod identity;
 mod ignore;
 mod init;
 mod inspect;
+mod merge;
 mod net;
 mod open;
 mod parse;
@@ -43,6 +44,7 @@ pub use identity::{
 pub use ignore::{IgnoreError, IgnoredList, MAX_IGNORED_ENTRIES};
 pub use init::{DEFAULT_BRANCH, InitError, Initialized};
 pub use inspect::InspectError;
+pub use merge::MergeError;
 pub use net::{NetError, NetProgress, SshTools, parse_progress, remote_host};
 pub use parse::{ParseError, StatusParser};
 pub use remote::{RemoteError, validate_remote_url};

@@ -4,6 +4,7 @@ use rune::{El, GrowthSpec, Key, ScrollSpec, col, el, row, text, text_input};
 
 use crate::state::State;
 use crate::theme;
+use crate::widgets::toggle;
 
 const ROW_HEIGHT: f32 = 44.0;
 
@@ -176,11 +177,168 @@ fn confirmation(s: &State) -> Option<El> {
     Some(panel)
 }
 
+fn merge_panel(s: &State) -> Option<El> {
+    use gitpoulpe_core::MergeKind;
+    let p = s.palette;
+    let m = s.branches.merge.as_ref()?;
+    let mut card = col()
+        .key("merge-panel")
+        .w_full()
+        .gap(6.0)
+        .px(12.0)
+        .py(10.0)
+        .radius(3.0)
+        .border(1.0, p.line);
+    let Some(preview) = &m.preview else {
+        let line = match &m.error {
+            Some(error) => text(format!("Aperçu impossible : {error}")).color(p.red),
+            None => text("Calcul de l'aperçu…".to_owned()).color(p.muted),
+        };
+        return Some(
+            card.child(line.key("merge-wait").font(theme::SMALL).wrap())
+                .child(
+                    action(s, "merge-cancel", "Fermer", false)
+                        .on_press(|s: &mut State| s.merge_cancel()),
+                ),
+        );
+    };
+    let current = preview
+        .current
+        .clone()
+        .unwrap_or_else(|| "HEAD détaché".to_owned());
+    let kind = match preview.kind {
+        MergeKind::UpToDate => format!(
+            "« {} » est déjà contenue dans « {current} » : il n'y a rien à fusionner.",
+            preview.source
+        ),
+        MergeKind::FastForward => format!(
+            "Avance rapide : « {current} » avance de {} commit(s) jusqu'à « {} », sans commit de fusion.",
+            preview.only_in_source, preview.source
+        ),
+        MergeKind::TrueMerge => format!(
+            "Commit de fusion : {} commit(s) de « {} » rejoignent « {current} » ({} commit(s) propres à « {current} »).",
+            preview.only_in_source, preview.source, preview.only_in_head
+        ),
+    };
+    card = card
+        .child(
+            text(format!(
+                "Fusionner « {} » dans « {current} »",
+                preview.source
+            ))
+            .key("merge-title")
+            .font(theme::BODY_STRONG)
+            .color(p.text)
+            .wrap(),
+        )
+        .child(
+            text(kind)
+                .key("merge-kind")
+                .font(theme::SMALL)
+                .color(p.text)
+                .wrap(),
+        );
+    match &preview.predicted_conflicts {
+        Some(files) if files.is_empty() => {
+            card = card.child(
+                text("Aucun conflit prévu.".to_owned())
+                    .key("merge-no-conflict")
+                    .font(theme::SMALL)
+                    .color(p.muted),
+            );
+        }
+        Some(files) => {
+            card = card.child(
+                text(format!(
+                    "{} fichier(s) en conflit prévu(s) : {}. La fusion s'arrêtera pour vous laisser les résoudre.",
+                    files.len(),
+                    files
+                        .iter()
+                        .take(5)
+                        .map(|f| f.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))
+                .key("merge-conflicts")
+                .font(theme::SMALL)
+                .color(p.red)
+                .wrap(),
+            );
+        }
+        None => {}
+    }
+    if !preview.local_changes.is_empty() {
+        card = card.child(
+            text(format!(
+                "{} fichier(s) ont des modifications locales ({}). Git refuse la fusion si elle devait les écraser ; sinon elles sont conservées.",
+                preview.local_changes.len(),
+                preview
+                    .local_changes
+                    .iter()
+                    .take(5)
+                    .map(|f| f.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
+            .key("merge-local")
+            .font(theme::SMALL)
+            .color(p.muted)
+            .wrap(),
+        );
+    }
+    if let Some(error) = &m.error {
+        card = card.child(
+            text(format!("Fusion non faite : {error}"))
+                .key("merge-error")
+                .font(theme::SMALL)
+                .color(p.red)
+                .wrap(),
+        );
+    }
+    if preview.kind != MergeKind::UpToDate {
+        card = card
+            .child(
+                toggle(s, "merge-no-ff", "Toujours créer un commit de fusion", m.no_ff)
+                    .on_press(|s: &mut State| s.merge_toggle_no_ff()),
+            )
+            .child(
+                toggle(
+                    s,
+                    "merge-autostash",
+                    "Mettre mon travail local de côté pendant la fusion (réserve conservée si besoin)",
+                    m.autostash,
+                )
+                .on_press(|s: &mut State| s.merge_toggle_autostash()),
+            );
+    }
+    let mut buttons = row().gap(8.0);
+    if preview.kind != MergeKind::UpToDate {
+        buttons = buttons.child(
+            action(
+                s,
+                "merge-confirm",
+                if m.busy { "Fusion…" } else { "Fusionner" },
+                true,
+            )
+            .on_press(|s: &mut State| s.merge_confirm()),
+        );
+    }
+    buttons = buttons.child(
+        action(s, "merge-cancel", "Fermer", false).on_press(|s: &mut State| s.merge_cancel()),
+    );
+    card = card.child(buttons);
+    Some(card)
+}
+
 fn detail(s: &State) -> El {
     let p = s.palette;
     let mut panel = col()
+        .key("branch-panel")
         .w(380.0)
         .h_full()
+        .scroll(ScrollSpec {
+            stick_bottom: false,
+        })
         .px(16.0)
         .py(14.0)
         .gap(10.0)
@@ -236,6 +394,17 @@ fn detail(s: &State) -> El {
         );
     }
     if !branch.current && branch.other_worktree.is_none() {
+        let into = s.branches.branches.iter().find(|b| b.current).map_or_else(
+            || "la branche courante".to_owned(),
+            |b| format!("« {} »", b.name),
+        );
+        panel = panel.child(
+            action(s, "branch-merge", &format!("Fusionner dans {into}…"), false)
+                .on_press(|s: &mut State| s.merge_ask()),
+        );
+        if let Some(merge) = merge_panel(s) {
+            panel = panel.child(merge);
+        }
         panel = panel
             .child(
                 action(s, "branch-switch", "Passer sur cette branche", true)

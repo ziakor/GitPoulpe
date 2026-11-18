@@ -1,9 +1,18 @@
-use gitpoulpe_core::{Branch, BranchLoss};
+use gitpoulpe_core::{Branch, BranchLoss, MergeKind, MergeMode, MergeOutcome, MergePreview};
 use gitpoulpe_git::DeleteMode;
 use rune::TextEdit;
 
 use crate::engine::{BranchDone, BranchOp, Command};
 use crate::state::State;
+
+pub struct MergeState {
+    pub source: String,
+    pub preview: Option<MergePreview>,
+    pub error: Option<String>,
+    pub busy: bool,
+    pub no_ff: bool,
+    pub autostash: bool,
+}
 
 pub struct BranchesState {
     pub open: bool,
@@ -17,6 +26,8 @@ pub struct BranchesState {
     pub new_name: TextEdit,
     pub rename_to: TextEdit,
     pub confirm: Option<DeleteConfirmation>,
+    pub merge: Option<MergeState>,
+    pub merge_request: u64,
     pub version: u32,
 }
 
@@ -40,6 +51,8 @@ impl Default for BranchesState {
             new_name: TextEdit::new(""),
             rename_to: TextEdit::new(""),
             confirm: None,
+            merge: None,
+            merge_request: 0,
             version: 0,
         }
     }
@@ -84,7 +97,171 @@ impl State {
         }
     }
 
+    pub fn merge_ask(&mut self) {
+        let Some(branch) = self.branches.selected_branch() else {
+            return;
+        };
+        let source = branch.name.clone();
+        self.branches.merge = Some(MergeState {
+            source: source.clone(),
+            preview: None,
+            error: None,
+            busy: false,
+            no_ff: false,
+            autostash: false,
+        });
+        self.branches.merge_request += 1;
+        self.branches.version += 1;
+        if let Some(engine) = &self.engine {
+            engine.send(Command::MergePreview {
+                request: self.branches.merge_request,
+                source,
+            });
+        }
+    }
+
+    pub fn merge_cancel(&mut self) {
+        self.branches.merge = None;
+        self.branches.merge_request += 1;
+        self.branches.version += 1;
+    }
+
+    pub fn merge_toggle_no_ff(&mut self) {
+        if let Some(m) = self.branches.merge.as_mut() {
+            m.no_ff = !m.no_ff;
+            self.branches.version += 1;
+        }
+    }
+
+    pub fn merge_toggle_autostash(&mut self) {
+        if let Some(m) = self.branches.merge.as_mut() {
+            m.autostash = !m.autostash;
+            self.branches.version += 1;
+        }
+    }
+
+    pub fn merge_confirm(&mut self) {
+        let profile = self.active_profile().cloned().map(Box::new);
+        let Some(m) = self.branches.merge.as_mut() else {
+            return;
+        };
+        let Some(preview) = m.preview.as_ref() else {
+            return;
+        };
+        if m.busy || preview.kind == MergeKind::UpToDate {
+            return;
+        }
+        m.busy = true;
+        m.error = None;
+        let command = Command::Merge {
+            request: self.branches.merge_request,
+            source: m.source.clone(),
+            mode: if m.no_ff {
+                MergeMode::NoFastForward
+            } else {
+                MergeMode::Auto
+            },
+            expected_head: preview.head.clone(),
+            autostash: m.autostash,
+            profile,
+        };
+        self.branches.version += 1;
+        if let Some(engine) = &self.engine {
+            engine.send(command);
+        }
+    }
+
+    pub fn apply_merge_previewed(
+        &mut self,
+        request: u64,
+        result: Result<Box<MergePreview>, String>,
+    ) -> bool {
+        if request != self.branches.merge_request {
+            return false;
+        }
+        let Some(m) = self.branches.merge.as_mut() else {
+            return false;
+        };
+        match result {
+            Ok(preview) => m.preview = Some(*preview),
+            Err(message) => m.error = Some(message),
+        }
+        self.branches.version += 1;
+        true
+    }
+
+    pub fn apply_merge_finished(
+        &mut self,
+        request: u64,
+        result: Result<MergeOutcome, String>,
+    ) -> bool {
+        if request != self.branches.merge_request {
+            return false;
+        }
+        let Some(m) = self.branches.merge.as_mut() else {
+            return false;
+        };
+        m.busy = false;
+        let source = m.source.clone();
+        match result {
+            Ok(outcome) => {
+                self.branches.merge = None;
+                let (message, journal) = match outcome {
+                    MergeOutcome::UpToDate => (
+                        format!("« {source} » est déjà dans la branche courante."),
+                        None,
+                    ),
+                    MergeOutcome::FastForward { from, to } => (
+                        format!(
+                            "« {source} » a été avancée par avance rapide : aucun commit de fusion."
+                        ),
+                        Some((from, to)),
+                    ),
+                    MergeOutcome::Merged {
+                        from,
+                        to,
+                        stash_kept,
+                    } => (
+                        if stash_kept {
+                            format!(
+                                "« {source} » fusionnée. Votre travail local est resté dans la réserve (git stash list) : la réapplication a produit des conflits."
+                            )
+                        } else {
+                            format!("« {source} » fusionnée dans la branche courante.")
+                        },
+                        Some((from, to)),
+                    ),
+                    MergeOutcome::Conflicts { files } => (
+                        format!(
+                            "La fusion de « {source} » a produit des conflits dans {} fichier(s) : résolvez-les ou abandonnez la fusion.",
+                            files.len()
+                        ),
+                        None,
+                    ),
+                };
+                let conflicted = message.contains("a produit des conflits");
+                if let Some((from, to)) = journal {
+                    self.record_journal("merge", Some(from), Some(to), source);
+                }
+                self.notice = Some(message);
+                self.request_refresh(false);
+                self.probe_operation();
+                if conflicted {
+                    self.open_conflicts();
+                } else {
+                    self.reload_branches();
+                }
+            }
+            Err(message) => {
+                m.error = Some(message);
+            }
+        }
+        self.branches.version += 1;
+        true
+    }
+
     pub fn select_branch(&mut self, name: &str) {
+        self.branches.merge = None;
         self.branches.selected = Some(name.to_owned());
         self.branches.rename_to = TextEdit::new(name);
         self.branches.confirm = None;
