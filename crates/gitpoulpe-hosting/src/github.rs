@@ -45,6 +45,8 @@ pub enum GithubError {
     Http(HttpError),
     Secret(SecretError),
     NotConnected,
+    DeviceDenied,
+    DeviceExpired,
 }
 
 impl std::fmt::Display for GithubError {
@@ -70,6 +72,10 @@ impl std::fmt::Display for GithubError {
             Self::Http(e) => write!(f, "{e}"),
             Self::Secret(e) => write!(f, "{e}"),
             Self::NotConnected => f.write_str("aucun jeton n'est enregistré pour cette connexion"),
+            Self::DeviceDenied => f.write_str("l'autorisation a été refusée dans le navigateur"),
+            Self::DeviceExpired => {
+                f.write_str("le code a expiré avant l'autorisation : recommencez la connexion")
+            }
         }
     }
 }

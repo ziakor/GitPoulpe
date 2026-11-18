@@ -4,6 +4,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 LOG = sys.argv[1]
+POLLS = [0]
 USERS = {
     "good": {"login": "Octo", "name": "Octo Cat", "scopes": "repo, read:org"},
     "fine": {"login": "Octo", "name": "Octo Cat", "scopes": None},
@@ -59,6 +60,40 @@ class Handler(BaseHTTPRequestHandler):
             if token == "evil" and page == 1:
                 headers["Link"] = '<http://127.0.0.1:9/user/repos?page=2>; rel="next"'
             return self.reply(200, pages[page], headers)
+        return self.reply(404, {"message": "Not Found"})
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        raw = self.rfile.read(length).decode()
+        with open(LOG, "a") as f:
+            f.write(json.dumps({"path": self.path, "auth": self.headers.get("Authorization"),
+                                "accept": self.headers.get("Accept"), "body": raw}) + "\n")
+        body = json.loads(raw or "{}")
+        if body.get("client_id") != "client-1":
+            return self.reply(200, {"error": "incorrect_client_credentials"})
+        if self.path == "/login/device/code":
+            if body.get("scope") != "repo read:org":
+                return self.reply(200, {"error": "bad_scope"})
+            return self.reply(200, {"device_code": "dc-ok", "user_code": "ABCD-1234",
+                                    "verification_uri": f"http://127.0.0.1:{self.server.server_address[1]}/login/device",
+                                    "expires_in": 900, "interval": 5})
+        if self.path == "/login/oauth/access_token":
+            code = body.get("device_code")
+            if body.get("grant_type") != "urn:ietf:params:oauth:grant-type:device_code":
+                return self.reply(200, {"error": "unsupported_grant_type"})
+            if code == "dc-deny":
+                return self.reply(200, {"error": "access_denied"})
+            if code == "dc-exp":
+                return self.reply(200, {"error": "expired_token"})
+            if code == "dc-off":
+                return self.reply(200, {"error": "device_flow_disabled"})
+            if code == "dc-ok":
+                POLLS[0] += 1
+                if POLLS[0] == 1:
+                    return self.reply(200, {"error": "authorization_pending"})
+                if POLLS[0] == 2:
+                    return self.reply(200, {"error": "slow_down", "interval": 10})
+                return self.reply(200, {"access_token": "good", "token_type": "bearer", "scope": "repo,read:org"})
         return self.reply(404, {"message": "Not Found"})
 
     def do_GET(self):

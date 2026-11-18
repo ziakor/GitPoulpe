@@ -140,14 +140,58 @@ fn panel(s: &State) -> El {
                     ),
             );
     }
+    panel = panel.child(
+        text("Connecter un compte GitHub".to_owned())
+            .font(theme::BODY_STRONG)
+            .color(p.text),
+    );
+    if let Some(code) = &s.accounts.device {
+        panel = panel
+            .child(
+                text(format!(
+                    "Ouvrez {} et saisissez le code :",
+                    code.verification_uri
+                ))
+                .key("ac-device-uri")
+                .font(theme::SMALL)
+                .color(p.text)
+                .wrap(),
+            )
+            .child(
+                text(code.user_code.clone())
+                    .key("ac-device-code")
+                    .font(theme::BODY_STRONG)
+                    .color(p.text),
+            )
+            .child(
+                text("En attente de votre autorisation dans le navigateur…".to_owned())
+                    .key("ac-device-wait")
+                    .font(theme::SMALL)
+                    .color(p.muted)
+                    .wrap(),
+            )
+            .child(
+                action(s, "ac-device-cancel", "Annuler", false)
+                    .on_press(|s: &mut State| s.cancel_device()),
+            );
+    } else if !s.accounts.enterprise {
+        panel = panel.child(
+            action(
+                s,
+                "ac-device",
+                if s.accounts.busy {
+                    "Demande du code…"
+                } else {
+                    "Se connecter avec GitHub"
+                },
+                true,
+            )
+            .on_press(|s: &mut State| s.connect_device()),
+        );
+    }
     panel = panel
         .child(
-            text("Connecter un compte GitHub".to_owned())
-                .font(theme::BODY_STRONG)
-                .color(p.text),
-        )
-        .child(
-            text("Le jeton d'accès personnel est gardé dans le trousseau du système, jamais dans les préférences ni dans un dépôt. Aucun compte GitPoulpe n'est nécessaire.".to_owned())
+            text("Le jeton est gardé dans le trousseau du système, jamais dans les préférences ni dans un dépôt. Sans navigateur, ou pour GitHub Enterprise Server, collez un jeton d'accès personnel.".to_owned())
                 .key("ac-help")
                 .font(theme::SMALL)
                 .color(p.muted)

@@ -24,7 +24,7 @@ use gitpoulpe_git::{
     NetError, PullRequest, PushRequest, QUIET_PERIOD, RemoteCheck, RepoWatcher, SequenceRequest,
     Signal, SigningCheck, StashError, SubmoduleError, WorktreeError, check_signing, coalesce,
 };
-use gitpoulpe_hosting::Session as AccountSession;
+use gitpoulpe_hosting::{DeviceCode, Session as AccountSession};
 use rune::Waker;
 use std::time::Duration;
 
@@ -789,6 +789,10 @@ pub enum Event {
     AccountConnected {
         request: u64,
         result: Result<(Connection, AccountSession), String>,
+    },
+    AccountDeviceCode {
+        request: u64,
+        code: DeviceCode,
     },
     AccountChecked {
         id: String,

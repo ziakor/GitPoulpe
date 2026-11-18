@@ -3,7 +3,8 @@ use std::sync::Arc;
 
 use gitpoulpe_core::{Connection, ConnectionBook};
 use gitpoulpe_hosting::{
-    GithubHost, SecretStore, Session, check_connection, connect_github, disconnect,
+    DeviceCode, GITHUB_CLIENT_ID, GithubHost, SecretStore, Session, await_device_token,
+    check_connection, connect_github, disconnect, start_device_flow,
 };
 use rune::TextEdit;
 
@@ -32,6 +33,11 @@ pub struct AccountsState {
     pub server: TextEdit,
     pub token: TextEdit,
     pub version: u32,
+    pub device: Option<DeviceCode>,
+    pub device_task: Option<tokio::task::AbortHandle>,
+    pub oauth_client_id: String,
+    pub oauth_host: GithubHost,
+    pub second_ms: u64,
 }
 
 impl AccountsState {
@@ -49,6 +55,11 @@ impl AccountsState {
             server: TextEdit::new(""),
             token: TextEdit::new(""),
             version: 0,
+            device: None,
+            device_task: None,
+            oauth_client_id: GITHUB_CLIENT_ID.to_owned(),
+            oauth_host: GithubHost::dotcom(),
+            second_ms: 1000,
         }
     }
 }
@@ -84,6 +95,7 @@ impl State {
     }
 
     pub fn close_accounts(&mut self) {
+        self.cancel_device();
         self.accounts.open = false;
         self.accounts.token = TextEdit::new("");
     }
@@ -160,6 +172,78 @@ impl State {
         });
     }
 
+    pub fn connect_device(&mut self) {
+        if self.accounts.busy || self.accounts.enterprise {
+            return;
+        }
+        self.accounts.request += 1;
+        self.accounts.busy = true;
+        self.accounts.error = None;
+        self.accounts.done = None;
+        self.accounts.device = None;
+        self.accounts.version += 1;
+        let request = self.accounts.request;
+        let host = self.accounts.oauth_host.clone();
+        let client_id = self.accounts.oauth_client_id.clone();
+        let second_ms = self.accounts.second_ms;
+        let secrets = self.hosting.secrets.clone();
+        let sender = self.event_tx();
+        let waker = self.waker_slot();
+        let notify = move |event: Event| {
+            let _ = sender.send(event);
+            if let Some(wake) = waker.lock().unwrap().as_ref() {
+                wake();
+            }
+        };
+        let task = self.hosting.runtime.spawn(async move {
+            let code = match start_device_flow(&host, &client_id).await {
+                Ok(code) => code,
+                Err(e) => {
+                    notify(Event::AccountConnected {
+                        request,
+                        result: Err(e.to_string()),
+                    });
+                    return;
+                }
+            };
+            notify(Event::AccountDeviceCode {
+                request,
+                code: code.clone(),
+            });
+            let result = async {
+                let token = await_device_token(&host, &client_id, &code, |d| {
+                    tokio::time::sleep(std::time::Duration::from_millis(d.as_secs() * second_ms))
+                })
+                .await?;
+                connect_github(secrets.as_ref(), &host, token.expose()).await
+            }
+            .await
+            .map_err(|e| e.to_string());
+            notify(Event::AccountConnected { request, result });
+        });
+        self.accounts.device_task = Some(task.abort_handle());
+    }
+
+    pub fn cancel_device(&mut self) {
+        if let Some(task) = self.accounts.device_task.take() {
+            task.abort();
+        }
+        if self.accounts.device.take().is_some() || self.accounts.busy {
+            self.accounts.request += 1;
+            self.accounts.busy = false;
+        }
+        self.accounts.version += 1;
+    }
+
+    pub fn apply_account_device_code(&mut self, request: u64, code: DeviceCode) -> bool {
+        if request != self.accounts.request {
+            return false;
+        }
+        self.accounts.device = Some(code);
+        self.accounts.version += 1;
+        true
+    }
+
     pub fn disconnect_account(&mut self) {
         let Some(id) = self.accounts.selected.clone() else {
             return;
@@ -193,6 +277,8 @@ impl State {
             return false;
         }
         self.accounts.busy = false;
+        self.accounts.device = None;
+        self.accounts.device_task = None;
         match result {
             Ok((connection, session)) => {
                 self.accounts.done = Some(format!(

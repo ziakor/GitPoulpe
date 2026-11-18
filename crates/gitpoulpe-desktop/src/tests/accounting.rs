@@ -14,6 +14,7 @@ use crate::state::State;
 struct Fake {
     child: Child,
     port: u16,
+    log: std::path::PathBuf,
     _dir: tempfile::TempDir,
 }
 
@@ -36,8 +37,16 @@ impl Fake {
         Self {
             child,
             port: line.trim().parse().unwrap(),
+            log: dir.path().join("log"),
             _dir: dir,
         }
+    }
+
+    fn polls(&self) -> usize {
+        std::fs::read_to_string(&self.log)
+            .unwrap_or_default()
+            .matches("login/oauth/access_token")
+            .count()
     }
 
     fn base(&self) -> String {
@@ -204,4 +213,75 @@ fn disconnecting_removes_the_token_but_never_touches_local_git_profiles() {
     assert!(store.keys().is_empty());
     assert!(shows(&rt, "vos profils Git sont inchangés"));
     assert_eq!(rt.state.book, profiles);
+}
+
+fn point_oauth_at(rt: &mut Runtime<State>, fake: &Fake, second_ms: u64) {
+    rt.state.accounts.oauth_host = gitpoulpe_hosting::GithubHost {
+        api: fake.base(),
+        web: fake.base(),
+    };
+    rt.state.accounts.oauth_client_id = "client-1".to_owned();
+    rt.state.accounts.second_ms = second_ms;
+    step(rt);
+}
+
+#[test]
+fn browser_sign_in_connects_the_account_without_pasting_a_token() {
+    let fake = Fake::start();
+    let store = Arc::new(MemoryStore::default());
+    let mut rt = screen(store.clone());
+    point_oauth_at(&mut rt, &fake, 1);
+    assert!(rect_of(&rt, "ac-device").is_some());
+    click(&mut rt, "ac-device");
+    settle(&mut rt, |s| !s.accounts.busy && s.accounts.done.is_some());
+    assert!(shows(&rt, "Connecté en tant que Octo"));
+    assert!(rt.state.accounts.device.is_none());
+    let key = rt.state.accounts.book.connections[0].secret_key();
+    assert_eq!(store.get(&key).unwrap().as_deref(), Some("good"));
+    assert_eq!(rt.state.accounts.token.text, "");
+}
+
+#[test]
+fn the_code_is_shown_while_waiting_and_cancelling_stops_everything_and_stores_nothing() {
+    let fake = Fake::start();
+    let store = Arc::new(MemoryStore::default());
+    let mut rt = screen(store.clone());
+    point_oauth_at(&mut rt, &fake, 600);
+    click(&mut rt, "ac-device");
+    settle(&mut rt, |s| s.accounts.device.is_some());
+    let issued = rt.state.accounts.device.clone().unwrap();
+    let request = rt.state.accounts.request;
+    assert!(shows(&rt, "ABCD-1234"));
+    assert!(shows(&rt, "/login/device"));
+    assert!(shows(&rt, "En attente de votre autorisation"));
+    assert!(rect_of(&rt, "ac-device").is_none());
+    click(&mut rt, "ac-device-cancel");
+    settle(&mut rt, |s| s.accounts.device.is_none() && !s.accounts.busy);
+    assert!(!shows(&rt, "ABCD-1234"));
+    assert!(rect_of(&rt, "ac-device").is_some());
+    assert!(rt.state.accounts.device_task.is_none());
+    assert!(!rt.state.apply_account_device_code(request, issued));
+    assert!(rt.state.accounts.device.is_none());
+    let polls_at_cancel = fake.polls();
+    std::thread::sleep(std::time::Duration::from_secs(7));
+    step(&mut rt);
+    assert_eq!(fake.polls(), polls_at_cancel);
+    assert!(store.keys().is_empty());
+    assert!(rt.state.accounts.book.connections.is_empty());
+}
+
+#[test]
+fn a_wrong_client_id_is_explained_and_the_enterprise_form_offers_no_browser_sign_in() {
+    let fake = Fake::start();
+    let mut rt = screen(Arc::new(MemoryStore::default()));
+    point_oauth_at(&mut rt, &fake, 1);
+    rt.state.accounts.oauth_client_id = "other".to_owned();
+    click(&mut rt, "ac-device");
+    settle(&mut rt, |s| !s.accounts.busy && s.accounts.error.is_some());
+    assert!(shows(&rt, "identifiant d'application OAuth inconnu"));
+    click(&mut rt, "ac-enterprise");
+    settle(&mut rt, |s| s.accounts.enterprise);
+    assert!(rect_of(&rt, "ac-device").is_none());
+    rt.state.connect_device();
+    assert!(!rt.state.accounts.busy && rt.state.accounts.device_task.is_none());
 }

@@ -86,6 +86,7 @@ impl std::fmt::Debug for Token {
 pub struct ApiClient {
     base: String,
     authorization: Option<String>,
+    accept: &'static str,
     agent: ureq::Agent,
 }
 
@@ -158,8 +159,14 @@ impl ApiClient {
         Ok(Self {
             base,
             authorization: token.map(|t| format!("Bearer {}", t.expose())),
+            accept: "application/vnd.github+json",
             agent,
         })
+    }
+
+    pub fn with_plain_json(mut self) -> Self {
+        self.accept = "application/json";
+        self
     }
 
     pub fn base(&self) -> &str {
@@ -188,11 +195,12 @@ impl ApiClient {
         };
         let agent = self.agent.clone();
         let authorization = self.authorization.clone();
+        let accept = self.accept;
         tokio::task::spawn_blocking(move || {
             let mut request = ureq::http::Request::builder()
                 .method(method)
                 .uri(&url)
-                .header("Accept", "application/vnd.github+json")
+                .header("Accept", accept)
                 .header("X-GitHub-Api-Version", "2022-11-28");
             if let Some(value) = authorization {
                 request = request.header("Authorization", value);

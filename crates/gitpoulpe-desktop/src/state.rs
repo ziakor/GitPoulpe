@@ -918,6 +918,9 @@ impl State {
             Event::AccountConnected { request, result } => {
                 self.apply_account_connected(request, result)
             }
+            Event::AccountDeviceCode { request, code } => {
+                self.apply_account_device_code(request, code)
+            }
             Event::AccountChecked { id, result } => self.apply_account_checked(id, result),
             Event::GitflowLoaded { request, result } => self.apply_gitflow_loaded(request, result),
             Event::GitflowPlanned { request, result } => {
