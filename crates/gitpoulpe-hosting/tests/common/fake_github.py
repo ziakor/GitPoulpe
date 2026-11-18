@@ -25,6 +25,42 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def repo(self, owner, name, **extra):
+        base = {"name": name, "owner": {"login": owner}, "description": None, "private": False,
+                "fork": False, "archived": False, "default_branch": "main",
+                "clone_url": f"https://example.test/{owner}/{name}.git",
+                "permissions": {"push": True}}
+        base.update(extra)
+        return base
+
+    def listing(self, token):
+        port = self.server.server_address[1]
+        path, _, query = self.path.partition("?")
+        params = dict(p.split("=", 1) for p in query.split("&") if "=" in p)
+        page = int(params.get("page", "1"))
+        if token == "sso":
+            return self.reply(403, {"message": "SAML"}, {"X-GitHub-SSO": "required; url=https://github.com/orgs/acme/sso"})
+        if token == "bad":
+            return self.reply(401, {"message": "Bad credentials"})
+        if path == "/user/orgs":
+            return self.reply(200, [{"login": "Zeta", "description": "z"}, {"login": "acme", "description": None}])
+        if path == "/orgs/ghost/repos":
+            return self.reply(404, {"message": "Not Found"})
+        if path == "/orgs/acme/repos":
+            return self.reply(200, [self.repo("acme", "tool", archived=True, permissions={"push": False})])
+        if path == "/user/repos":
+            pages = {
+                1: [self.repo("octo", "b", private=True, description="secret"), self.repo("acme", "Zed", fork=True)],
+                2: [self.repo("octo", "a")],
+            }
+            headers = {}
+            if page < 2:
+                headers["Link"] = f'<http://127.0.0.1:{port}/user/repos?page={page + 1}>; rel="next"'
+            if token == "evil" and page == 1:
+                headers["Link"] = '<http://127.0.0.1:9/user/repos?page=2>; rel="next"'
+            return self.reply(200, pages[page], headers)
+        return self.reply(404, {"message": "Not Found"})
+
     def do_GET(self):
         with open(LOG, "a") as f:
             f.write(json.dumps({"path": self.path, "auth": self.headers.get("Authorization")}) + "\n")
@@ -38,6 +74,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
+        if self.path.startswith(("/user/orgs", "/user/repos", "/orgs/")):
+            return self.listing(token)
         if self.path != "/user":
             return self.reply(404, {"message": "Not Found"})
         if token == "sso":

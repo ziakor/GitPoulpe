@@ -246,6 +246,10 @@ The **Comptes fournisseurs** button on the profiles screen connects GitHub.com o
 | arrows, PgUp, PgDn, Home, End | read |
 | Ctrl+O | open a repository |
 
+### Browsing organizations and repositories
+
+For a connected GitHub account the hosting crate lists the organizations the token can see and the repositories of the account or of one organization. Pages are followed up to a fixed cap and the result says when it was truncated. Each repository carries the id of the connection it came from, so two accounts or servers with same-named repositories never mix. A next-page link to another server is refused. SSO, rate-limit, expired-token and permission failures stay distinct. There is no screen for this yet.
+
 ## Build and run
 
 Requirements: Rust 1.100.0 (`rustup toolchain install 1.100.0`), Git on the `PATH` (tested with 2.53.0), a GPU and a Linux graphical session. The folder picker uses the XDG desktop portal.

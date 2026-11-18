@@ -88,7 +88,7 @@ impl From<SecretError> for GithubError {
     }
 }
 
-pub fn interpret_failure(response: &Response) -> GithubError {
+pub(crate) fn interpret_failure(response: &Response) -> GithubError {
     let message = response
         .json()
         .ok()
