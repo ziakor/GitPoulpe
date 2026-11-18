@@ -13,6 +13,16 @@ pub fn restore_branch(name: &str, tip: &str) -> String {
     format!("git branch -- {} {tip}", quote(name))
 }
 
+pub fn restore_remote(name: &str, url: &str) -> String {
+    if gitpoulpe_core::url_has_secret(url) {
+        return format!(
+            "git remote add -- {} <URL avec identifiants, non affichée>",
+            quote(name)
+        );
+    }
+    format!("git remote add -- {} {}", quote(name), quote(url))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

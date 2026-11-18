@@ -55,6 +55,7 @@ impl State {
         self.close_history();
         self.close_ignored();
         self.close_branches();
+        self.close_remotes();
         self.profiles_open = false;
         self.tags.open = true;
         self.tags.target = target;

@@ -16,6 +16,7 @@ mod ignoring;
 mod initializing;
 mod inspecting;
 mod profiles;
+mod remoting;
 mod staging;
 mod tagging;
 

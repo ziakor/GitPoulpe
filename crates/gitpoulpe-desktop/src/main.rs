@@ -11,6 +11,8 @@ mod keys;
 mod perf;
 mod profiles;
 mod profiles_view;
+mod remotes;
+mod remotes_view;
 mod shell;
 mod state;
 mod tags;

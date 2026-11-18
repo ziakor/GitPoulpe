@@ -62,6 +62,15 @@ Git runs as an external program, without a shell, with the repository's filters,
 - The folder becomes an empty repository without a first commit and opens immediately; the files already in it appear as untracked.
 - An existing repository, including a bare one, is never reinitialised, and a folder inside another repository is refused with the path of the enclosing one. A refused access or an interrupted creation leaves the panel open with the reason; trying again completes a half-created `.git`.
 
+## Remotes
+
+- The "Remotes" button of the branch screen opens the remote screen: each remote with its read (fetch) and write (push) URLs, as Git resolves them. A separate push URL is flagged.
+- Adding a remote validates the name (`git check-ref-format`) and the URL; an existing name is refused and its configuration is never replaced. Accepted URLs are `https`, `http`, `ssh`, `git`, `file`, `host:path` and local paths. Transport helpers (`ext::`, `fd::`), options disguised as hosts (a leading `-`), blanks and control characters are refused, since they can run commands.
+- Changing the read URL, the push URL or the name only goes through if the remote still has the URLs that were displayed, and never rewrites a remote that has several URLs (edit those with `git config`). Renaming moves the remote-tracking branches and the branches' upstream setting with it. Everything applies to the open repository only.
+- Removing a remote first states its impact: how many remote-tracking branches go away and which local branches lose their upstream. Local branches and commits are kept. The `git remote add` command that restores it is shown.
+- URLs with embedded credentials (`https://user:token@host`) are shown with the secret masked, never prefilled in a field and never repeated in a recovery command; the new URL has to be typed in full.
+- Changes are written to the per-repository journal, with credentials masked.
+
 ## Committing
 
 - Write a message in the box at the bottom of the file list, then "Créer le commit" or Ctrl+Enter. The commit contains exactly the staged content shown, with the effective identity of the repository's profile (or your Git configuration when it has none). The box also shows who will be the author and whether the profile's signing key is usable.

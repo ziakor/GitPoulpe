@@ -185,6 +185,7 @@ pub struct State {
     pub ignored: crate::ignored::IgnoredState,
     pub branches: crate::branches::BranchesState,
     pub tags: crate::tags::TagsState,
+    pub remotes: crate::remotes::RemotesState,
     pub init: crate::initialize::InitState,
     pub form: ProfileForm,
     identity_request: u64,
@@ -302,6 +303,7 @@ impl State {
             ignored: crate::ignored::IgnoredState::default(),
             branches: crate::branches::BranchesState::default(),
             tags: crate::tags::TagsState::default(),
+            remotes: crate::remotes::RemotesState::default(),
             init: crate::initialize::InitState::default(),
             form: ProfileForm::default(),
             identity_request: 0,
@@ -568,6 +570,7 @@ impl State {
                 self.ignored = crate::ignored::IgnoredState::default();
                 self.branches = crate::branches::BranchesState::default();
                 self.tags = crate::tags::TagsState::default();
+                self.remotes = crate::remotes::RemotesState::default();
                 self.writing = false;
                 self.positions.clear();
                 self.pending_anchor = None;
@@ -710,6 +713,13 @@ impl State {
                 completed_existing,
             } => self.apply_init_done(request, path, completed_existing),
             Event::InitFailed { request, message } => self.apply_init_failed(request, message),
+            Event::RemotesListed { request, result } => self.apply_remotes_listed(request, result),
+            Event::RemoteDone { request, result } => self.apply_remote_done(request, result),
+            Event::RemoteImpacted {
+                request,
+                name,
+                result,
+            } => self.apply_remote_impacted(request, name, result),
             Event::TagsListed { request, result } => self.apply_tags_listed(request, result),
             Event::TagDone { request, result } => self.apply_tag_done(request, result),
             Event::BranchesListed { request, result } => {
@@ -1735,6 +1745,7 @@ impl State {
         self.close_ignored();
         self.close_branches();
         self.close_tags();
+        self.close_remotes();
         let selected = self
             .active_profile()
             .or_else(|| self.book.profiles.first())
@@ -2085,6 +2096,7 @@ impl State {
         self.close_ignored();
         self.close_branches();
         self.close_tags();
+        self.close_remotes();
         self.start_history();
     }
 
@@ -2213,6 +2225,7 @@ impl State {
             return;
         }
         self.close_tags();
+        self.close_remotes();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::CommitInspect {

@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use gitpoulpe_core::{
     AmendInfo, AmendRequest, Branch, BranchLoss, ChangeEntry, Commit, CommitDetail, CommitOutcome,
     CommitRange, CommitRequest, DiffLine, DiffSide, DocumentMeta, Generation, IgnoreReason,
-    IgnoreScope, OpenError, Profile, RangeError, ReadError, SessionId, SessionInfo, StageOutcome,
-    StatusSnapshot, Tag, WriteError, WriteJob,
+    IgnoreScope, OpenError, Profile, RangeError, ReadError, Remote, RemoteImpact, SessionId,
+    SessionInfo, StageOutcome, StatusSnapshot, Tag, WriteError, WriteJob, mask_url,
 };
 use gitpoulpe_git::{
     BranchError, CacheConfig, Cancel, DeleteMode, DiffCache, DiffError, DiffReader, Git,
@@ -49,6 +49,32 @@ pub enum TagOp {
     Delete {
         name: String,
         expected: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RemoteOp {
+    Add {
+        name: String,
+        url: String,
+    },
+    SetUrl {
+        name: String,
+        url: String,
+        expected: Vec<String>,
+    },
+    SetPushUrl {
+        name: String,
+        url: Option<String>,
+        expected: Vec<String>,
+    },
+    Rename {
+        old: String,
+        new: String,
+    },
+    Remove {
+        name: String,
+        expected: Vec<String>,
     },
 }
 
@@ -135,6 +161,17 @@ pub enum Command {
     IgnoreEdit {
         request: u64,
         edit: IgnoreEdit,
+    },
+    RemoteList {
+        request: u64,
+    },
+    RemoteOp {
+        request: u64,
+        op: RemoteOp,
+    },
+    RemoteImpact {
+        request: u64,
+        name: String,
     },
     InitPrepare {
         request: u64,
@@ -282,6 +319,19 @@ pub enum Event {
     OpenFailed {
         request: u64,
         message: String,
+    },
+    RemotesListed {
+        request: u64,
+        result: Result<Vec<Remote>, String>,
+    },
+    RemoteDone {
+        request: u64,
+        result: Result<BranchDone, String>,
+    },
+    RemoteImpacted {
+        request: u64,
+        name: String,
+        result: Result<RemoteImpact, String>,
     },
     InitPrepared {
         request: u64,
@@ -558,6 +608,44 @@ async fn run(
                             shared.emit(Event::AmendInfo { request, info });
                         });
                     }
+                    Command::RemoteList { request } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .list_remotes(&current.info)
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::RemotesListed { request, result });
+                        });
+                    }
+                    Command::RemoteOp { request, op } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        tokio::spawn(remote_op(shared.clone(), current, request, op));
+                    }
+                    Command::RemoteImpact { request, name } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .remote_impact(&current.info, &name)
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::RemoteImpacted {
+                                request,
+                                name,
+                                result,
+                            });
+                        });
+                    }
                     Command::InitPrepare { request, path } => {
                         let shared = shared.clone();
                         tokio::spawn(async move {
@@ -816,6 +904,102 @@ async fn open(
 
 fn short(oid: &str) -> String {
     oid.chars().take(8).collect()
+}
+
+async fn remote_op(shared: Arc<Shared>, session: Arc<Session>, request: u64, op: RemoteOp) {
+    let _guard = session.writer.lock().await;
+    let git = &shared.git;
+    let info = &session.info;
+    let result = match &op {
+        RemoteOp::Add { name, url } => {
+            git.add_remote(info, name, url)
+                .await
+                .map(|remote| BranchDone {
+                    message: format!("Remote {} ajouté.", remote.name),
+                    journal: Some((
+                        "remote-add".into(),
+                        None,
+                        remote.fetch_urls.first().map(|u| mask_url(u)),
+                        remote.name,
+                    )),
+                })
+        }
+        RemoteOp::SetUrl {
+            name,
+            url,
+            expected,
+        } => git
+            .set_remote_url(info, name, url, expected)
+            .await
+            .map(|remote| BranchDone {
+                message: format!("URL de lecture de {} modifiée.", remote.name),
+                journal: Some((
+                    "remote-set-url".into(),
+                    expected.first().map(|u| mask_url(u)),
+                    remote.fetch_urls.first().map(|u| mask_url(u)),
+                    remote.name,
+                )),
+            }),
+        RemoteOp::SetPushUrl {
+            name,
+            url,
+            expected,
+        } => git
+            .set_remote_push_url(info, name, url.as_deref(), expected)
+            .await
+            .map(|remote| BranchDone {
+                message: if remote.push_urls.is_empty() {
+                    format!("{} envoie désormais vers son URL de lecture.", remote.name)
+                } else {
+                    format!("URL d'envoi de {} modifiée.", remote.name)
+                },
+                journal: Some((
+                    "remote-set-push-url".into(),
+                    expected.first().map(|u| mask_url(u)),
+                    remote.push_urls.first().map(|u| mask_url(u)),
+                    remote.name,
+                )),
+            }),
+        RemoteOp::Rename { old, new } => {
+            git.rename_remote(info, old, new)
+                .await
+                .map(|remote| BranchDone {
+                    message: format!(
+                        "Remote {old} renommé en {}. Ses branches de suivi ont suivi.",
+                        remote.name
+                    ),
+                    journal: Some((
+                        "remote-rename".into(),
+                        Some(old.clone()),
+                        Some(remote.name),
+                        old.clone(),
+                    )),
+                })
+        }
+        RemoteOp::Remove { name, expected } => {
+            git.remove_remote(info, name, expected)
+                .await
+                .map(|removed| {
+                    let url = removed.fetch_urls.first().cloned().unwrap_or_default();
+                    BranchDone {
+                        message: format!(
+                            "Remote {name} supprimé. Pour le rétablir : {}",
+                            crate::shell::restore_remote(name, &url)
+                        ),
+                        journal: Some((
+                            "remote-remove".into(),
+                            Some(mask_url(&url)),
+                            None,
+                            name.clone(),
+                        )),
+                    }
+                })
+        }
+    };
+    shared.emit(Event::RemoteDone {
+        request,
+        result: result.map_err(|e| e.to_string()),
+    });
 }
 
 async fn tag_op(shared: Arc<Shared>, session: Arc<Session>, request: u64, op: TagOp) {

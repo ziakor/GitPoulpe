@@ -296,6 +296,10 @@ pub fn branches_screen(s: &State) -> El {
                 .truncate(),
         )
         .child(
+            action(s, "branches-remotes", "Remotes", false)
+                .on_press(|s: &mut State| s.open_remotes()),
+        )
+        .child(
             action(s, "branches-tags", "Tags", false).on_press(|s: &mut State| s.open_tags(None)),
         )
         .child(

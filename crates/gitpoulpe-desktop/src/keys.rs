@@ -6,7 +6,12 @@ use crate::view::row_key;
 const LINES_PER_KEY: usize = 3;
 const SIDEWAYS_STEP: f32 = 96.0;
 
-const TEXT_INPUTS: [&str; 8] = [
+const TEXT_INPUTS: [&str; 13] = [
+    "rm-new-name",
+    "rm-new-url",
+    "rm-url",
+    "rm-push-url",
+    "rm-rename",
     "init-branch",
     "filter",
     "commit-message",
@@ -112,6 +117,14 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         s.close_profiles();
         return true;
     }
+    if s.remotes.open && event.key == Key::Escape {
+        if s.remotes.confirm_remove.is_some() {
+            s.remote_cancel_remove();
+        } else {
+            s.close_remotes();
+        }
+        return true;
+    }
     if s.tags.open && event.key == Key::Escape {
         if s.tags.confirm_delete.is_some() {
             s.tag_cancel_delete();
@@ -161,7 +174,8 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         || s.profiles_open
         || s.ignored.open
         || s.branches.open
-        || s.tags.open;
+        || s.tags.open
+        || s.remotes.open;
     match &event.key {
         Key::Text(text) if reading && !typing => match text.as_str() {
             "/" => tx.focus("filter", true),

@@ -53,6 +53,8 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
         crate::branches_view::branches_screen(s)
     } else if s.tags.open {
         crate::tags_view::tags_screen(s)
+    } else if s.remotes.open {
+        crate::remotes_view::remotes_screen(s)
     } else {
         body
     };

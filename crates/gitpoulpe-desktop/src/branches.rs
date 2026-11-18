@@ -60,6 +60,7 @@ impl State {
         self.close_history();
         self.close_ignored();
         self.close_tags();
+        self.close_remotes();
         self.profiles_open = false;
         self.branches.open = true;
         self.reload_branches();
