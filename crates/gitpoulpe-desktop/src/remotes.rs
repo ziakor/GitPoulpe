@@ -1,8 +1,27 @@
 use gitpoulpe_core::{Remote, RemoteImpact};
+use gitpoulpe_git::{HostKey, NetError, RemoteCheck};
 use rune::TextEdit;
 
 use crate::engine::{BranchDone, Command, RemoteOp};
 use crate::state::State;
+
+pub enum CheckStatus {
+    Running,
+    Reachable(RemoteCheck),
+    Failed(NetError),
+}
+
+pub enum ScanStatus {
+    Scanning,
+    Keys(Vec<HostKey>),
+    Failed(NetError),
+}
+
+pub struct CheckState {
+    pub name: String,
+    pub status: CheckStatus,
+    pub scan: Option<ScanStatus>,
+}
 
 pub struct RemotesState {
     pub open: bool,
@@ -20,6 +39,9 @@ pub struct RemotesState {
     pub push_url: TextEdit,
     pub rename: TextEdit,
     pub confirm_remove: Option<(String, Option<RemoteImpact>)>,
+    pub check: Option<CheckState>,
+    pub check_request: u64,
+    pub scan_request: u64,
     pub version: u32,
 }
 
@@ -41,6 +63,9 @@ impl Default for RemotesState {
             push_url: TextEdit::new(""),
             rename: TextEdit::new(""),
             confirm_remove: None,
+            check: None,
+            check_request: 0,
+            scan_request: 0,
             version: 0,
         }
     }
@@ -75,6 +100,7 @@ impl State {
     }
 
     pub fn close_remotes(&mut self) {
+        self.cancel_remote_check();
         self.remotes.open = false;
         self.remotes.confirm_remove = None;
     }
@@ -92,6 +118,8 @@ impl State {
     }
 
     pub fn select_remote(&mut self, name: &str) {
+        self.cancel_remote_check();
+        self.remotes.check = None;
         self.remotes.selected = Some(name.to_owned());
         self.remotes.clear_forms();
         self.remotes.version += 1;
@@ -271,6 +299,153 @@ impl State {
             Err(message) => {
                 self.notice = Some(format!("Remote non modifié : {message}"));
                 self.reload_remotes();
+            }
+        }
+        self.remotes.version += 1;
+        true
+    }
+
+    pub fn remote_check(&mut self) {
+        let Some(remote) = self.remotes.selected_remote() else {
+            return;
+        };
+        let name = remote.name.clone();
+        if matches!(
+            self.remotes.check.as_ref().map(|c| &c.status),
+            Some(CheckStatus::Running)
+        ) {
+            return;
+        }
+        self.remotes.check_request += 1;
+        self.remotes.check = Some(CheckState {
+            name: name.clone(),
+            status: CheckStatus::Running,
+            scan: None,
+        });
+        self.remotes.version += 1;
+        if let Some(engine) = &self.engine {
+            engine.send(Command::RemoteCheck {
+                request: self.remotes.check_request,
+                name,
+            });
+        }
+    }
+
+    pub fn cancel_remote_check(&mut self) {
+        if matches!(
+            self.remotes.check.as_ref().map(|c| &c.status),
+            Some(CheckStatus::Running)
+        ) && let Some(engine) = &self.engine
+        {
+            engine.send(Command::NetCancel);
+        }
+    }
+
+    fn check_host(&self) -> Option<(String, Option<u16>)> {
+        let check = self.remotes.check.as_ref()?;
+        let remote = self.remotes.remotes.iter().find(|r| r.name == check.name)?;
+        gitpoulpe_git::remote_host(remote.fetch_urls.first()?)
+    }
+
+    pub fn remote_scan_host(&mut self) {
+        let Some((host, port)) = self.check_host() else {
+            return;
+        };
+        let Some(check) = self.remotes.check.as_mut() else {
+            return;
+        };
+        check.scan = Some(ScanStatus::Scanning);
+        self.remotes.scan_request += 1;
+        self.remotes.version += 1;
+        if let Some(engine) = &self.engine {
+            engine.send(Command::SshScan {
+                request: self.remotes.scan_request,
+                host,
+                port,
+            });
+        }
+    }
+
+    pub fn remote_trust_host(&mut self, index: usize) {
+        let Some((host, port)) = self.check_host() else {
+            return;
+        };
+        let Some(CheckState {
+            scan: Some(ScanStatus::Keys(keys)),
+            ..
+        }) = &self.remotes.check
+        else {
+            return;
+        };
+        let Some(key) = keys.get(index) else {
+            return;
+        };
+        let fingerprint = key.fingerprint.clone();
+        self.remotes.scan_request += 1;
+        if let Some(engine) = &self.engine {
+            engine.send(Command::SshTrust {
+                request: self.remotes.scan_request,
+                host,
+                port,
+                fingerprint,
+            });
+        }
+    }
+
+    pub fn apply_remote_checked(
+        &mut self,
+        request: u64,
+        name: String,
+        result: Result<RemoteCheck, NetError>,
+    ) -> bool {
+        if request != self.remotes.check_request {
+            return false;
+        }
+        match &mut self.remotes.check {
+            Some(check) if check.name == name => {
+                check.status = match result {
+                    Ok(done) => CheckStatus::Reachable(done),
+                    Err(error) => CheckStatus::Failed(error),
+                };
+            }
+            _ => return false,
+        }
+        self.remotes.version += 1;
+        true
+    }
+
+    pub fn apply_ssh_scanned(
+        &mut self,
+        request: u64,
+        result: Result<Vec<HostKey>, NetError>,
+    ) -> bool {
+        if request != self.remotes.scan_request {
+            return false;
+        }
+        let Some(check) = self.remotes.check.as_mut() else {
+            return false;
+        };
+        check.scan = Some(match result {
+            Ok(keys) => ScanStatus::Keys(keys),
+            Err(error) => ScanStatus::Failed(error),
+        });
+        self.remotes.version += 1;
+        true
+    }
+
+    pub fn apply_ssh_trusted(&mut self, request: u64, result: Result<(), NetError>) -> bool {
+        if request != self.remotes.scan_request {
+            return false;
+        }
+        match result {
+            Ok(()) => {
+                self.notice = Some("Hôte enregistré dans known_hosts.".to_owned());
+                self.remote_check();
+            }
+            Err(error) => {
+                if let Some(check) = self.remotes.check.as_mut() {
+                    check.scan = Some(ScanStatus::Failed(error));
+                }
             }
         }
         self.remotes.version += 1;

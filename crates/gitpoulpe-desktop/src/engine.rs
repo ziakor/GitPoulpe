@@ -12,8 +12,9 @@ use gitpoulpe_core::{
 };
 use gitpoulpe_git::{
     BranchError, CacheConfig, Cancel, DeleteMode, DiffCache, DiffError, DiffReader, Git,
-    HistoryError, HistoryStream, Identity, IdentityError, IgnoreError, IgnoredList, InspectError,
-    MAX_WAIT, QUIET_PERIOD, RepoWatcher, Signal, SigningCheck, check_signing, coalesce,
+    HistoryError, HistoryStream, HostKey, Identity, IdentityError, IgnoreError, IgnoredList,
+    InspectError, MAX_WAIT, NetError, QUIET_PERIOD, RemoteCheck, RepoWatcher, Signal, SigningCheck,
+    check_signing, coalesce,
 };
 use rune::Waker;
 use std::time::Duration;
@@ -173,6 +174,22 @@ pub enum Command {
         request: u64,
         name: String,
     },
+    RemoteCheck {
+        request: u64,
+        name: String,
+    },
+    SshScan {
+        request: u64,
+        host: String,
+        port: Option<u16>,
+    },
+    SshTrust {
+        request: u64,
+        host: String,
+        port: Option<u16>,
+        fingerprint: String,
+    },
+    NetCancel,
     InitPrepare {
         request: u64,
         path: PathBuf,
@@ -333,6 +350,19 @@ pub enum Event {
         name: String,
         result: Result<RemoteImpact, String>,
     },
+    RemoteChecked {
+        request: u64,
+        name: String,
+        result: Result<RemoteCheck, NetError>,
+    },
+    SshScanned {
+        request: u64,
+        result: Result<Vec<HostKey>, NetError>,
+    },
+    SshTrusted {
+        request: u64,
+        result: Result<(), NetError>,
+    },
     InitPrepared {
         request: u64,
         branch: String,
@@ -375,7 +405,7 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn start(events: Sender<Event>, waker: WakerSlot) -> std::io::Result<Self> {
+    pub fn start(events: Sender<Event>, waker: WakerSlot, git: Git) -> std::io::Result<Self> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .thread_name("gitpoulpe-engine")
@@ -385,7 +415,7 @@ impl Engine {
         std::thread::Builder::new()
             .name("gitpoulpe-engine-main".to_owned())
             .spawn(move || {
-                let acknowledge = runtime.block_on(run(receiver, events, waker));
+                let acknowledge = runtime.block_on(run(receiver, events, waker, git));
                 runtime.shutdown_timeout(SHUTDOWN_WAIT);
                 if let Some(acknowledge) = acknowledge {
                     let _ = acknowledge.send(());
@@ -466,8 +496,8 @@ async fn run(
     mut receiver: UnboundedReceiver<Command>,
     events: Sender<Event>,
     waker: WakerSlot,
+    git: Git,
 ) -> Option<std::sync::mpsc::Sender<()>> {
-    let git = Git::new();
     let cache = match open_cache() {
         Ok(cache) => cache,
         Err(error) => {
@@ -491,6 +521,7 @@ async fn run(
     let mut history: Option<HistoryHandle> = None;
     let mut search: Option<HistoryHandle> = None;
     let mut watcher: Option<RepoWatcher> = None;
+    let mut net_cancel: Option<Cancel> = None;
     let mut signals: Option<UnboundedReceiver<Signal>> = None;
     let watched = Arc::new(std::sync::Mutex::new(HashSet::new()));
     let mut shutdown = None;
@@ -645,6 +676,53 @@ async fn run(
                                 result,
                             });
                         });
+                    }
+                    Command::RemoteCheck { request, name } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let cancel = Cancel::new();
+                        net_cancel = Some(cancel.clone());
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .check_remote(&current.info, &name, &cancel)
+                                .await;
+                            shared.emit(Event::RemoteChecked {
+                                request,
+                                name,
+                                result,
+                            });
+                        });
+                    }
+                    Command::SshScan {
+                        request,
+                        host,
+                        port,
+                    } => {
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared.git.scan_ssh_host(&host, port).await;
+                            shared.emit(Event::SshScanned { request, result });
+                        });
+                    }
+                    Command::SshTrust {
+                        request,
+                        host,
+                        port,
+                        fingerprint,
+                    } => {
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared.git.trust_ssh_host(&host, port, &fingerprint).await;
+                            shared.emit(Event::SshTrusted { request, result });
+                        });
+                    }
+                    Command::NetCancel => {
+                        if let Some(cancel) = net_cancel.take() {
+                            cancel.cancel();
+                        }
                     }
                     Command::InitPrepare { request, path } => {
                         let shared = shared.clone();

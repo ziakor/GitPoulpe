@@ -71,6 +71,14 @@ Git runs as an external program, without a shell, with the repository's filters,
 - URLs that can carry a secret are shown masked, never prefilled in a field and never repeated in a recovery command: any user part on `http`, `https` or `git` (a token is often used as the user name), a password on `ssh://`, and any query string or fragment. The new URL has to be typed in full.
 - Changes are written to the per-repository journal, with credentials masked.
 
+## Access over SSH
+
+- "Tester l'accès" on a remote runs a read (`git ls-remote`) with your existing SSH setup and reports the branches, tags and `HEAD` it found. The operation can be cancelled; Git and every process it started (ssh, helpers) are stopped together.
+- GitPoulpe uses your `ssh` configuration, agent and keys as they are. It adds only `BatchMode=yes` and connection time-outs to the SSH command (your own `GIT_SSH_COMMAND` or global `core.sshCommand` is the base); a key protected by a passphrase therefore has to be loaded in the agent (`ssh-add`). Host verification is never disabled.
+- An unknown host is a decision: the fingerprints it presents are read with `ssh-keyscan`, shown, and written to `known_hosts` only when you accept one of them. The key is scanned again at that moment and must still match, and only a plain `host key` line for that exact host is accepted. A host that is already known but presents another key is refused with no way to accept it from GitPoulpe; the `ssh-keygen -R` command is shown for you to run if the change is legitimate.
+- A refused access says whether an SSH agent was reachable. Private keys are never read, copied, stored or logged by GitPoulpe, and an SSH command written in a repository's own configuration (`core.sshCommand`) is ignored for network operations.
+- Network operations only allow the `https`, `http`, `ssh`, `git` and `file` transports, and never the `ext::` helpers.
+
 ## Committing
 
 - Write a message in the box at the bottom of the file list, then "Créer le commit" or Ctrl+Enter. The commit contains exactly the staged content shown, with the effective identity of the repository's profile (or your Git configuration when it has none). The box also shows who will be the author and whether the profile's signing key is usable.

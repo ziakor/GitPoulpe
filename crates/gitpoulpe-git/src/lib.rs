@@ -10,10 +10,12 @@ mod identity;
 mod ignore;
 mod init;
 mod inspect;
+mod net;
 mod open;
 mod parse;
 mod process;
 mod remote;
+mod ssh;
 mod stage;
 mod status;
 mod tag;
@@ -33,8 +35,10 @@ pub use identity::{
 pub use ignore::{IgnoreError, IgnoredList, MAX_IGNORED_ENTRIES};
 pub use init::{DEFAULT_BRANCH, InitError, Initialized};
 pub use inspect::InspectError;
+pub use net::{NetError, NetProgress, SshTools, parse_progress, remote_host};
 pub use parse::{ParseError, StatusParser};
 pub use remote::{RemoteError, validate_remote_url};
+pub use ssh::{HostKey, RemoteCheck};
 pub use stage::stamp_of;
 pub use tag::TagError;
 pub use watch::{MAX_WAIT, QUIET_PERIOD, RepoWatcher, Signal, WatchError, coalesce, is_relevant};
@@ -45,6 +49,7 @@ use std::ffi::OsString;
 pub struct Git {
     program: OsString,
     env: Vec<(OsString, OsString)>,
+    pub(crate) ssh: SshTools,
 }
 
 impl Git {
@@ -52,6 +57,7 @@ impl Git {
         Self {
             program: OsString::from("git"),
             env: Vec::new(),
+            ssh: SshTools::default(),
         }
     }
 
@@ -59,6 +65,7 @@ impl Git {
         Self {
             program: program.into(),
             env: Vec::new(),
+            ssh: SshTools::default(),
         }
     }
 

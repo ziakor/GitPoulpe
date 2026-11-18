@@ -1,8 +1,10 @@
 use std::borrow::Cow;
 
 use gitpoulpe_core::mask_url;
+use gitpoulpe_git::NetError;
 use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text};
 
+use crate::remotes::{CheckState, CheckStatus, ScanStatus};
 use crate::state::State;
 use crate::theme;
 use crate::widgets::{action, field};
@@ -60,6 +62,128 @@ fn remote_row(s: &State, index: usize) -> El {
 fn urls_line(label: &str, urls: &[String]) -> String {
     let shown: Vec<String> = urls.iter().map(|u| mask_url(u)).collect();
     format!("{label} : {}", shown.join(", "))
+}
+
+fn check_section(s: &State, mut panel: El, remote_name: &str) -> El {
+    let p = s.palette;
+    let state: Option<&CheckState> = s.remotes.check.as_ref().filter(|c| c.name == remote_name);
+    let running = matches!(state.map(|c| &c.status), Some(CheckStatus::Running));
+    panel = panel.child(el().h(1.0).w_full().fill(p.line));
+    if running {
+        return panel
+            .child(
+                text("Test de l'accès en cours…".to_owned())
+                    .key("rm-check-running")
+                    .font(theme::SMALL)
+                    .color(p.muted),
+            )
+            .child(
+                action(s, "rm-check-cancel", "Annuler le test", false)
+                    .on_press(|s: &mut State| s.cancel_remote_check()),
+            );
+    }
+    panel = panel.child(
+        action(s, "rm-check", "Tester l'accès", false).on_press(|s: &mut State| s.remote_check()),
+    );
+    let Some(state) = state else {
+        return panel;
+    };
+    match &state.status {
+        CheckStatus::Running => panel,
+        CheckStatus::Reachable(check) => panel.child(
+            text(format!(
+                "Accès réussi : {} branche(s), {} tag(s){}.",
+                check.branches,
+                check.tags,
+                check
+                    .head
+                    .as_deref()
+                    .map_or_else(String::new, |h| format!(", HEAD sur {h}"))
+            ))
+            .key("rm-check-ok")
+            .font(theme::SMALL)
+            .color(p.text)
+            .wrap(),
+        ),
+        CheckStatus::Failed(error) => {
+            panel = panel.child(
+                text(format!("Accès impossible : {error}"))
+                    .key("rm-check-error")
+                    .font(theme::SMALL)
+                    .color(p.red)
+                    .wrap(),
+            );
+            match error {
+                NetError::SshHostUnknown { .. } => host_decision(s, panel, state),
+                NetError::SshHostChanged { host } if !host.is_empty() => panel.child(
+                    text(format!(
+                        "Si ce changement est légitime, retirez l'ancienne entrée vous-même puis réessayez : ssh-keygen -R {}",
+                        crate::shell::quote(host)
+                    ))
+                    .key("rm-host-changed")
+                    .font(theme::SMALL)
+                    .color(p.muted)
+                    .wrap()
+                    .selectable(true),
+                ),
+                _ => panel,
+            }
+        }
+    }
+}
+
+fn host_decision(s: &State, mut panel: El, state: &CheckState) -> El {
+    let p = s.palette;
+    match &state.scan {
+        None => panel.child(
+            action(s, "rm-scan", "Voir l'empreinte de l'hôte", false)
+                .on_press(|s: &mut State| s.remote_scan_host()),
+        ),
+        Some(ScanStatus::Scanning) => panel.child(
+            text("Lecture de l'empreinte…".to_owned())
+                .font(theme::SMALL)
+                .color(p.muted),
+        ),
+        Some(ScanStatus::Failed(error)) => panel.child(
+            text(format!("Empreinte illisible : {error}"))
+                .key("rm-scan-error")
+                .font(theme::SMALL)
+                .color(p.red)
+                .wrap(),
+        ),
+        Some(ScanStatus::Keys(keys)) => {
+            panel = panel.child(
+                text(
+                    "Comparez ces empreintes avec celles publiées par le fournisseur avant d'accepter."
+                        .to_owned(),
+                )
+                .font(theme::SMALL)
+                .color(p.muted)
+                .wrap(),
+            );
+            for (index, key) in keys.iter().enumerate() {
+                panel = panel
+                    .child(
+                        text(format!("{} {}", key.key_type, key.fingerprint))
+                            .key(format!("rm-fp{index}"))
+                            .font(theme::PATH_SMALL)
+                            .color(p.text)
+                            .wrap()
+                            .selectable(true),
+                    )
+                    .child(
+                        action(
+                            s,
+                            &format!("rm-trust{index}"),
+                            "Faire confiance à cette empreinte",
+                            false,
+                        )
+                        .on_press(move |s: &mut State| s.remote_trust_host(index)),
+                    );
+            }
+            panel
+        }
+    }
 }
 
 fn selected_detail(s: &State, mut panel: El) -> El {
@@ -161,6 +285,7 @@ fn selected_detail(s: &State, mut panel: El) -> El {
             action(s, "rm-rename-save", "Renommer", false)
                 .on_press(|s: &mut State| s.remote_rename()),
         );
+    panel = check_section(s, panel, &remote.name);
     match &s.remotes.confirm_remove {
         Some((name, impact)) if *name == remote.name => {
             let consequence = match impact {

@@ -50,6 +50,11 @@ fn idle(s: &State) -> bool {
 }
 
 fn click(rt: &mut Runtime<State>, key: &str) {
+    if key.starts_with("rm-") && !key.starts_with("rm-row") {
+        let target = key.to_owned();
+        rt.update(move |_, tx| tx.scroll_into_view_in("rm-panel", target));
+        step(rt);
+    }
     let rect = rect_of(rt, key).unwrap_or_else(|| panic!("{key} is not on screen"));
     click_at(rt, rect[0] + 10.0, rect[1] + rect[3] / 2.0, false);
 }
@@ -344,4 +349,196 @@ fn a_token_used_as_the_user_name_is_masked_everywhere_too() {
     settle(&mut rt, |s| idle(s) && s.remotes.remotes.len() == 2);
     let notice = rt.state.notice.clone().unwrap_or_default();
     assert!(!notice.contains("t0kenvalue"), "{notice}");
+}
+
+mod access {
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use gitpoulpe_git::{Git, SshTools};
+
+    use super::*;
+
+    const FAKE_SSH: &str = include_str!("../../../gitpoulpe-git/tests/common/fake_ssh.sh");
+
+    struct Net {
+        dir: tempfile::TempDir,
+        repo: tempfile::TempDir,
+        _source: tempfile::TempDir,
+    }
+
+    impl Net {
+        fn path(&self, name: &str) -> std::path::PathBuf {
+            self.dir.path().join(name)
+        }
+        fn mode(&self, mode: &str) {
+            std::fs::write(self.path("mode"), mode).unwrap();
+        }
+    }
+
+    fn executable(path: &Path, body: &str) {
+        std::fs::write(path, body).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    fn setup() -> (Net, Runtime<State>) {
+        let dir = tempfile::tempdir().unwrap();
+        executable(&dir.path().join("fakessh"), FAKE_SSH);
+        std::fs::write(dir.path().join("mode"), "ok").unwrap();
+        let source = tempfile::tempdir().unwrap();
+        git(source.path(), &["init", "-q", "-b", "main"]);
+        std::fs::write(source.path().join("a.txt"), "one\n").unwrap();
+        git(source.path(), &["add", "-A"]);
+        git(source.path(), &["commit", "-q", "-m", "first"]);
+        git(source.path(), &["branch", "dev"]);
+        git(source.path(), &["tag", "v1"]);
+        let repo = tempfile::tempdir().unwrap();
+        git(repo.path(), &["init", "-q", "-b", "main"]);
+        std::fs::write(repo.path().join("b.txt"), "x\n").unwrap();
+        git(repo.path(), &["add", "-A"]);
+        git(repo.path(), &["commit", "-q", "-m", "local"]);
+        let url = format!("ssh://git@fakehost{}", source.path().display());
+        git(repo.path(), &["remote", "add", "origin", &url]);
+        let engine_git = Git::new()
+            .with_env("GIT_SSH_COMMAND", dir.path().join("fakessh").as_os_str())
+            .with_env("FAKESSH_DIR", dir.path().as_os_str())
+            .with_ssh_tools(SshTools {
+                keyscan: dir.path().join("fake-keyscan").into(),
+                keygen: "ssh-keygen".into(),
+                known_hosts: Some(dir.path().join("known_hosts")),
+            });
+        let mut state = State::new(None, rune::prefs::Prefs::memory());
+        state.engine_git = Some(engine_git);
+        state.setup(Arc::new(|| {}));
+        state.open_blocking(repo.path().to_path_buf(), Duration::from_secs(20));
+        let mut rt = runtime(state);
+        rt.on_key = Some(crate::keys::on_key);
+        click(&mut rt, "branch-name");
+        settle(&mut rt, |s| s.branches.open && !s.branches.loading);
+        click(&mut rt, "branches-remotes");
+        settle(&mut rt, |s| s.remotes.open && idle(s));
+        pick(&mut rt, "origin");
+        (
+            Net {
+                dir,
+                repo,
+                _source: source,
+            },
+            rt,
+        )
+    }
+
+    fn finished(s: &State) -> bool {
+        s.remotes
+            .check
+            .as_ref()
+            .is_some_and(|c| !matches!(c.status, crate::remotes::CheckStatus::Running))
+    }
+
+    #[test]
+    fn an_access_test_reads_the_remote_and_reports_what_it_found() {
+        let (_net, mut rt) = setup();
+        click(&mut rt, "rm-check");
+        settle(&mut rt, finished);
+        assert!(shows(
+            &rt,
+            "Accès réussi : 2 branche(s), 1 tag(s), HEAD sur main"
+        ));
+    }
+
+    #[test]
+    fn an_unknown_host_shows_its_fingerprint_and_is_trusted_only_on_explicit_request() {
+        let (net, mut rt) = setup();
+        net.mode("unknown");
+        click(&mut rt, "rm-check");
+        settle(&mut rt, finished);
+        assert!(shows(&rt, "hôte SSH inconnu"));
+        let key = std::process::Command::new("ssh-keygen")
+            .args(["-q", "-t", "ed25519", "-N", "", "-C", "", "-f"])
+            .arg(net.path("hostkey"))
+            .status()
+            .unwrap();
+        assert!(key.success());
+        let public = std::fs::read_to_string(net.path("hostkey.pub")).unwrap();
+        let mut parts = public.split_whitespace();
+        let line = format!(
+            "fakehost {} {}",
+            parts.next().unwrap(),
+            parts.next().unwrap()
+        );
+        executable(
+            &net.path("fake-keyscan"),
+            &format!("#!/bin/sh\ncat <<'EOF'\n{line}\nEOF\n"),
+        );
+        click(&mut rt, "rm-scan");
+        settle(&mut rt, |s| {
+            matches!(
+                s.remotes.check.as_ref().and_then(|c| c.scan.as_ref()),
+                Some(crate::remotes::ScanStatus::Keys(_))
+            )
+        });
+        assert!(shows(&rt, "SHA256:"));
+        assert!(!net.path("known_hosts").exists());
+        net.mode("ok");
+        click(&mut rt, "rm-trust0");
+        settle(&mut rt, |s| {
+            finished(s)
+                && matches!(
+                    s.remotes.check.as_ref().map(|c| &c.status),
+                    Some(crate::remotes::CheckStatus::Reachable(_))
+                )
+        });
+        assert_eq!(
+            std::fs::read_to_string(net.path("known_hosts")).unwrap(),
+            format!("{line}\n")
+        );
+        assert!(shows(&rt, "Accès réussi"));
+    }
+
+    #[test]
+    fn a_changed_host_offers_no_way_to_trust_it() {
+        let (net, mut rt) = setup();
+        net.mode("changed");
+        click(&mut rt, "rm-check");
+        settle(&mut rt, finished);
+        assert!(shows(&rt, "a changé"));
+        assert!(shows(&rt, "ssh-keygen -R 'fakehost'"));
+        assert!(rect_of(&rt, "rm-scan").is_none());
+        assert!(rect_of(&rt, "rm-trust0").is_none());
+    }
+
+    #[test]
+    fn a_running_test_can_be_cancelled_and_leaves_no_process_behind() {
+        let (net, mut rt) = setup();
+        net.mode("hang");
+        click(&mut rt, "rm-check");
+        for _ in 0..30 {
+            step(&mut rt);
+            if net.path("sleeper").exists() {
+                break;
+            }
+        }
+        assert!(net.path("sleeper").exists());
+        assert!(shows(&rt, "Test de l'accès en cours"));
+        click(&mut rt, "rm-check-cancel");
+        settle(&mut rt, finished);
+        assert!(shows(&rt, "opération annulée"));
+        let pid = std::fs::read_to_string(net.path("sleeper"))
+            .unwrap()
+            .trim()
+            .to_owned();
+        let mut alive = true;
+        for _ in 0..60 {
+            alive = std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                .map(|s| !s.contains(") Z"))
+                .unwrap_or(false);
+            if !alive {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(!alive);
+        let _ = &net.repo;
+    }
 }

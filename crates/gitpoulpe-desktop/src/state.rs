@@ -16,7 +16,7 @@ use gitpoulpe_core::{
     HunkSpec, LineSelection, Refusal, SplitIndex, StageOutcome, StageTarget, StatusSnapshot,
     WriteError, WriteJob, display_label,
 };
-use gitpoulpe_git::SigningCheck;
+use gitpoulpe_git::{Git, SigningCheck};
 use rune::prefs::Prefs;
 use rune::{Live, TextEdit, Tx, Waker};
 
@@ -187,6 +187,7 @@ pub struct State {
     pub tags: crate::tags::TagsState,
     pub remotes: crate::remotes::RemotesState,
     pub init: crate::initialize::InitState,
+    pub engine_git: Option<Git>,
     pub form: ProfileForm,
     identity_request: u64,
     signing_request: u64,
@@ -305,6 +306,7 @@ impl State {
             tags: crate::tags::TagsState::default(),
             remotes: crate::remotes::RemotesState::default(),
             init: crate::initialize::InitState::default(),
+            engine_git: None,
             form: ProfileForm::default(),
             identity_request: 0,
             signing_request: 0,
@@ -335,7 +337,12 @@ impl State {
     pub fn setup(&mut self, waker: Waker) {
         *self.waker.lock().unwrap() = Some(waker);
         if self.engine.is_none() {
-            self.engine = Engine::start(self.event_sender.clone(), self.waker.clone()).ok();
+            self.engine = Engine::start(
+                self.event_sender.clone(),
+                self.waker.clone(),
+                self.engine_git.clone().unwrap_or_default(),
+            )
+            .ok();
         }
         if let Some(path) = self.initial_path.take() {
             self.open_path(path);
@@ -378,7 +385,12 @@ impl State {
 
     pub fn open_path(&mut self, path: PathBuf) {
         if self.engine.is_none() {
-            self.engine = Engine::start(self.event_sender.clone(), self.waker.clone()).ok();
+            self.engine = Engine::start(
+                self.event_sender.clone(),
+                self.waker.clone(),
+                self.engine_git.clone().unwrap_or_default(),
+            )
+            .ok();
         }
         self.request += 1;
         self.screen = Screen::Opening(path.clone());
@@ -720,6 +732,13 @@ impl State {
                 name,
                 result,
             } => self.apply_remote_impacted(request, name, result),
+            Event::RemoteChecked {
+                request,
+                name,
+                result,
+            } => self.apply_remote_checked(request, name, result),
+            Event::SshScanned { request, result } => self.apply_ssh_scanned(request, result),
+            Event::SshTrusted { request, result } => self.apply_ssh_trusted(request, result),
             Event::TagsListed { request, result } => self.apply_tags_listed(request, result),
             Event::TagDone { request, result } => self.apply_tag_done(request, result),
             Event::BranchesListed { request, result } => {
