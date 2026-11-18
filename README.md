@@ -195,6 +195,16 @@ The **Submodules** button on the branches screen lists every submodule, nested o
 - URLs are shown with credentials masked. URLs using `ext::` or `fd::` transports, or starting with a dash, are refused and never handed to Git.
 - **Open** loads the submodule as a repository of its own.
 
+## Gitflow
+
+The **Gitflow** button on the branches screen manages feature, release and hotfix branches on top of the regular branch, merge and tag operations.
+
+- The effective convention is always shown: main and develop branch names, the feature, release and hotfix prefixes and the version-tag prefix (`gitflow.*` keys, the same ones git-flow-avh uses). Until you save it, the defaults are only displayed and nothing is written to the repository. Saving lists what will be written and, if the develop branch is missing, announces that it will be created from the main branch.
+- Starting and finishing list every step before anything runs. Starting a feature or release branches from develop, a hotfix from main. Finishing merges with a merge commit (never a fast-forward), tags releases and hotfixes with an annotated tag, merges into develop and deletes the finished branch.
+- The announced steps are checked again right before running; if the repository changed in between, nothing runs. Tracked local changes, an operation already in progress and a tag that already points elsewhere (it is never moved) stop the flow before any step.
+- A merge conflict stops the flow and opens the conflict resolution screen. After resolving it, finishing the branch again skips the steps already done and resumes with the rest.
+- Flow steps are not recorded in the undo history; the reflog and the recovery markers remain available.
+
 ## Committing
 
 - Write a message in the box at the bottom of the file list, then "Créer le commit" or Ctrl+Enter. The commit contains exactly the staged content shown, with the effective identity of the repository's profile (or your Git configuration when it has none). The box also shows who will be the author and whether the profile's signing key is usable.

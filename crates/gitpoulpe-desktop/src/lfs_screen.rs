@@ -33,6 +33,7 @@ impl State {
         self.close_worktrees();
         self.close_hooks();
         self.close_submodules();
+        self.close_gitflow();
         self.profiles_open = false;
         self.lfs.open = true;
         self.reload_lfs();

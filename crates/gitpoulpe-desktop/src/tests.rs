@@ -13,6 +13,7 @@ mod branching;
 mod cloning;
 mod committing;
 mod conflicting;
+mod gitflowing;
 mod history;
 mod hooking;
 mod ignoring;

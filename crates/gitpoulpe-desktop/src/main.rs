@@ -5,6 +5,8 @@ mod cloning_view;
 mod conflicts;
 mod conflicts_view;
 mod engine;
+mod gitflow_screen;
+mod gitflow_screen_view;
 mod history_state;
 mod history_view;
 mod hook_screen;

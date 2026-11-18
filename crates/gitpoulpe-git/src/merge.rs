@@ -106,7 +106,10 @@ impl Git {
         }
     }
 
-    async fn tracked_changes(&self, info: &SessionInfo) -> Result<Vec<PathBuf>, MergeError> {
+    pub(crate) async fn tracked_changes(
+        &self,
+        info: &SessionInfo,
+    ) -> Result<Vec<PathBuf>, MergeError> {
         let out = self
             .exec_ok(
                 info,

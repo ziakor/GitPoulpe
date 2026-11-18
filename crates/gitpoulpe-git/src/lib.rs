@@ -9,6 +9,7 @@ mod diff;
 mod diff_parse;
 mod exec;
 mod fetch;
+mod gitflow;
 mod history;
 mod hooks;
 mod identity;
@@ -48,6 +49,7 @@ pub use diff::{DiffDocument, DiffError, DiffReader};
 pub use diff_parse::{DiffParseError, DiffParser, DiffSummary};
 pub use exec::ExecError;
 pub use fetch::{FetchOutcome, RefUpdate};
+pub use gitflow::GitflowError;
 pub use history::{HistoryError, HistoryStream};
 pub use hooks::{HookError, KNOWN_HOOKS};
 pub use identity::{

@@ -7,14 +7,15 @@ use std::sync::{Arc, Mutex};
 use gitpoulpe_core::{
     AmendInfo, AmendRequest, Branch, BranchLoss, ChangeEntry, Commit, CommitDetail, CommitOutcome,
     CommitRange, CommitRequest, ConflictFile, ConflictVersions, DiffLine, DiffSide, DocumentMeta,
-    EmptyPolicy, Generation, HooksView, IgnoreReason, IgnoreScope, LfsFile, LfsStatus, LfsTransfer,
-    MergeMode, MergeOutcome, MergePreview, OpenError, Operation, OperationKind, PlanItem, Profile,
-    PullOutcome, PullPreview, PullStrategy, PushMode, PushOutcome, PushPreview, RangeError,
-    ReadError, RebaseOutcome, RebasePlanInfo, ReflogEntry, ReflogInspect, Remote, RemoteImpact,
-    ResetMode, ResetOutcome, ResetPreview, Resolution, SequenceKind, SequenceOutcome,
-    SequencePreview, SessionId, SessionInfo, StageOutcome, Stash, StashApplied, StashDetail,
-    StashScope, StatusSnapshot, Submodule, Tag, UndoDirection, UndoRecord, Worktree,
-    WorktreeRemoval, WriteError, WriteJob, mask_url,
+    EmptyPolicy, FlowKind, FlowOutcome, FlowPlan, Generation, GitflowConfig, GitflowView,
+    HooksView, IgnoreReason, IgnoreScope, LfsFile, LfsStatus, LfsTransfer, MergeMode, MergeOutcome,
+    MergePreview, OpenError, Operation, OperationKind, PlanItem, Profile, PullOutcome, PullPreview,
+    PullStrategy, PushMode, PushOutcome, PushPreview, RangeError, ReadError, RebaseOutcome,
+    RebasePlanInfo, ReflogEntry, ReflogInspect, Remote, RemoteImpact, ResetMode, ResetOutcome,
+    ResetPreview, Resolution, SequenceKind, SequenceOutcome, SequencePreview, SessionId,
+    SessionInfo, StageOutcome, Stash, StashApplied, StashDetail, StashScope, StatusSnapshot,
+    Submodule, Tag, UndoDirection, UndoRecord, Worktree, WorktreeRemoval, WriteError, WriteJob,
+    mask_url,
 };
 use gitpoulpe_git::{
     BranchChoice, BranchError, CacheConfig, Cancel, CloneError, ConflictError, ConflictSide,
@@ -435,6 +436,26 @@ pub enum Command {
         kind: LfsTransfer,
         branch: String,
     },
+    GitflowLoad {
+        request: u64,
+    },
+    GitflowPlan {
+        request: u64,
+        kind: FlowKind,
+        finish: bool,
+        name: String,
+    },
+    GitflowRun {
+        request: u64,
+        plan: Box<FlowPlan>,
+        finish: bool,
+        profile: Option<Box<Profile>>,
+    },
+    GitflowSave {
+        request: u64,
+        config: Box<GitflowConfig>,
+        create_develop: bool,
+    },
     SubmoduleList {
         request: u64,
     },
@@ -763,6 +784,22 @@ pub enum Event {
     LfsFinished {
         request: u64,
         result: Result<(), String>,
+    },
+    GitflowLoaded {
+        request: u64,
+        result: Result<Box<GitflowView>, String>,
+    },
+    GitflowPlanned {
+        request: u64,
+        result: Result<Box<FlowPlan>, String>,
+    },
+    GitflowFinished {
+        request: u64,
+        result: Result<FlowOutcome, String>,
+    },
+    GitflowSaved {
+        request: u64,
+        result: Result<Vec<String>, String>,
     },
     SubmodulesListed {
         request: u64,
@@ -1870,6 +1907,80 @@ async fn run(
                                 .await
                                 .map_err(|e| e.to_string());
                             shared.emit(Event::LfsFinished { request, result });
+                        });
+                    }
+                    Command::GitflowLoad { request } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .gitflow_view(&current.info)
+                                .await
+                                .map(Box::new)
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::GitflowLoaded { request, result });
+                        });
+                    }
+                    Command::GitflowPlan {
+                        request,
+                        kind,
+                        finish,
+                        name,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .gitflow_plan(&current.info, kind, finish, &name)
+                                .await
+                                .map(Box::new)
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::GitflowPlanned { request, result });
+                        });
+                    }
+                    Command::GitflowRun {
+                        request,
+                        plan,
+                        finish,
+                        profile,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let _guard = current.writer.lock().await;
+                            let result = shared
+                                .git
+                                .gitflow_run(&current.info, &plan, finish, profile.as_deref())
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::GitflowFinished { request, result });
+                        });
+                    }
+                    Command::GitflowSave {
+                        request,
+                        config,
+                        create_develop,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let _guard = current.writer.lock().await;
+                            let result = shared
+                                .git
+                                .gitflow_save(&current.info, &config, create_develop)
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::GitflowSaved { request, result });
                         });
                     }
                     Command::SubmoduleList { request } => {

@@ -192,6 +192,7 @@ pub struct State {
     pub hooks: crate::hook_screen::HooksState,
     pub lfs: crate::lfs_screen::LfsState,
     pub submodules: crate::submodule_screen::SubmodulesState,
+    pub gitflow: crate::gitflow_screen::GitflowState,
     pub worktrees: crate::worktrees::WorktreesState,
     pub undo_screen: crate::undos::UndoScreen,
     pub resetting: crate::resetting::ResetSlot,
@@ -327,6 +328,7 @@ impl State {
             hooks: crate::hook_screen::HooksState::default(),
             lfs: crate::lfs_screen::LfsState::default(),
             submodules: crate::submodule_screen::SubmodulesState::default(),
+            gitflow: crate::gitflow_screen::GitflowState::default(),
             worktrees: crate::worktrees::WorktreesState::default(),
             undo_screen: crate::undos::UndoScreen::default(),
             resetting: crate::resetting::ResetSlot::default(),
@@ -620,6 +622,7 @@ impl State {
                 self.hooks = crate::hook_screen::HooksState::default();
                 self.lfs = crate::lfs_screen::LfsState::default();
                 self.submodules = crate::submodule_screen::SubmodulesState::default();
+                self.gitflow = crate::gitflow_screen::GitflowState::default();
                 self.worktrees = crate::worktrees::WorktreesState::default();
                 self.undo_screen = crate::undos::UndoScreen::default();
                 self.resetting = crate::resetting::ResetSlot::default();
@@ -894,6 +897,14 @@ impl State {
                 phase,
                 percent,
             } => self.apply_submodule_progress(request, phase, percent),
+            Event::GitflowLoaded { request, result } => self.apply_gitflow_loaded(request, result),
+            Event::GitflowPlanned { request, result } => {
+                self.apply_gitflow_planned(request, result)
+            }
+            Event::GitflowFinished { request, result } => {
+                self.apply_gitflow_finished(request, result)
+            }
+            Event::GitflowSaved { request, result } => self.apply_gitflow_saved(request, result),
             Event::SubmoduleFinished { request, result } => {
                 self.apply_submodule_finished(request, result)
             }
@@ -1941,6 +1952,7 @@ impl State {
         self.close_hooks();
         self.close_lfs();
         self.close_submodules();
+        self.close_gitflow();
         let selected = self
             .active_profile()
             .or_else(|| self.book.profiles.first())
@@ -2303,6 +2315,7 @@ impl State {
         self.close_hooks();
         self.close_lfs();
         self.close_submodules();
+        self.close_gitflow();
         self.start_history();
     }
 
@@ -2440,6 +2453,7 @@ impl State {
         self.close_hooks();
         self.close_lfs();
         self.close_submodules();
+        self.close_gitflow();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::CommitInspect {

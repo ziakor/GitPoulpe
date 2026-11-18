@@ -127,6 +127,7 @@ impl State {
         self.close_hooks();
         self.close_lfs();
         self.close_submodules();
+        self.close_gitflow();
         self.profiles_open = false;
         self.remotes.open = true;
         self.reload_remotes();

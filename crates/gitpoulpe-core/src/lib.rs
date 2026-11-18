@@ -2,6 +2,7 @@ mod branch;
 mod commit;
 mod diff;
 mod error;
+mod gitflow;
 mod history;
 mod hooks;
 mod identity;
@@ -37,6 +38,9 @@ pub use diff::{
     FileRef, Hunk, RangeData, RangeError,
 };
 pub use error::{Diagnostic, OpenError, ReadError};
+pub use gitflow::{
+    FlowBranch, FlowKind, FlowOutcome, FlowPlan, FlowStep, GitflowConfig, GitflowView,
+};
 pub use history::{Commit, CommitDetail, GraphLayout, GraphRow, glyphs};
 pub use hooks::{HookInfo, HooksView};
 pub use identity::{Generation, RepoId, RequestId, SessionId};

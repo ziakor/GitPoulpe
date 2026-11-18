@@ -82,6 +82,7 @@ impl State {
         self.close_hooks();
         self.close_lfs();
         self.close_submodules();
+        self.close_gitflow();
         self.profiles_open = false;
         self.branches.open = true;
         self.reload_branches();
