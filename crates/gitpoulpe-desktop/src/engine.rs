@@ -9,9 +9,9 @@ use gitpoulpe_core::{
     CommitRange, CommitRequest, ConflictFile, ConflictVersions, DiffLine, DiffSide, DocumentMeta,
     Generation, IgnoreReason, IgnoreScope, MergeMode, MergeOutcome, MergePreview, OpenError,
     Operation, OperationKind, Profile, PushMode, PushOutcome, PushPreview, RangeError, ReadError,
-    ReflogEntry, ReflogInspect, Remote, RemoteImpact, Resolution, SessionId, SessionInfo,
-    StageOutcome, Stash, StashApplied, StashDetail, StashScope, StatusSnapshot, Tag, WriteError,
-    WriteJob, mask_url,
+    ReflogEntry, ReflogInspect, Remote, RemoteImpact, ResetMode, ResetOutcome, ResetPreview,
+    Resolution, SessionId, SessionInfo, StageOutcome, Stash, StashApplied, StashDetail, StashScope,
+    StatusSnapshot, Tag, WriteError, WriteJob, mask_url,
 };
 use gitpoulpe_git::{
     BranchError, CacheConfig, Cancel, CloneError, ConflictError, ConflictSide, DeleteMode,
@@ -329,6 +329,18 @@ pub enum Command {
         oid: String,
         name: String,
     },
+    ResetPreview {
+        request: u64,
+        target: String,
+        mode: ResetMode,
+    },
+    Reset {
+        request: u64,
+        target: String,
+        mode: ResetMode,
+        expected_head: String,
+        confirmed: bool,
+    },
     NetCancel,
     InitPrepare {
         request: u64,
@@ -570,6 +582,14 @@ pub enum Event {
     ReflogRecovered {
         request: u64,
         result: Result<BranchDone, String>,
+    },
+    ResetPreviewed {
+        request: u64,
+        result: Result<Box<ResetPreview>, String>,
+    },
+    ResetFinished {
+        request: u64,
+        result: Result<ResetOutcome, String>,
     },
     CloneProgress {
         request: u64,
@@ -1305,6 +1325,46 @@ async fn run(
                                 })
                                 .map_err(|e| e.to_string());
                             shared.emit(Event::ReflogRecovered { request, result });
+                        });
+                    }
+                    Command::ResetPreview {
+                        request,
+                        target,
+                        mode,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .reset_preview(&current.info, &target, mode)
+                                .await
+                                .map(Box::new)
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::ResetPreviewed { request, result });
+                        });
+                    }
+                    Command::Reset {
+                        request,
+                        target,
+                        mode,
+                        expected_head,
+                        confirmed,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let _guard = current.writer.lock().await;
+                            let result = shared
+                                .git
+                                .reset_branch(&current.info, &target, mode, &expected_head, confirmed)
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::ResetFinished { request, result });
                         });
                     }
                     Command::NetCancel => {

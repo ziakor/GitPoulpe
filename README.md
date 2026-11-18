@@ -135,6 +135,12 @@ Git runs as an external program, without a shell, with the repository's filters,
 - "Créer une branche de récupération" gives a name to an old commit without moving or touching the current branch, the index or the working tree (an existing name is refused). An object that is no longer in the repository can be neither inspected nor recovered, and the screen says so instead of reporting a recovery. Recoveries are recorded in the per-repository journal.
 - Reflogs are local and temporary: Git eventually expires them, which is why the recovery branch is the durable mark.
 
+## Resetting a branch
+
+- On a commit of the history, "Repositionner la branche ici…" opens a preview for a `soft`, `mixed` or `hard` reset of the current branch to that commit. Each mode is described with its exact effect: `soft` only moves the branch; `mixed` also resets the index (staged files become unstaged) and keeps the files; `hard` resets the index and the tracked files. The commits that leave the branch are listed, as are the staged and unstaged files.
+- A `hard` reset that would erase unsaved changes lists those files and needs a second, explicit confirmation; the git layer refuses it without that confirmation. It refuses as well when the branch moved since the preview, when the target is not a full commit id of this repository, and during a merge, rebase, cherry-pick, revert or unresolved conflicts.
+- Before moving anything, the previous tip is pinned under `refs/gitpoulpe/recovery/<time>-<id>-head` (it survives the expiry of the reflog and garbage collection), and the tracked unsaved changes of a destructive `hard` reset are snapshotted with `git stash create` under `…-work`. Limits that the screen states: untracked files are not touched and ignored files are not saved. Resets are recorded in the per-repository journal.
+
 ## Committing
 
 - Write a message in the box at the bottom of the file list, then "Créer le commit" or Ctrl+Enter. The commit contains exactly the staged content shown, with the effective identity of the repository's profile (or your Git configuration when it has none). The box also shows who will be the author and whether the profile's signing key is usable.

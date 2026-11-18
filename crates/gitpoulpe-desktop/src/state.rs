@@ -189,6 +189,7 @@ pub struct State {
     pub init: crate::initialize::InitState,
     pub conflicts: crate::conflicts::ConflictsState,
     pub stashes: crate::stashes::StashesState,
+    pub resetting: crate::resetting::ResetSlot,
     pub reflog: crate::reflogs::ReflogState,
     pub publishing: crate::publishing::PublishSlot,
     pub operation_kind: Option<gitpoulpe_core::OperationKind>,
@@ -315,6 +316,7 @@ impl State {
             init: crate::initialize::InitState::default(),
             conflicts: crate::conflicts::ConflictsState::default(),
             stashes: crate::stashes::StashesState::default(),
+            resetting: crate::resetting::ResetSlot::default(),
             reflog: crate::reflogs::ReflogState::default(),
             publishing: crate::publishing::PublishSlot::default(),
             operation_kind: None,
@@ -599,6 +601,7 @@ impl State {
                 self.remotes = crate::remotes::RemotesState::default();
                 self.conflicts = crate::conflicts::ConflictsState::default();
                 self.stashes = crate::stashes::StashesState::default();
+                self.resetting = crate::resetting::ResetSlot::default();
                 self.reflog = crate::reflogs::ReflogState::default();
                 self.publishing = crate::publishing::PublishSlot::default();
                 self.operation_kind = None;
@@ -809,6 +812,10 @@ impl State {
             Event::ReflogRecovered { request, result } => {
                 self.apply_reflog_recovered(request, result)
             }
+            Event::ResetPreviewed { request, result } => {
+                self.apply_reset_previewed(request, result)
+            }
+            Event::ResetFinished { request, result } => self.apply_reset_finished(request, result),
             Event::SshScanned { request, result } => self.apply_ssh_scanned(request, result),
             Event::SshTrusted { request, result } => self.apply_ssh_trusted(request, result),
             Event::TagsListed { request, result } => self.apply_tags_listed(request, result),

@@ -22,6 +22,7 @@ mod profiles;
 mod publishing;
 mod reflogging;
 mod remoting;
+mod resetting;
 mod staging;
 mod stashing;
 mod tagging;

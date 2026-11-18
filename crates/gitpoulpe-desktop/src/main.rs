@@ -20,6 +20,7 @@ mod reflogs;
 mod reflogs_view;
 mod remotes;
 mod remotes_view;
+mod resetting;
 mod shell;
 mod stashes;
 mod stashes_view;

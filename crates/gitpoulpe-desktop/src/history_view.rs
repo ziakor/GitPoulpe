@@ -161,16 +161,214 @@ fn results(s: &State) -> El {
     }
 }
 
+fn reset_card(s: &State, oid: &str) -> Option<El> {
+    use gitpoulpe_core::ResetMode;
+    let p = s.palette;
+    let state = s.resetting.state.as_ref().filter(|r| r.target == oid)?;
+    let mut card = col()
+        .key("reset-card")
+        .w_full()
+        .gap(6.0)
+        .px(12.0)
+        .py(10.0)
+        .radius(3.0)
+        .border(1.0, p.line)
+        .child(
+            text("Repositionner la branche courante ici".to_owned())
+                .font(theme::BODY_STRONG)
+                .color(p.text)
+                .wrap(),
+        );
+    let modes = row()
+        .gap(6.0)
+        .child(
+            action(s, "reset-soft", "soft", state.mode == ResetMode::Soft)
+                .on_press(|s: &mut State| s.reset_set_mode(ResetMode::Soft)),
+        )
+        .child(
+            action(s, "reset-mixed", "mixed", state.mode == ResetMode::Mixed)
+                .on_press(|s: &mut State| s.reset_set_mode(ResetMode::Mixed)),
+        )
+        .child(
+            action(s, "reset-hard", "hard", state.mode == ResetMode::Hard)
+                .on_press(|s: &mut State| s.reset_set_mode(ResetMode::Hard)),
+        );
+    card = card.child(modes);
+    if let Some(done) = &state.done {
+        card = card.child(
+            text(done.clone())
+                .key("reset-done")
+                .font(theme::SMALL)
+                .color(p.text)
+                .wrap(),
+        );
+    }
+    if let Some(error) = &state.error {
+        card = card.child(
+            text(error.clone())
+                .key("reset-error")
+                .font(theme::SMALL)
+                .color(p.red)
+                .wrap(),
+        );
+    }
+    if let Some(preview) = &state.preview {
+        let branch = preview
+            .branch
+            .clone()
+            .unwrap_or_else(|| "HEAD détaché".to_owned());
+        let effect = match state.mode {
+            ResetMode::Soft => format!(
+                "soft : « {branch} » passe sur ce commit ; l'index et les fichiers ne changent pas, les commits retirés restent en changements indexés."
+            ),
+            ResetMode::Mixed => format!(
+                "mixed : « {branch} » passe sur ce commit et l'index est remis dessus ; les fichiers ne changent pas. {} fichier(s) indexé(s) redeviennent non indexés.",
+                preview.staged.len()
+            ),
+            ResetMode::Hard => format!(
+                "hard : « {branch} » passe sur ce commit, l'index et les fichiers suivis sont remis dessus. Les fichiers non suivis ne sont pas touchés."
+            ),
+        };
+        card = card.child(
+            text(effect)
+                .key("reset-effect")
+                .font(theme::SMALL)
+                .color(p.text)
+                .wrap(),
+        );
+        if preview.entering > 0 && preview.leaving.is_empty() {
+            card = card.child(
+                text(format!(
+                    "La branche avance de {} commit(s).",
+                    preview.entering
+                ))
+                .font(theme::SMALL)
+                .color(p.muted),
+            );
+        }
+        if !preview.leaving.is_empty() {
+            let list = preview
+                .leaving
+                .iter()
+                .take(8)
+                .map(|c| {
+                    format!(
+                        "{} {}",
+                        c.oid.chars().take(8).collect::<String>(),
+                        c.subject
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            let more = if preview.leaving.len() > 8 || preview.leaving_truncated {
+                "\n…"
+            } else {
+                ""
+            };
+            card = card.child(
+                text(format!(
+                    "{} commit(s) ne seront plus sur la branche :\n{list}{more}",
+                    preview.leaving.len()
+                ))
+                .key("reset-leaving")
+                .font(theme::PATH_SMALL)
+                .color(p.muted)
+                .wrap(),
+            );
+        }
+        if !preview.would_lose.is_empty() {
+            card = card.child(
+                text(format!(
+                    "Modifications non enregistrées qui seraient effacées : {}.",
+                    preview
+                        .would_lose
+                        .iter()
+                        .take(8)
+                        .map(|f| f.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))
+                .key("reset-lose")
+                .font(theme::SMALL)
+                .color(p.red)
+                .wrap(),
+            );
+        }
+        card = card.child(
+            text("Repères : l'ancien sommet est gardé sous refs/gitpoulpe/recovery et dans le reflog ; les modifications suivies non enregistrées sont sauvegardées (git stash create). Limites : les fichiers non suivis ne sont pas touchés et les fichiers ignorés ne sont pas sauvegardés.".to_owned())
+                .key("reset-limits")
+                .font(theme::SMALL)
+                .color(p.muted)
+                .wrap(),
+        );
+        if state.confirm {
+            card = card
+                .child(
+                    text("Confirmez l'effacement des modifications listées ci-dessus.".to_owned())
+                        .key("reset-confirm-text")
+                        .font(theme::SMALL)
+                        .color(p.red)
+                        .wrap(),
+                )
+                .child(
+                    row()
+                        .gap(8.0)
+                        .child(
+                            action(s, "reset-confirm", "Effacer et repositionner", true)
+                                .on_press(|s: &mut State| s.reset_run()),
+                        )
+                        .child(
+                            action(s, "reset-confirm-cancel", "Annuler", false)
+                                .on_press(|s: &mut State| s.reset_cancel_confirm()),
+                        ),
+                );
+        } else {
+            card = card.child(
+                action(
+                    s,
+                    "reset-run",
+                    if state.busy {
+                        "En cours…"
+                    } else {
+                        "Repositionner"
+                    },
+                    true,
+                )
+                .on_press(|s: &mut State| s.reset_run()),
+            );
+        }
+    } else if state.error.is_none() {
+        card = card.child(
+            text("Calcul de l'aperçu…".to_owned())
+                .font(theme::SMALL)
+                .color(p.muted),
+        );
+    }
+    Some(
+        card.child(
+            action(s, "reset-close", "Fermer", false).on_press(|s: &mut State| s.reset_close()),
+        ),
+    )
+}
+
+fn action(s: &State, key: &str, caption: &str, primary: bool) -> El {
+    crate::widgets::action(s, key, caption, primary)
+}
+
 fn detail(s: &State) -> El {
     let p = s.palette;
     let mut panel = col()
+        .key("hist-panel")
         .w(340.0)
         .h_full()
         .px(16.0)
         .py(14.0)
         .gap(8.0)
         .fill(p.panel)
-        .border(1.0, p.line);
+        .border(1.0, p.line)
+        .scroll(ScrollSpec {
+            stick_bottom: false,
+        });
     let Some(commit) = s.history.selected.and_then(|i| s.history.commits.get(i)) else {
         return panel.child(
             text("Sélectionne un commit pour voir ses détails.".to_owned())
@@ -230,6 +428,7 @@ fn detail(s: &State) -> El {
     }
     let oid = commit.oid.clone();
     let tag_oid = commit.oid.clone();
+    let reset_oid = commit.oid.clone();
     panel
         .child(
             el().key("tag-commit")
@@ -270,6 +469,12 @@ fn detail(s: &State) -> El {
                         .color(p.on_accent),
                 ),
         )
+        .child({
+            let target = reset_oid.clone();
+            action(s, "reset-here", "Repositionner la branche ici…", false)
+                .on_press(move |s: &mut State| s.reset_ask(&target))
+        })
+        .children(reset_card(s, &reset_oid))
 }
 
 fn message(s: &State, title: &str, detail: &str) -> El {
