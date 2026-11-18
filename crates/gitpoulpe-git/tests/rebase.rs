@@ -451,3 +451,144 @@ async fn autostash_lets_a_dirty_tree_be_rebased_and_gets_the_work_back() {
     assert!(e.out(&["stash", "list"]).is_empty());
     assert_eq!(e.subjects()[0], "add b");
 }
+
+fn zero_one_two(p: &Path) {
+    write(p, "f.txt", "one\n");
+    commit_all(p, "first");
+    write(p, "f.txt", "two\n");
+    commit_all(p, "second");
+}
+
+async fn walk_to_the_end(e: &Env) {
+    let mut remembered: Vec<PathBuf> = Vec::new();
+    for _ in 0..6 {
+        let files = e.git.list_conflicts(&e.info).await.unwrap();
+        for file in &files {
+            e.git
+                .resolve_with_side(&e.info, &file.path, ConflictSide::Theirs)
+                .await
+                .unwrap();
+            remembered.push(file.path.clone());
+        }
+        let step = e
+            .git
+            .continue_operation(&e.info, None, &remembered)
+            .await
+            .unwrap();
+        if step.finished {
+            return;
+        }
+    }
+    panic!("the rebase never finished");
+}
+
+#[tokio::test]
+async fn a_reword_after_a_pause_still_finds_its_message_when_the_rebase_resumes() {
+    let e = env_with(zero_one_two).await;
+    let items = e
+        .items(&[
+            ("second", Pick, None),
+            ("first", Reword, Some("first, reworded after a conflict")),
+        ])
+        .await;
+    let outcome = e.run(&items).await.unwrap();
+    assert!(
+        matches!(outcome, RebaseOutcome::Conflicts { .. }),
+        "{outcome:?}"
+    );
+    assert!(
+        e.path().join(".git/gitpoulpe-rebase").is_dir(),
+        "the files must outlive the first call"
+    );
+    walk_to_the_end(&e).await;
+    assert_eq!(
+        e.out(&["log", "-1", "--format=%s"]),
+        "first, reworded after a conflict"
+    );
+    assert!(
+        !e.path().join(".git/gitpoulpe-rebase").exists(),
+        "cleaned up when the rebase ends"
+    );
+}
+
+#[tokio::test]
+async fn the_rebase_files_are_private_and_removed_on_abort_and_on_refusal() {
+    use std::os::unix::fs::PermissionsExt;
+    let e = env_with(zero_one_two).await;
+    let items = e
+        .items(&[("second", Pick, None), ("first", Reword, Some("later"))])
+        .await;
+    e.run(&items).await.unwrap();
+    let dir = e.path().join(".git/gitpoulpe-rebase");
+    assert_eq!(
+        std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    e.git
+        .abort_operation(&e.info, &[PathBuf::from("f.txt")])
+        .await
+        .unwrap();
+    assert!(!dir.exists());
+    write(e.path(), "f.txt", "dirty\n");
+    let plan = e.plan().await;
+    let kept: Vec<PlanItem> = plan
+        .commits
+        .iter()
+        .map(|c| PlanItem {
+            oid: c.oid.clone(),
+            action: Reword,
+            message: Some("x".into()),
+        })
+        .collect();
+    assert_eq!(e.run(&kept).await.unwrap_err(), RebaseError::LocalChanges);
+    assert!(!dir.exists());
+}
+
+#[tokio::test]
+async fn a_repository_path_with_quotes_and_spaces_cannot_break_or_inject_into_the_todo() {
+    let parent = tempfile::tempdir().unwrap();
+    let tricky = parent.path().join("it's a \"path\" $(touch pwned) here");
+    std::fs::create_dir(&tricky).unwrap();
+    run_git(&tricky, &["init", "-q", "-b", "main"]);
+    write(&tricky, "base.txt", "base\n");
+    commit_all(&tricky, "base");
+    let base = String::from_utf8_lossy(&run_git(&tricky, &["rev-parse", "HEAD"]))
+        .trim()
+        .to_owned();
+    write(&tricky, "a.txt", "a\n");
+    commit_all(&tricky, "add a");
+    write(&tricky, "b.txt", "b\n");
+    commit_all(&tricky, "add b");
+    let git = Git::new()
+        .with_env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .with_env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .with_env("GIT_AUTHOR_NAME", "t")
+        .with_env("GIT_AUTHOR_EMAIL", "t@example.com")
+        .with_env("GIT_COMMITTER_NAME", "t")
+        .with_env("GIT_COMMITTER_EMAIL", "t@example.com");
+    let info = git.open(&tricky, &Cancel::new()).await.unwrap();
+    let plan = git.rebase_plan(&info, &base).await.unwrap();
+    let items: Vec<PlanItem> = plan
+        .commits
+        .iter()
+        .map(|c| PlanItem {
+            oid: c.oid.clone(),
+            action: Reword,
+            message: Some(format!("{} (reworded)", c.subject)),
+        })
+        .collect();
+    let head = String::from_utf8_lossy(&run_git(&tricky, &["rev-parse", "HEAD"]))
+        .trim()
+        .to_owned();
+    let outcome = git
+        .start_rebase(&info, &base, &items, &head, false, None)
+        .await
+        .unwrap();
+    assert!(matches!(outcome, RebaseOutcome::Done { .. }), "{outcome:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&run_git(&tricky, &["log", "-1", "--format=%s"])).trim(),
+        "add b (reworded)"
+    );
+    assert!(!tricky.join("pwned").exists());
+    assert!(!parent.path().join("pwned").exists());
+}

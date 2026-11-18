@@ -86,6 +86,18 @@ impl From<crate::conflict::ConflictError> for RebaseError {
     }
 }
 
+pub(crate) fn sh_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
+}
+
+fn create_private_dir(path: &std::path::Path) -> std::io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .recursive(true)
+        .create(path)
+}
+
 fn valid_oid(id: &str) -> bool {
     (40..=64).contains(&id.len()) && id.chars().all(|c| c.is_ascii_hexdigit())
 }
@@ -115,6 +127,14 @@ pub fn validate_plan(plan: &[PlanItem], commits: &[RebaseCommit]) -> Result<(), 
 }
 
 impl Git {
+    pub(crate) fn rebase_files_dir(&self, info: &SessionInfo) -> PathBuf {
+        info.git_dir.join("gitpoulpe-rebase")
+    }
+
+    pub(crate) fn remove_rebase_files(&self, info: &SessionInfo) {
+        let _ = std::fs::remove_dir_all(self.rebase_files_dir(info));
+    }
+
     pub async fn rebase_plan(
         &self,
         info: &SessionInfo,
@@ -235,33 +255,32 @@ impl Git {
         let marker = format!("refs/gitpoulpe/recovery/{stamp}-{short}-rebase");
         self.exec_ok(info, &["update-ref", &marker, &details.head])
             .await?;
-        let work = tempfile::Builder::new()
-            .prefix("gitpoulpe-rebase-")
-            .tempdir()
-            .map_err(|e| RebaseError::Refused(e.to_string()))?;
+        let work = self.rebase_files_dir(info);
+        let _ = std::fs::remove_dir_all(&work);
+        create_private_dir(&work).map_err(|e| RebaseError::Refused(e.to_string()))?;
         let mut todo = String::new();
         for (index, item) in plan.iter().enumerate() {
             match item.action {
                 RebaseAction::Reword => {
-                    let file = work.path().join(format!("message-{index}"));
+                    let file = work.join(format!("message-{index}"));
                     std::fs::write(&file, item.message.as_deref().unwrap_or_default())
                         .map_err(|e| RebaseError::Refused(e.to_string()))?;
                     todo.push_str(&format!("pick {}\n", item.oid));
                     todo.push_str(&format!(
-                        "exec git commit --amend -q -F '{}'\n",
-                        file.display()
+                        "exec git commit --amend -q -F {}\n",
+                        sh_quote(&file.display().to_string())
                     ));
                 }
                 other => todo.push_str(&format!("{} {}\n", other.caption(), item.oid)),
             }
         }
-        let todo_file = work.path().join("todo");
+        let todo_file = work.join("todo");
         std::fs::write(&todo_file, todo).map_err(|e| RebaseError::Refused(e.to_string()))?;
         let mut env: Vec<(OsString, OsString)> = profile.map(profile_env).unwrap_or_default();
         env.push(("GIT_EDITOR".into(), "true".into()));
         env.push((
             "GIT_SEQUENCE_EDITOR".into(),
-            format!("cp '{}'", todo_file.display()).into(),
+            format!("cp {}", sh_quote(&todo_file.display().to_string())).into(),
         ));
         let mut args: Vec<String> = profile
             .map(signing_config)
@@ -291,6 +310,7 @@ impl Git {
         }
         if !out.ok() {
             let message = out.stderr.clone();
+            self.remove_rebase_files(info);
             let _ = self
                 .exec(info, &["update-ref", "-d", &marker], &[], None)
                 .await;
@@ -307,6 +327,7 @@ impl Git {
             }
             return Err(RebaseError::Refused(message));
         }
+        self.remove_rebase_files(info);
         let head = self.exec_ok(info, &["rev-parse", "HEAD"]).await?.text();
         Ok(RebaseOutcome::Done { head, marker })
     }

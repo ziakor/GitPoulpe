@@ -510,6 +510,9 @@ impl Git {
         if !out.ok() && self.list_conflicts(info).await?.is_empty() {
             return Err(ConflictError::Refused(out.stderr));
         }
+        if !still {
+            self.remove_rebase_files(info);
+        }
         Ok(ContinueOutcome {
             finished: !still,
             message: if still {
@@ -546,6 +549,9 @@ impl Git {
         let still = self.operation_state(info).await?.is_some();
         if !out.ok() && !still {
             return Err(ConflictError::Refused(out.stderr));
+        }
+        if !still {
+            self.remove_rebase_files(info);
         }
         Ok(ContinueOutcome {
             finished: !still,
@@ -604,6 +610,7 @@ impl Git {
         }
         self.exec_ok(info, &[operation.kind.git_name(), "--abort"])
             .await?;
+        self.remove_rebase_files(info);
         Ok(AbortReport {
             backup: (saved > 0).then_some(backup_root),
             saved,
