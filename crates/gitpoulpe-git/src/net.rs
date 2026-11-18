@@ -365,6 +365,8 @@ impl Git {
         }
         if has(&[
             "ssl certificate problem",
+            "ssl certificate verification failed",
+            "certificate signer not trusted",
             "server certificate verification failed",
             "certificate verify failed",
             "unable to get local issuer certificate",

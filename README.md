@@ -79,6 +79,14 @@ Git runs as an external program, without a shell, with the repository's filters,
 - A refused access says whether an SSH agent was reachable. Private keys are never read, copied, stored or logged by GitPoulpe, and an SSH command written in a repository's own configuration (`core.sshCommand`) is ignored for network operations.
 - Network operations only allow the `https`, `http`, `ssh`, `git` and `file` transports, and never the `ext::` helpers.
 
+## Access over HTTPS
+
+- The same "Tester l'accès" works for `https` remotes. Credentials come from your own Git setup: `credential.helper`, `core.askPass` or `GIT_ASKPASS` from the system and global configuration. GitPoulpe stores nothing and never puts a secret in a URL; when no mechanism provides credentials, or the server refuses them, the operation ends with a message pointing at `git config --global credential.helper`. Terminal prompts are disabled.
+- A `credential.helper` or `core.askPass` written in a repository's own configuration is ignored for network operations, because it would run a program chosen by whoever made the repository.
+- Cancelling stops Git and the helper or prompt it started.
+- Certificate checks are always on: `http.sslVerify=false` (in any configuration) and `GIT_SSL_NO_VERIFY` are overridden. An untrusted certificate is reported as a TLS error; to accept a private authority, point `http.sslCAInfo` at its certificate in your global configuration.
+- Network and name-resolution failures, authentication refusals and missing repositories are reported separately, with any credential embedded in a URL hidden from the message.
+
 ## Committing
 
 - Write a message in the box at the bottom of the file list, then "Créer le commit" or Ctrl+Enter. The commit contains exactly the staged content shown, with the effective identity of the repository's profile (or your Git configuration when it has none). The box also shows who will be the author and whether the profile's signing key is usable.

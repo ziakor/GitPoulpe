@@ -98,3 +98,88 @@ pub fn tree_fingerprint(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
     }
     out
 }
+
+pub struct HttpServer {
+    child: std::process::Child,
+    pub port: u16,
+    pub dir: TempDir,
+}
+
+impl HttpServer {
+    pub fn start(source: &Path, auth: Option<(&str, &str)>) -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root");
+        std::fs::create_dir(&root).unwrap();
+        git(
+            &root,
+            &[
+                "clone",
+                "-q",
+                "--bare",
+                &source.display().to_string(),
+                "repo.git",
+            ],
+        );
+        let (cert, key) = (dir.path().join("cert.pem"), dir.path().join("key.pem"));
+        let status = Command::new("openssl")
+            .args([
+                "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2",
+            ])
+            .args(["-subj", "/CN=localhost"])
+            .args(["-addext", "subjectAltName=DNS:localhost,IP:127.0.0.1"])
+            .arg("-keyout")
+            .arg(&key)
+            .arg("-out")
+            .arg(&cert)
+            .stderr(std::process::Stdio::null())
+            .status()
+            .expect("openssl is needed to build the test certificate");
+        assert!(status.success());
+        let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/common/git_http_server.py");
+        let credentials = auth.map_or_else(|| "none".to_owned(), |(u, p)| format!("{u}:{p}"));
+        let mut child = Command::new("python3")
+            .arg("-I")
+            .arg(script)
+            .arg(&root)
+            .arg(&cert)
+            .arg(&key)
+            .arg(&credentials)
+            .arg(dir.path().join("requests.log"))
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("python3 runs the test server");
+        let mut line = String::new();
+        std::io::BufRead::read_line(
+            &mut std::io::BufReader::new(child.stdout.as_mut().unwrap()),
+            &mut line,
+        )
+        .unwrap();
+        let port = line
+            .trim()
+            .strip_prefix("PORT ")
+            .unwrap_or_else(|| panic!("test server did not start: {line:?}"))
+            .parse()
+            .unwrap();
+        Self { child, port, dir }
+    }
+
+    pub fn url(&self) -> String {
+        format!("https://127.0.0.1:{}/repo.git", self.port)
+    }
+
+    pub fn cert(&self) -> PathBuf {
+        self.dir.path().join("cert.pem")
+    }
+
+    pub fn requests(&self) -> String {
+        std::fs::read_to_string(self.dir.path().join("requests.log")).unwrap_or_default()
+    }
+}
+
+impl Drop for HttpServer {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
