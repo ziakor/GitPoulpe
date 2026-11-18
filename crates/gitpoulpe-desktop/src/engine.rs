@@ -5,8 +5,9 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 use gitpoulpe_core::{
-    ChangeEntry, DiffLine, DiffSide, DocumentMeta, Generation, OpenError, Profile, RangeError,
-    ReadError, SessionId, SessionInfo, StageOutcome, StatusSnapshot, WriteError, WriteJob,
+    ChangeEntry, CommitOutcome, CommitRequest, DiffLine, DiffSide, DocumentMeta, Generation,
+    OpenError, Profile, RangeError, ReadError, SessionId, SessionInfo, StageOutcome,
+    StatusSnapshot, WriteError, WriteJob,
 };
 use gitpoulpe_git::{
     CacheConfig, Cancel, DiffCache, DiffReader, Git, Identity, IdentityError, MAX_WAIT,
@@ -48,6 +49,10 @@ pub enum Command {
         request: u64,
         job: Box<WriteJob>,
     },
+    Commit {
+        request: u64,
+        job: Box<CommitRequest>,
+    },
     Identity {
         request: u64,
         profile: Option<Box<Profile>>,
@@ -79,6 +84,10 @@ pub enum Event {
     Staged {
         request: u64,
         result: Result<StageOutcome, WriteError>,
+    },
+    Committed {
+        request: u64,
+        result: Result<CommitOutcome, WriteError>,
     },
     Identity {
         request: u64,
@@ -290,6 +299,12 @@ async fn run(
                             start_refresh(&shared, current, request, false);
                         }
                     }
+                    Command::Commit { request, job } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        tokio::spawn(commit(shared.clone(), current, request, *job));
+                    }
                     Command::Identity { request, profile } => {
                         let Some(current) = session.clone() else {
                             continue;
@@ -460,6 +475,15 @@ async fn identity(
         result,
         signing,
     });
+}
+
+async fn commit(shared: Arc<Shared>, session: Arc<Session>, request: u64, job: CommitRequest) {
+    let result = {
+        let _writer = session.writer.lock().await;
+        shared.git.commit(&session.info, &job, &Cancel::new()).await
+    };
+    shared.emit(Event::Committed { request, result });
+    start_refresh(&shared, &session, 0, false);
 }
 
 async fn write(shared: Arc<Shared>, session: Arc<Session>, request: u64, job: WriteJob) {

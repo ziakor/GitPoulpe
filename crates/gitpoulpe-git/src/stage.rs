@@ -38,7 +38,7 @@ pub fn stamp_of(path: &Path) -> FileStamp {
     }
 }
 
-fn write_failure(error: RunError) -> WriteError {
+pub(crate) fn write_failure(error: RunError) -> WriteError {
     match error {
         RunError::Cancelled => WriteError::Cancelled,
         RunError::Spawn(e) => WriteError::GitUnavailable(RunError::spawn_diagnostic(&e)),
@@ -52,7 +52,7 @@ fn write_failure(error: RunError) -> WriteError {
     }
 }
 
-fn locked_index(diagnostic: &Diagnostic) -> Option<String> {
+pub(crate) fn locked_index(diagnostic: &Diagnostic) -> Option<String> {
     let message = &diagnostic.message;
     let start = message.find("Unable to create '")? + "Unable to create '".len();
     let rest = &message[start..];
@@ -179,7 +179,7 @@ impl Git {
         })
     }
 
-    async fn current_status(
+    pub(crate) async fn current_status(
         &self,
         info: &SessionInfo,
         cancel: &Cancel,

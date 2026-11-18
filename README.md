@@ -2,7 +2,7 @@
 
 A free, open-source native Git client written in Rust, with the [Rune](https://github.com/anomalyco/rune) UI toolkit (GPLv3). Linux first; Windows and macOS will follow.
 
-Status: milestone M1, "local inspection", is delivered. Milestone M2, "local work", is in progress: so far the app can stage and unstage whole files, single blocks and selected lines, and manage local Git profiles. Reading a repository never modifies it; the only writes are the explicit actions listed under "Writing".
+Status: milestone M1, "local inspection", is delivered. Milestone M2, "local work", is in progress: so far the app can stage and unstage whole files, single blocks and selected lines, manage local Git profiles and create commits. Reading a repository never modifies it; the only writes are the explicit actions listed under "Writing".
 
 The interface is currently in French only.
 
@@ -24,6 +24,13 @@ Git runs as an external program, without a shell, with the repository's filters,
 - Unstage, in the staged view: "Désindexer" button in a file header, `u` for the current file (or for the selected lines when there are some), tick several files and use "Désindexer la sélection" or `Shift+U`. "Désindexer ce bloc" and line selection work like their staging counterparts, including for newly added files; deleted, renamed and mode-changed files are unstaged whole. A staged rename is undone as a whole. Unstaging never touches the working directory and works before the first commit.
 - Nothing is staged if a file changed after it was displayed, if the index changed, or if the file is in conflict; the state is re-read and a message says why.
 - Git runs as configured for these actions (clean filters, such as Git LFS, apply). An existing `index.lock` is reported, never removed.
+
+## Committing
+
+- Write a message in the box at the bottom of the file list, then "Créer le commit" or Ctrl+Enter. The commit contains exactly the staged content shown, with the effective identity of the repository's profile (or your Git configuration when it has none). The box also shows who will be the author and whether the profile's signing key is usable.
+- Nothing is committed when the message is empty, nothing is staged, conflicts are pending, or the index changed after it was displayed. The message you typed is kept in every failure case.
+- Git runs as configured: hooks (`pre-commit`, `commit-msg`) are executed. If a hook refuses, its output is shown under the message and you can fix the problem and retry. Unknown identity and signing failures are reported in the same way, before anything is written when possible. An existing `index.lock` is reported, never removed.
+- Each commit is recorded in a per-repository journal (50 entries, in GitPoulpe's preferences, outside the repository) with the commit before and after, as a recovery point.
 
 ## Profiles
 

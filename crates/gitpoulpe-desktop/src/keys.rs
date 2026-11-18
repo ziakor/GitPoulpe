@@ -6,6 +6,15 @@ use crate::view::row_key;
 const LINES_PER_KEY: usize = 3;
 const SIDEWAYS_STEP: f32 = 96.0;
 
+const TEXT_INPUTS: [&str; 6] = [
+    "filter",
+    "commit-message",
+    "pf-label",
+    "pf-name",
+    "pf-email",
+    "pf-key",
+];
+
 pub fn open_dialog(tx: &mut Tx) {
     let options = FileDialogOptions {
         title: "Ouvrir un dépôt Git".into(),
@@ -101,7 +110,7 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
     }
     let reading = matches!(s.screen, crate::state::Screen::Ready);
     let free = tx.focused().is_none() || tx.focused() == Some("viewport");
-    let typing = tx.focused() == Some("filter");
+    let typing = tx.focused().is_some_and(|key| TEXT_INPUTS.contains(&key)) || s.profiles_open;
     match &event.key {
         Key::Text(text) if reading && !typing => match text.as_str() {
             "/" => tx.focus("filter", true),

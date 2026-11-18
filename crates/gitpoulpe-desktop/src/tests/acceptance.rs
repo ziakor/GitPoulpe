@@ -326,7 +326,6 @@ fn the_interface_never_offers_an_action_that_changes_the_repository() {
     let forbidden = [
         "ajouter",
         "valider",
-        "commit",
         "supprimer",
         "annuler",
         "restaurer",

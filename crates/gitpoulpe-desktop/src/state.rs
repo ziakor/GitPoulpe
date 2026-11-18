@@ -11,7 +11,10 @@ use gitpoulpe_core::{
     HunkSpec, LineSelection, Refusal, SplitIndex, StageOutcome, StageTarget, StatusSnapshot,
     WriteError, WriteJob, display_label,
 };
-use gitpoulpe_core::{Profile, ProfileBook};
+use gitpoulpe_core::{
+    CommitFailureKind, CommitOutcome, CommitRefusal, CommitRequest, JournalEntry, Profile,
+    ProfileBook, push_journal,
+};
 use gitpoulpe_git::SigningCheck;
 use rune::prefs::Prefs;
 use rune::{Live, TextEdit, Tx, Waker};
@@ -150,6 +153,9 @@ pub struct State {
     pub marks_version: u32,
     pub line_pick: Option<LinePick>,
     pub book: ProfileBook,
+    pub commit_message: TextEdit,
+    pub commit_report: Option<String>,
+    commit_request: u64,
     pub identity_shown: Option<IdentityShown>,
     pub profiles_open: bool,
     pub form: ProfileForm,
@@ -246,6 +252,9 @@ impl State {
             marks_version: 0,
             line_pick: None,
             book: prefs.get::<ProfileBook>(PROFILES_KEY).unwrap_or_default(),
+            commit_message: TextEdit::new(""),
+            commit_report: None,
+            commit_request: 0,
             identity_shown: None,
             profiles_open: false,
             form: ProfileForm::default(),
@@ -519,6 +528,14 @@ impl State {
                 } else {
                     WatchStatus::Unavailable(reason)
                 };
+                true
+            }
+            Event::Committed { request, result } => {
+                if request != self.commit_request {
+                    return false;
+                }
+                self.writing = false;
+                self.finish_commit(result);
                 true
             }
             Event::Identity {
@@ -1596,6 +1613,137 @@ impl State {
                 });
             }
             Err(error) => self.form.error = Some(error.to_string()),
+        }
+    }
+}
+
+impl State {
+    pub fn staged_for_commit(&self) -> Vec<(PathBuf, String)> {
+        let Some(repo) = self.repo.as_ref() else {
+            return Vec::new();
+        };
+        repo.snapshot
+            .entries
+            .iter()
+            .filter(|e| e.is_staged())
+            .map(|e| {
+                (
+                    e.path.clone(),
+                    repo.snapshot
+                        .index_ids
+                        .get(&e.path)
+                        .cloned()
+                        .unwrap_or_default(),
+                )
+            })
+            .collect()
+    }
+
+    pub fn commit(&mut self) {
+        if self.writing {
+            self.notice = Some("Une écriture est déjà en cours.".to_owned());
+            return;
+        }
+        if self.repo.is_none() {
+            return;
+        }
+        let request = CommitRequest {
+            message: self.commit_message.text.clone(),
+            staged: self.staged_for_commit(),
+            profile: self.active_profile().cloned(),
+        };
+        self.commit_request += 1;
+        self.writing = true;
+        self.commit_report = None;
+        self.notice = Some("Création du commit…".to_owned());
+        if let Some(engine) = &self.engine {
+            engine.send(Command::Commit {
+                request: self.commit_request,
+                job: Box::new(request),
+            });
+        }
+    }
+
+    fn record_journal(
+        &mut self,
+        action: &str,
+        before: Option<String>,
+        after: Option<String>,
+        detail: String,
+    ) {
+        let Some(key) = self.repo_key() else { return };
+        let prefs_key = format!("journal:{key}");
+        let mut journal: Vec<JournalEntry> = self.prefs.get(&prefs_key).unwrap_or_default();
+        let at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        push_journal(
+            &mut journal,
+            JournalEntry {
+                at,
+                action: action.to_owned(),
+                before,
+                after,
+                detail,
+            },
+        );
+        let _ = self.prefs.set(&prefs_key, &journal);
+    }
+
+    #[cfg(test)]
+    pub fn journal(&self) -> Vec<JournalEntry> {
+        self.repo_key()
+            .and_then(|key| self.prefs.get(&format!("journal:{key}")))
+            .unwrap_or_default()
+    }
+
+    fn finish_commit(&mut self, result: Result<CommitOutcome, WriteError>) {
+        match result {
+            Ok(CommitOutcome::Created {
+                oid,
+                subject,
+                before,
+                signed,
+            }) => {
+                self.commit_message = TextEdit::new("");
+                self.commit_report = None;
+                let short: String = oid.chars().take(8).collect();
+                self.notice = Some(format!(
+                    "Commit {short} créé{} : {subject}",
+                    if signed { " et signé" } else { "" }
+                ));
+                self.record_journal("commit", before, Some(oid), subject);
+            }
+            Ok(CommitOutcome::Refused(reason)) => {
+                self.notice = Some(
+                    match reason {
+                        CommitRefusal::EmptyMessage => "Écris un message de commit.",
+                        CommitRefusal::EmptyIndex => "Rien n'est indexé : indexe des changements avant de créer le commit.",
+                        CommitRefusal::Conflicts => "Des conflits ne sont pas résolus : la résolution n'est pas encore disponible, aucun commit n'a été créé.",
+                        CommitRefusal::Stale => "L'index a changé depuis son affichage : l'état a été relu, vérifie les fichiers indexés puis recommence. Ton message est conservé.",
+                    }
+                    .to_owned(),
+                );
+            }
+            Ok(CommitOutcome::Failed { kind, output }) => {
+                let lead = match kind {
+                    CommitFailureKind::IdentityUnknown => {
+                        "Git ne connaît pas ton identité. Choisis un profil (bouton Profil) ou configure user.name et user.email."
+                    }
+                    CommitFailureKind::SigningUnavailable => {
+                        "La signature a échoué : le commit n'a pas été créé."
+                    }
+                    CommitFailureKind::Hook => {
+                        "Un hook Git a refusé le commit. Corrige le problème puis réessaie."
+                    }
+                    CommitFailureKind::Other => "Git a refusé le commit.",
+                };
+                self.notice = Some(format!("{lead} Ton message est conservé."));
+                self.commit_report = Some(format!("{lead}\n{output}"));
+            }
+            Err(error) => {
+                self.notice = Some(self.describe_stage(Err(error)));
+            }
         }
     }
 }

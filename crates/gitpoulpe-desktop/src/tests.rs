@@ -8,6 +8,7 @@ use rune::{Env, Runtime};
 use tempfile::TempDir;
 
 mod acceptance;
+mod committing;
 mod profiles;
 mod staging;
 
@@ -1383,6 +1384,8 @@ fn every_control_stays_inside_the_window_at_the_smallest_supported_size() {
         "profiles",
         "refresh",
         "theme",
+        "commit-message",
+        "commit",
         "Non indexés",
         "Indexés",
         "filter",

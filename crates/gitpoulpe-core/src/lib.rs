@@ -1,3 +1,4 @@
+mod commit;
 mod diff;
 mod error;
 mod identity;
@@ -7,6 +8,10 @@ mod split;
 mod status;
 mod write;
 
+pub use commit::{
+    CommitFailureKind, CommitOutcome, CommitRefusal, CommitRequest, JOURNAL_LIMIT, JournalEntry,
+    push_journal,
+};
 pub use diff::{
     BuildState, DiffKey, DiffLine, DiffLineKind, DiffSide, DocumentKind, DocumentMeta, FileRef,
     Hunk, RangeData, RangeError,

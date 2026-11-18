@@ -1,5 +1,6 @@
 mod cache;
 mod cancel;
+mod commit;
 mod diagnostics;
 mod diff;
 mod diff_parse;

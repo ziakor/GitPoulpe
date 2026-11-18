@@ -406,6 +406,119 @@ fn left_pane(s: &State) -> El {
                 })
                 .child(list),
         )
+        .child(commit_box(s))
+}
+
+fn commit_box(s: &State) -> El {
+    let p = s.palette;
+    let staged = s.staged_for_commit().len();
+    let mut lines = col().w_full().gap(2.0);
+    if let Some(shown) = &s.identity_shown {
+        let origin = shown
+            .profile
+            .as_ref()
+            .map_or("configuration Git".to_owned(), |label| {
+                format!("profil {label}")
+            });
+        match &shown.result {
+            Ok(identity) => {
+                lines = lines.child(
+                    text(format!(
+                        "Auteur : {} <{}> ({origin})",
+                        identity.name, identity.email
+                    ))
+                    .font(theme::SMALL)
+                    .color(p.muted)
+                    .truncate(),
+                );
+            }
+            Err(_) => {
+                lines = lines.child(
+                    text("Identité inconnue : choisis un profil avec le bouton Profil.".to_owned())
+                        .font(theme::SMALL)
+                        .color(p.red)
+                        .wrap(),
+                );
+            }
+        }
+        match &shown.signing {
+            gitpoulpe_git::SigningCheck::Ready => {
+                lines = lines.child(
+                    text("Signature : clé du profil utilisable.".to_owned())
+                        .font(theme::SMALL)
+                        .color(p.muted),
+                );
+            }
+            gitpoulpe_git::SigningCheck::Problem(_) => {
+                lines = lines.child(
+                    text("Signature impossible avec ce profil : voir Profil.".to_owned())
+                        .font(theme::SMALL)
+                        .color(p.red)
+                        .wrap(),
+                );
+            }
+            gitpoulpe_git::SigningCheck::NotRequested => {}
+        }
+    }
+    let input = text_input(&s.commit_message, theme::BODY)
+        .key("commit-message")
+        .label("Message du commit")
+        .w_full()
+        .h(72.0)
+        .px(10.0)
+        .py(8.0)
+        .radius(3.0)
+        .fill(p.raised)
+        .border(1.0, p.line)
+        .color(p.text)
+        .placeholder(
+            "Message du commit (Ctrl+Entrée pour valider)".to_owned(),
+            p.muted,
+        )
+        .focus_ring(2.0, 2.0, p.accent)
+        .on_edit(|s: &mut State| &mut s.commit_message)
+        .on_input_key(|s: &mut State, event, _| {
+            if event.mods.cmd && event.key == Key::Enter {
+                s.commit();
+                return true;
+            }
+            false
+        });
+    let caption = match staged {
+        0 => "Créer le commit".to_owned(),
+        1 => "Créer le commit (1 fichier)".to_owned(),
+        n => format!("Créer le commit ({n} fichiers)"),
+    };
+    let mut column = col()
+        .w_full()
+        .px(16.0)
+        .py(12.0)
+        .gap(8.0)
+        .fill(p.panel)
+        .border(1.0, p.line)
+        .child(input)
+        .child(lines);
+    if let Some(report) = &s.commit_report {
+        column = column.child(
+            text(report.clone())
+                .font(theme::SMALL)
+                .color(p.red)
+                .wrap()
+                .max_lines(8),
+        );
+    }
+    column.child(
+        stage_button(
+            s,
+            "commit".to_owned(),
+            "Créer le commit".to_owned(),
+            caption,
+            true,
+        )
+        .w_full()
+        .h(32.0)
+        .on_press(|s: &mut State| s.commit()),
+    )
 }
 
 fn marked_bar(s: &State) -> El {
