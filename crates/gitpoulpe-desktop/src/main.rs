@@ -35,6 +35,8 @@ mod undos;
 mod undos_view;
 mod view;
 mod widgets;
+mod worktrees;
+mod worktrees_view;
 
 #[cfg(test)]
 mod bench;

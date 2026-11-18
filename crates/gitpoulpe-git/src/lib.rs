@@ -33,6 +33,7 @@ mod status;
 mod tag;
 mod undo;
 mod watch;
+mod worktree;
 
 pub use branch::{BranchError, DeleteMode};
 pub use cache::{CacheConfig, CacheStats, DiffCache};
@@ -68,6 +69,7 @@ pub use stash::StashError;
 pub use tag::TagError;
 pub use undo::UndoError;
 pub use watch::{MAX_WAIT, QUIET_PERIOD, RepoWatcher, Signal, WatchError, coalesce, is_relevant};
+pub use worktree::{BranchChoice, WorktreeError};
 
 use std::ffi::OsString;
 

@@ -189,6 +189,7 @@ pub struct State {
     pub init: crate::initialize::InitState,
     pub conflicts: crate::conflicts::ConflictsState,
     pub stashes: crate::stashes::StashesState,
+    pub worktrees: crate::worktrees::WorktreesState,
     pub undo_screen: crate::undos::UndoScreen,
     pub resetting: crate::resetting::ResetSlot,
     pub rebasing: crate::rebasing::RebaseSlot,
@@ -320,6 +321,7 @@ impl State {
             init: crate::initialize::InitState::default(),
             conflicts: crate::conflicts::ConflictsState::default(),
             stashes: crate::stashes::StashesState::default(),
+            worktrees: crate::worktrees::WorktreesState::default(),
             undo_screen: crate::undos::UndoScreen::default(),
             resetting: crate::resetting::ResetSlot::default(),
             rebasing: crate::rebasing::RebaseSlot::default(),
@@ -609,6 +611,7 @@ impl State {
                 self.remotes = crate::remotes::RemotesState::default();
                 self.conflicts = crate::conflicts::ConflictsState::default();
                 self.stashes = crate::stashes::StashesState::default();
+                self.worktrees = crate::worktrees::WorktreesState::default();
                 self.undo_screen = crate::undos::UndoScreen::default();
                 self.resetting = crate::resetting::ResetSlot::default();
                 self.rebasing = crate::rebasing::RebaseSlot::default();
@@ -851,6 +854,15 @@ impl State {
                 percent,
             } => self.apply_pull_progress(request, phase, percent),
             Event::PullFinished { request, result } => self.apply_pull_finished(request, result),
+            Event::WorktreesListed { request, result } => {
+                self.apply_worktrees_listed(request, result)
+            }
+            Event::WorktreeRemovalPreviewed { request, result } => {
+                self.apply_worktree_removal_previewed(request, result)
+            }
+            Event::WorktreeFinished { request, result } => {
+                self.apply_worktree_finished(request, result)
+            }
             Event::SshScanned { request, result } => self.apply_ssh_scanned(request, result),
             Event::SshTrusted { request, result } => self.apply_ssh_trusted(request, result),
             Event::TagsListed { request, result } => self.apply_tags_listed(request, result),
@@ -1891,6 +1903,7 @@ impl State {
         self.close_stashes();
         self.close_reflog();
         self.close_undo();
+        self.close_worktrees();
         let selected = self
             .active_profile()
             .or_else(|| self.book.profiles.first())
@@ -2249,6 +2262,7 @@ impl State {
         self.close_stashes();
         self.close_reflog();
         self.close_undo();
+        self.close_worktrees();
         self.start_history();
     }
 
@@ -2382,6 +2396,7 @@ impl State {
         self.close_stashes();
         self.close_reflog();
         self.close_undo();
+        self.close_worktrees();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::CommitInspect {

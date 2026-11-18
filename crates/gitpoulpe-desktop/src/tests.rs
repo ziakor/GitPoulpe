@@ -30,6 +30,7 @@ mod staging;
 mod stashing;
 mod tagging;
 mod undoing;
+mod worktreeing;
 
 use crate::state::{Screen, State, ViewKind, path_from_args};
 use crate::view::view;

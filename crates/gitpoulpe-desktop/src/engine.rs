@@ -13,14 +13,14 @@ use gitpoulpe_core::{
     ReflogEntry, ReflogInspect, Remote, RemoteImpact, ResetMode, ResetOutcome, ResetPreview,
     Resolution, SequenceKind, SequenceOutcome, SequencePreview, SessionId, SessionInfo,
     StageOutcome, Stash, StashApplied, StashDetail, StashScope, StatusSnapshot, Tag, UndoDirection,
-    UndoRecord, WriteError, WriteJob, mask_url,
+    UndoRecord, Worktree, WorktreeRemoval, WriteError, WriteJob, mask_url,
 };
 use gitpoulpe_git::{
-    BranchError, CacheConfig, Cancel, CloneError, ConflictError, ConflictSide, DeleteMode,
-    DiffCache, DiffError, DiffReader, FetchOutcome, Git, HistoryError, HistoryStream, HostKey,
-    Identity, IdentityError, IgnoreError, IgnoredList, InspectError, MAX_WAIT, NetError,
+    BranchChoice, BranchError, CacheConfig, Cancel, CloneError, ConflictError, ConflictSide,
+    DeleteMode, DiffCache, DiffError, DiffReader, FetchOutcome, Git, HistoryError, HistoryStream,
+    HostKey, Identity, IdentityError, IgnoreError, IgnoredList, InspectError, MAX_WAIT, NetError,
     PullRequest, PushRequest, QUIET_PERIOD, RemoteCheck, RepoWatcher, SequenceRequest, Signal,
-    SigningCheck, StashError, check_signing, coalesce,
+    SigningCheck, StashError, WorktreeError, check_signing, coalesce,
 };
 use rune::Waker;
 use std::time::Duration;
@@ -141,6 +141,27 @@ pub struct StashDone {
     pub message: String,
     pub conflicts: bool,
     pub journal: Option<(String, Option<String>, Option<String>, String)>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WorktreeOp {
+    Add {
+        path: PathBuf,
+        branch: String,
+        create: bool,
+    },
+    Lock {
+        path: PathBuf,
+        reason: String,
+    },
+    Unlock {
+        path: PathBuf,
+    },
+    Remove {
+        path: PathBuf,
+        discard: bool,
+    },
+    Prune,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -384,6 +405,17 @@ pub enum Command {
         expected_head: String,
         autostash: bool,
         profile: Option<Box<Profile>>,
+    },
+    WorktreeList {
+        request: u64,
+    },
+    WorktreeRemovalPreview {
+        request: u64,
+        path: PathBuf,
+    },
+    WorktreeOp {
+        request: u64,
+        op: WorktreeOp,
     },
     NetCancel,
     InitPrepare {
@@ -669,6 +701,18 @@ pub enum Event {
     PullFinished {
         request: u64,
         result: Result<PullOutcome, String>,
+    },
+    WorktreesListed {
+        request: u64,
+        result: Result<Vec<Worktree>, String>,
+    },
+    WorktreeRemovalPreviewed {
+        request: u64,
+        result: Result<WorktreeRemoval, String>,
+    },
+    WorktreeFinished {
+        request: u64,
+        result: Result<BranchDone, String>,
     },
     CloneProgress {
         request: u64,
@@ -1625,6 +1669,40 @@ async fn run(
                             shared.emit(Event::PullFinished { request, result });
                         });
                     }
+                    Command::WorktreeList { request } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .list_worktrees(&current.info)
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::WorktreesListed { request, result });
+                        });
+                    }
+                    Command::WorktreeRemovalPreview { request, path } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .worktree_removal(&current.info, &path)
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::WorktreeRemovalPreviewed { request, result });
+                        });
+                    }
+                    Command::WorktreeOp { request, op } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        tokio::spawn(worktree_op(shared.clone(), current, request, op));
+                    }
                     Command::NetCancel => {
                         if let Some(cancel) = net_cancel.take() {
                             cancel.cancel();
@@ -2121,6 +2199,80 @@ async fn stash_op(shared: Arc<Shared>, session: Arc<Session>, request: u64, op: 
         }),
     };
     shared.emit(Event::StashFinished {
+        request,
+        result: result.map_err(|e| e.to_string()),
+    });
+}
+
+async fn worktree_op(shared: Arc<Shared>, session: Arc<Session>, request: u64, op: WorktreeOp) {
+    let _guard = session.writer.lock().await;
+    let git = &shared.git;
+    let info = &session.info;
+    let done = |message: String,
+                journal: Option<(String, Option<String>, Option<String>, String)>| {
+        BranchDone { message, journal }
+    };
+    let result: Result<BranchDone, WorktreeError> = match &op {
+        WorktreeOp::Add {
+            path,
+            branch,
+            create,
+        } => git
+            .add_worktree(
+                info,
+                path,
+                if *create {
+                    BranchChoice::New {
+                        name: branch,
+                        start: None,
+                    }
+                } else {
+                    BranchChoice::Existing(branch)
+                },
+            )
+            .await
+            .map(|()| {
+                done(
+                    format!("Worktree créé dans {} sur la branche {branch}.", path.display()),
+                    Some(("worktree-add".into(), None, None, path.display().to_string())),
+                )
+            }),
+        WorktreeOp::Lock { path, reason } => git
+            .lock_worktree(info, path, reason)
+            .await
+            .map(|()| done(format!("{} verrouillé.", path.display()), None)),
+        WorktreeOp::Unlock { path } => git
+            .unlock_worktree(info, path)
+            .await
+            .map(|()| done(format!("{} déverrouillé.", path.display()), None)),
+        WorktreeOp::Remove { path, discard } => {
+            git.remove_worktree(info, path, *discard)
+                .await
+                .map(|removed| {
+                    let mut message = format!("Worktree {} supprimé.", removed.path.display());
+                    if let Some(snapshot) = &removed.snapshot {
+                        message.push_str(&format!(
+                            " Les modifications suivies sont sauvegardées sous {snapshot} (git stash apply <id>)."
+                        ));
+                    }
+                    if removed.lost_untracked > 0 {
+                        message.push_str(&format!(
+                            " {} fichier(s) non suivi(s) ont été effacés et ne sont pas récupérables.",
+                            removed.lost_untracked
+                        ));
+                    }
+                    done(
+                        message,
+                        Some(("worktree-remove".into(), None, None, path.display().to_string())),
+                    )
+                })
+        }
+        WorktreeOp::Prune => git
+            .prune_worktrees(info)
+            .await
+            .map(|()| done("Worktrees orphelins nettoyés.".to_owned(), None)),
+    };
+    shared.emit(Event::WorktreeFinished {
         request,
         result: result.map_err(|e| e.to_string()),
     });

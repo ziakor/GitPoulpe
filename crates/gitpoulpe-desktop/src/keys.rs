@@ -6,7 +6,10 @@ use crate::view::row_key;
 const LINES_PER_KEY: usize = 3;
 const SIDEWAYS_STEP: f32 = 96.0;
 
-const TEXT_INPUTS: [&str; 18] = [
+const TEXT_INPUTS: [&str; 21] = [
+    "wt-path",
+    "wt-branch",
+    "wt-reason",
     "rl-name",
     "stash-message",
     "cf-result",
@@ -138,6 +141,14 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         s.close_profiles();
         return true;
     }
+    if s.worktrees.open && event.key == Key::Escape {
+        if s.worktrees.removal.is_some() {
+            s.worktree_cancel_remove();
+        } else {
+            s.close_worktrees();
+        }
+        return true;
+    }
     if s.undo_screen.open && event.key == Key::Escape {
         s.close_undo();
         return true;
@@ -225,7 +236,8 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         || s.conflicts.open
         || s.stashes.open
         || s.reflog.open
-        || s.undo_screen.open;
+        || s.undo_screen.open
+        || s.worktrees.open;
     match &event.key {
         Key::Text(text) if reading && !typing => match text.as_str() {
             "/" => tx.focus("filter", true),

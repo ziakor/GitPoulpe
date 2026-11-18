@@ -812,6 +812,10 @@ pub fn branches_screen(s: &State) -> El {
                 .truncate(),
         )
         .child(
+            action(s, "branches-worktrees", "Worktrees", false)
+                .on_press(|s: &mut State| s.open_worktrees()),
+        )
+        .child(
             action(s, "branches-undo", "Annuler/refaire", false)
                 .on_press(|s: &mut State| s.open_undo()),
         )

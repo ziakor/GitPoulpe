@@ -21,6 +21,7 @@ mod stash;
 mod status;
 mod tag;
 mod undo;
+mod worktree;
 mod write;
 
 pub use branch::{Branch, BranchLoss, LOSS_LIST_LIMIT, LostCommit};
@@ -56,6 +57,7 @@ pub use stash::{Stash, StashApplied, StashDetail, StashFile, StashScope};
 pub use status::{BranchInfo, ChangeEntry, EntryKind, StatusCode, StatusSnapshot, display_label};
 pub use tag::Tag;
 pub use undo::{UNDO_LIMIT, UndoDirection, UndoKind, UndoRecord, UndoState, push_undo};
+pub use worktree::{Worktree, WorktreeRemoval, WorktreeRemoved};
 pub use write::{
     FileStamp, HunkLines, HunkSpec, LineSelection, Refusal, StageOutcome, StageTarget, StampKind,
     WriteError, WriteJob,

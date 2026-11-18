@@ -65,6 +65,8 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
         crate::reflogs_view::reflog_screen(s)
     } else if s.undo_screen.open {
         crate::undos_view::undo_screen(s)
+    } else if s.worktrees.open {
+        crate::worktrees_view::worktrees_screen(s)
     } else {
         body
     };
