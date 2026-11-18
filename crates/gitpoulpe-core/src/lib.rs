@@ -8,6 +8,7 @@ mod ignore;
 mod merge;
 mod operation;
 mod profile;
+mod pull;
 mod push;
 mod rebase;
 mod reflog;
@@ -42,6 +43,7 @@ pub use operation::{
     ConflictFile, ConflictKind, ConflictVersions, Operation, OperationKind, Resolution, Version,
 };
 pub use profile::{Profile, ProfileBook, ProfileError, SigningPreference};
+pub use pull::{Integration, PullKind, PullOutcome, PullPreview, PullStrategy};
 pub use push::{LostRemoteCommit, PushKind, PushMode, PushOutcome, PushPreview};
 pub use rebase::{PlanItem, RebaseAction, RebaseCommit, RebaseOutcome, RebasePlanInfo};
 pub use reflog::{ReflogEntry, ReflogInspect};

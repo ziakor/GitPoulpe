@@ -330,6 +330,149 @@ fn merge_panel(s: &State) -> Option<El> {
     Some(card)
 }
 
+fn pull_panel(s: &State) -> Option<El> {
+    use gitpoulpe_core::{PullKind, PullStrategy};
+    let p = s.palette;
+    let state = s.pulling.state.as_ref()?;
+    let mut card = col()
+        .key("pull-panel")
+        .w_full()
+        .gap(6.0)
+        .px(12.0)
+        .py(10.0)
+        .radius(3.0)
+        .border(1.0, p.line)
+        .child(
+            text("Intégrer les changements distants".to_owned())
+                .key("pull-title")
+                .font(theme::BODY_STRONG)
+                .color(p.text)
+                .wrap(),
+        );
+    if let Some((phase, percent)) = &state.running {
+        return Some(
+            card.child(
+                text(format!("Intégration · {phase} {percent} %"))
+                    .key("pull-running")
+                    .font(theme::SMALL)
+                    .color(p.muted),
+            )
+            .child(
+                action(s, "pull-stop", "Annuler", false)
+                    .on_press(|s: &mut State| s.pull_cancel_running()),
+            ),
+        );
+    }
+    if let Some(done) = &state.done {
+        card = card.child(
+            text(done.clone())
+                .key("pull-done")
+                .font(theme::SMALL)
+                .color(p.text)
+                .wrap(),
+        );
+    }
+    if let Some(error) = &state.error {
+        card = card.child(
+            text(error.clone())
+                .key("pull-error")
+                .font(theme::SMALL)
+                .color(p.red)
+                .wrap(),
+        );
+    }
+    if let Some(preview) = &state.preview {
+        card = card
+            .child(
+                text(format!(
+                    "Branche suivie : {} → {} ({}) · {} commit(s) chez vous, {} chez le distant, d'après la dernière récupération.",
+                    preview.upstream,
+                    preview.branch,
+                    crate::pulling::kind_caption(preview.kind),
+                    preview.ahead,
+                    preview.behind
+                ))
+                .key("pull-status")
+                .font(theme::SMALL)
+                .color(p.text)
+                .wrap(),
+            )
+            .child(
+                text("Stratégie (rien n'est choisi pour vous) :".to_owned())
+                    .font(theme::SMALL)
+                    .color(p.muted),
+            )
+            .child(
+                row()
+                    .gap(6.0)
+                    .child(
+                        action(
+                            s,
+                            "pull-ff",
+                            "avance rapide",
+                            state.strategy == PullStrategy::FastForwardOnly,
+                        )
+                        .on_press(|s: &mut State| {
+                            s.pull_set_strategy(PullStrategy::FastForwardOnly)
+                        }),
+                    )
+                    .child(
+                        action(s, "pull-merge", "fusion", state.strategy == PullStrategy::Merge)
+                            .on_press(|s: &mut State| s.pull_set_strategy(PullStrategy::Merge)),
+                    )
+                    .child(
+                        action(s, "pull-rebase", "rebase", state.strategy == PullStrategy::Rebase)
+                            .on_press(|s: &mut State| s.pull_set_strategy(PullStrategy::Rebase)),
+                    ),
+            )
+            .child(
+                text(format!(
+                    "Stratégie choisie : {}. La récupération a lieu d'abord ; si elle échoue ou est annulée, rien n'est intégré et votre travail local reste intact.",
+                    state.strategy.caption()
+                ))
+                .key("pull-strategy")
+                .font(theme::SMALL)
+                .color(p.muted)
+                .wrap(),
+            );
+        if preview.kind == PullKind::Diverged && state.strategy == PullStrategy::FastForwardOnly {
+            card = card.child(
+                text("Les branches ont divergé : l'avance rapide sera refusée. Choisissez la fusion ou le rebase.".to_owned())
+                    .key("pull-diverged")
+                    .font(theme::SMALL)
+                    .color(p.red)
+                    .wrap(),
+            );
+        }
+        if !preview.local_changes.is_empty() {
+            card = card.child(
+                toggle(
+                    s,
+                    "pull-autostash",
+                    "Mettre mon travail local de côté pendant l'intégration",
+                    state.autostash,
+                )
+                .on_press(|s: &mut State| s.pull_toggle_autostash()),
+            );
+        }
+        card = card.child(
+            action(s, "pull-run", "Récupérer et intégrer", true)
+                .on_press(|s: &mut State| s.pull_run()),
+        );
+    } else if state.error.is_none() {
+        card = card.child(
+            text("Lecture de la branche suivie…".to_owned())
+                .font(theme::SMALL)
+                .color(p.muted),
+        );
+    }
+    Some(
+        card.child(
+            action(s, "pull-close", "Fermer", false).on_press(|s: &mut State| s.pull_close()),
+        ),
+    )
+}
+
 fn publish_panel(s: &State) -> Option<El> {
     use gitpoulpe_core::PushKind;
     let p = s.palette;
@@ -565,6 +708,20 @@ fn detail(s: &State) -> El {
             .wrap()
             .selectable(true),
     );
+    if branch.current {
+        panel = panel.child(
+            action(
+                s,
+                "branch-pull",
+                "Intégrer les changements distants…",
+                false,
+            )
+            .on_press(|s: &mut State| s.pull_ask()),
+        );
+        if let Some(card) = pull_panel(s) {
+            panel = panel.child(card);
+        }
+    }
     panel = panel.child(
         action(s, "branch-publish", "Publier…", false).on_press(|s: &mut State| s.publish_ask()),
     );

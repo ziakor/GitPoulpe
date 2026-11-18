@@ -77,6 +77,7 @@ impl State {
             "cherry-pick" => moved("Cherry-pick".to_owned(), None),
             "revert" => moved("Revert".to_owned(), None),
             "rebase" => moved("Rebase interactif".to_owned(), None),
+            "pull" => moved(format!("Intégration distante ({detail})"), None),
             "reset" => moved(
                 format!("Reset {detail}"),
                 Some(

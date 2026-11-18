@@ -195,6 +195,7 @@ pub struct State {
     pub sequencing: crate::sequencing::SequenceSlot,
     pub reflog: crate::reflogs::ReflogState,
     pub publishing: crate::publishing::PublishSlot,
+    pub pulling: crate::pulling::PullSlot,
     pub operation_kind: Option<gitpoulpe_core::OperationKind>,
     pub(crate) probe_request: u64,
     pub clone: crate::cloning::CloneState,
@@ -325,6 +326,7 @@ impl State {
             sequencing: crate::sequencing::SequenceSlot::default(),
             reflog: crate::reflogs::ReflogState::default(),
             publishing: crate::publishing::PublishSlot::default(),
+            pulling: crate::pulling::PullSlot::default(),
             operation_kind: None,
             probe_request: 0,
             clone: crate::cloning::CloneState::default(),
@@ -613,6 +615,7 @@ impl State {
                 self.sequencing = crate::sequencing::SequenceSlot::default();
                 self.reflog = crate::reflogs::ReflogState::default();
                 self.publishing = crate::publishing::PublishSlot::default();
+                self.pulling = crate::pulling::PullSlot::default();
                 self.operation_kind = None;
                 self.writing = false;
                 self.positions.clear();
@@ -841,6 +844,13 @@ impl State {
             Event::RebaseFinished { request, result } => {
                 self.apply_rebase_finished(request, result)
             }
+            Event::PullPreviewed { request, result } => self.apply_pull_previewed(request, result),
+            Event::PullProgress {
+                request,
+                phase,
+                percent,
+            } => self.apply_pull_progress(request, phase, percent),
+            Event::PullFinished { request, result } => self.apply_pull_finished(request, result),
             Event::SshScanned { request, result } => self.apply_ssh_scanned(request, result),
             Event::SshTrusted { request, result } => self.apply_ssh_trusted(request, result),
             Event::TagsListed { request, result } => self.apply_tags_listed(request, result),

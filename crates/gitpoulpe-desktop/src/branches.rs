@@ -271,6 +271,8 @@ impl State {
         self.branches.merge = None;
         self.publishing.state = None;
         self.publishing.request += 1;
+        self.pulling.state = None;
+        self.pulling.request += 1;
         self.branches.selected = Some(name.to_owned());
         self.branches.rename_to = TextEdit::new(name);
         self.branches.confirm = None;

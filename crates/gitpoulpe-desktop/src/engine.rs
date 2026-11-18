@@ -8,18 +8,19 @@ use gitpoulpe_core::{
     AmendInfo, AmendRequest, Branch, BranchLoss, ChangeEntry, Commit, CommitDetail, CommitOutcome,
     CommitRange, CommitRequest, ConflictFile, ConflictVersions, DiffLine, DiffSide, DocumentMeta,
     EmptyPolicy, Generation, IgnoreReason, IgnoreScope, MergeMode, MergeOutcome, MergePreview,
-    OpenError, Operation, OperationKind, PlanItem, Profile, PushMode, PushOutcome, PushPreview,
-    RangeError, ReadError, RebaseOutcome, RebasePlanInfo, ReflogEntry, ReflogInspect, Remote,
-    RemoteImpact, ResetMode, ResetOutcome, ResetPreview, Resolution, SequenceKind, SequenceOutcome,
-    SequencePreview, SessionId, SessionInfo, StageOutcome, Stash, StashApplied, StashDetail,
-    StashScope, StatusSnapshot, Tag, UndoDirection, UndoRecord, WriteError, WriteJob, mask_url,
+    OpenError, Operation, OperationKind, PlanItem, Profile, PullOutcome, PullPreview, PullStrategy,
+    PushMode, PushOutcome, PushPreview, RangeError, ReadError, RebaseOutcome, RebasePlanInfo,
+    ReflogEntry, ReflogInspect, Remote, RemoteImpact, ResetMode, ResetOutcome, ResetPreview,
+    Resolution, SequenceKind, SequenceOutcome, SequencePreview, SessionId, SessionInfo,
+    StageOutcome, Stash, StashApplied, StashDetail, StashScope, StatusSnapshot, Tag, UndoDirection,
+    UndoRecord, WriteError, WriteJob, mask_url,
 };
 use gitpoulpe_git::{
     BranchError, CacheConfig, Cancel, CloneError, ConflictError, ConflictSide, DeleteMode,
     DiffCache, DiffError, DiffReader, FetchOutcome, Git, HistoryError, HistoryStream, HostKey,
     Identity, IdentityError, IgnoreError, IgnoredList, InspectError, MAX_WAIT, NetError,
-    PushRequest, QUIET_PERIOD, RemoteCheck, RepoWatcher, SequenceRequest, Signal, SigningCheck,
-    StashError, check_signing, coalesce,
+    PullRequest, PushRequest, QUIET_PERIOD, RemoteCheck, RepoWatcher, SequenceRequest, Signal,
+    SigningCheck, StashError, check_signing, coalesce,
 };
 use rune::Waker;
 use std::time::Duration;
@@ -374,6 +375,16 @@ pub enum Command {
         autostash: bool,
         profile: Option<Box<Profile>>,
     },
+    PullPreview {
+        request: u64,
+    },
+    Pull {
+        request: u64,
+        strategy: PullStrategy,
+        expected_head: String,
+        autostash: bool,
+        profile: Option<Box<Profile>>,
+    },
     NetCancel,
     InitPrepare {
         request: u64,
@@ -645,6 +656,19 @@ pub enum Event {
     RebaseFinished {
         request: u64,
         result: Result<RebaseOutcome, String>,
+    },
+    PullPreviewed {
+        request: u64,
+        result: Result<Box<PullPreview>, String>,
+    },
+    PullProgress {
+        request: u64,
+        phase: String,
+        percent: u8,
+    },
+    PullFinished {
+        request: u64,
+        result: Result<PullOutcome, String>,
     },
     CloneProgress {
         request: u64,
@@ -1540,6 +1564,65 @@ async fn run(
                                 .await
                                 .map_err(|e| e.to_string());
                             shared.emit(Event::RebaseFinished { request, result });
+                        });
+                    }
+                    Command::PullPreview { request } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .pull_preview(&current.info)
+                                .await
+                                .map(Box::new)
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::PullPreviewed { request, result });
+                        });
+                    }
+                    Command::Pull {
+                        request,
+                        strategy,
+                        expected_head,
+                        autostash,
+                        profile,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let cancel = Cancel::new();
+                        net_cancel = Some(cancel.clone());
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let _guard = current.writer.lock().await;
+                            let mut last = (String::new(), 101u8);
+                            let result = shared
+                                .git
+                                .pull(
+                                    &current.info,
+                                    &PullRequest {
+                                        strategy,
+                                        expected_head: &expected_head,
+                                        autostash,
+                                    },
+                                    profile.as_deref(),
+                                    &cancel,
+                                    |progress| {
+                                        let key = (progress.phase.clone(), progress.percent);
+                                        if key != last {
+                                            shared.emit(Event::PullProgress {
+                                                request,
+                                                phase: progress.phase,
+                                                percent: progress.percent,
+                                            });
+                                            last = key;
+                                        }
+                                    },
+                                )
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::PullFinished { request, result });
                         });
                     }
                     Command::NetCancel => {
