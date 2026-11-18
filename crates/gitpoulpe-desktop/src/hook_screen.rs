@@ -33,6 +33,7 @@ impl State {
         self.close_reflog();
         self.close_undo();
         self.close_worktrees();
+        self.close_lfs();
         self.profiles_open = false;
         self.hooks.open = true;
         self.reload_hooks();

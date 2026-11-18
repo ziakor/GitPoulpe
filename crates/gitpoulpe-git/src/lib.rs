@@ -15,6 +15,7 @@ mod identity;
 mod ignore;
 mod init;
 mod inspect;
+mod lfs;
 mod merge;
 mod net;
 mod open;
@@ -55,6 +56,7 @@ pub use identity::{
 pub use ignore::{IgnoreError, IgnoredList, MAX_IGNORED_ENTRIES};
 pub use init::{DEFAULT_BRANCH, InitError, Initialized};
 pub use inspect::InspectError;
+pub use lfs::{LfsError, not_installed_help, parse_pointer};
 pub use merge::MergeError;
 pub use net::{NetError, NetProgress, SshTools, parse_progress, remote_host};
 pub use parse::{ParseError, StatusParser};

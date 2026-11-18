@@ -68,6 +68,7 @@ impl State {
         self.close_reflog();
         self.close_undo();
         self.close_hooks();
+        self.close_lfs();
         self.profiles_open = false;
         self.worktrees.open = true;
         self.reload_worktrees();

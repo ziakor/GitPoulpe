@@ -18,6 +18,7 @@ mod hooking;
 mod ignoring;
 mod initializing;
 mod inspecting;
+mod lfsing;
 mod merging;
 mod profiles;
 mod publishing;

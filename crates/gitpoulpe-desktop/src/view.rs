@@ -69,6 +69,8 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
         crate::worktrees_view::worktrees_screen(s)
     } else if s.hooks.open {
         crate::hook_screen_view::hooks_screen(s)
+    } else if s.lfs.open {
+        crate::lfs_screen_view::lfs_screen(s)
     } else {
         body
     };

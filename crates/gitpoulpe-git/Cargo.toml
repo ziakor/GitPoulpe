@@ -10,3 +10,4 @@ gitpoulpe-core = { path = "../gitpoulpe-core" }
 tokio.workspace = true
 notify.workspace = true
 tempfile = "=3.27.0"
+sha2 = "=0.11.1"

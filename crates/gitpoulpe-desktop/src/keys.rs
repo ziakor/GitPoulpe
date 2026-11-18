@@ -141,6 +141,10 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         s.close_profiles();
         return true;
     }
+    if s.lfs.open && event.key == Key::Escape {
+        s.close_lfs();
+        return true;
+    }
     if s.hooks.open && event.key == Key::Escape {
         if s.hooks.confirm_shared.is_some() {
             s.hook_cancel_shared();
@@ -246,7 +250,8 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         || s.reflog.open
         || s.undo_screen.open
         || s.worktrees.open
-        || s.hooks.open;
+        || s.hooks.open
+        || s.lfs.open;
     match &event.key {
         Key::Text(text) if reading && !typing => match text.as_str() {
             "/" => tx.focus("filter", true),

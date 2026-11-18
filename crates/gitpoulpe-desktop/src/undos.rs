@@ -180,6 +180,7 @@ impl State {
         self.close_reflog();
         self.close_worktrees();
         self.close_hooks();
+        self.close_lfs();
         self.profiles_open = false;
         self.undo_screen.open = true;
         self.undo_screen.message = None;

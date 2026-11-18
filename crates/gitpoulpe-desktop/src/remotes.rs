@@ -125,6 +125,7 @@ impl State {
         self.close_undo();
         self.close_worktrees();
         self.close_hooks();
+        self.close_lfs();
         self.profiles_open = false;
         self.remotes.open = true;
         self.reload_remotes();

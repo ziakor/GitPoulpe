@@ -6,6 +6,7 @@ mod history;
 mod hooks;
 mod identity;
 mod ignore;
+mod lfs;
 mod merge;
 mod operation;
 mod profile;
@@ -41,6 +42,7 @@ pub use identity::{Generation, RepoId, RequestId, SessionId};
 pub use ignore::{
     IgnoreReason, IgnoreRuleError, IgnoreScope, IgnoreSource, is_plain_relative, rule_for_path,
 };
+pub use lfs::{LfsFile, LfsFileState, LfsPointer, LfsStatus, LfsTransfer};
 pub use merge::{MergeKind, MergeMode, MergeOutcome, MergePreview};
 pub use operation::{
     ConflictFile, ConflictKind, ConflictVersions, Operation, OperationKind, Resolution, Version,

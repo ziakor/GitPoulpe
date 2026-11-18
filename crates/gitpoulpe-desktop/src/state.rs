@@ -190,6 +190,7 @@ pub struct State {
     pub conflicts: crate::conflicts::ConflictsState,
     pub stashes: crate::stashes::StashesState,
     pub hooks: crate::hook_screen::HooksState,
+    pub lfs: crate::lfs_screen::LfsState,
     pub worktrees: crate::worktrees::WorktreesState,
     pub undo_screen: crate::undos::UndoScreen,
     pub resetting: crate::resetting::ResetSlot,
@@ -323,6 +324,7 @@ impl State {
             conflicts: crate::conflicts::ConflictsState::default(),
             stashes: crate::stashes::StashesState::default(),
             hooks: crate::hook_screen::HooksState::default(),
+            lfs: crate::lfs_screen::LfsState::default(),
             worktrees: crate::worktrees::WorktreesState::default(),
             undo_screen: crate::undos::UndoScreen::default(),
             resetting: crate::resetting::ResetSlot::default(),
@@ -614,6 +616,7 @@ impl State {
                 self.conflicts = crate::conflicts::ConflictsState::default();
                 self.stashes = crate::stashes::StashesState::default();
                 self.hooks = crate::hook_screen::HooksState::default();
+                self.lfs = crate::lfs_screen::LfsState::default();
                 self.worktrees = crate::worktrees::WorktreesState::default();
                 self.undo_screen = crate::undos::UndoScreen::default();
                 self.resetting = crate::resetting::ResetSlot::default();
@@ -873,6 +876,13 @@ impl State {
                 enabled,
                 result,
             } => self.apply_hook_changed(request, name, enabled, result),
+            Event::LfsLoaded { request, result } => self.apply_lfs_loaded(request, result),
+            Event::LfsProgress {
+                request,
+                phase,
+                percent,
+            } => self.apply_lfs_progress(request, phase, percent),
+            Event::LfsFinished { request, result } => self.apply_lfs_finished(request, result),
             Event::SshScanned { request, result } => self.apply_ssh_scanned(request, result),
             Event::SshTrusted { request, result } => self.apply_ssh_trusted(request, result),
             Event::TagsListed { request, result } => self.apply_tags_listed(request, result),
@@ -1915,6 +1925,7 @@ impl State {
         self.close_undo();
         self.close_worktrees();
         self.close_hooks();
+        self.close_lfs();
         let selected = self
             .active_profile()
             .or_else(|| self.book.profiles.first())
@@ -2275,6 +2286,7 @@ impl State {
         self.close_undo();
         self.close_worktrees();
         self.close_hooks();
+        self.close_lfs();
         self.start_history();
     }
 
@@ -2410,6 +2422,7 @@ impl State {
         self.close_undo();
         self.close_worktrees();
         self.close_hooks();
+        self.close_lfs();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::CommitInspect {

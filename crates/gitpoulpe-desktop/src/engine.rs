@@ -7,13 +7,14 @@ use std::sync::{Arc, Mutex};
 use gitpoulpe_core::{
     AmendInfo, AmendRequest, Branch, BranchLoss, ChangeEntry, Commit, CommitDetail, CommitOutcome,
     CommitRange, CommitRequest, ConflictFile, ConflictVersions, DiffLine, DiffSide, DocumentMeta,
-    EmptyPolicy, Generation, HooksView, IgnoreReason, IgnoreScope, MergeMode, MergeOutcome,
-    MergePreview, OpenError, Operation, OperationKind, PlanItem, Profile, PullOutcome, PullPreview,
-    PullStrategy, PushMode, PushOutcome, PushPreview, RangeError, ReadError, RebaseOutcome,
-    RebasePlanInfo, ReflogEntry, ReflogInspect, Remote, RemoteImpact, ResetMode, ResetOutcome,
-    ResetPreview, Resolution, SequenceKind, SequenceOutcome, SequencePreview, SessionId,
-    SessionInfo, StageOutcome, Stash, StashApplied, StashDetail, StashScope, StatusSnapshot, Tag,
-    UndoDirection, UndoRecord, Worktree, WorktreeRemoval, WriteError, WriteJob, mask_url,
+    EmptyPolicy, Generation, HooksView, IgnoreReason, IgnoreScope, LfsFile, LfsStatus, LfsTransfer,
+    MergeMode, MergeOutcome, MergePreview, OpenError, Operation, OperationKind, PlanItem, Profile,
+    PullOutcome, PullPreview, PullStrategy, PushMode, PushOutcome, PushPreview, RangeError,
+    ReadError, RebaseOutcome, RebasePlanInfo, ReflogEntry, ReflogInspect, Remote, RemoteImpact,
+    ResetMode, ResetOutcome, ResetPreview, Resolution, SequenceKind, SequenceOutcome,
+    SequencePreview, SessionId, SessionInfo, StageOutcome, Stash, StashApplied, StashDetail,
+    StashScope, StatusSnapshot, Tag, UndoDirection, UndoRecord, Worktree, WorktreeRemoval,
+    WriteError, WriteJob, mask_url,
 };
 use gitpoulpe_git::{
     BranchChoice, BranchError, CacheConfig, Cancel, CloneError, ConflictError, ConflictSide,
@@ -426,6 +427,14 @@ pub enum Command {
         enabled: bool,
         confirm_shared: bool,
     },
+    LfsLoad {
+        request: u64,
+    },
+    LfsRun {
+        request: u64,
+        kind: LfsTransfer,
+        branch: String,
+    },
     NetCancel,
     InitPrepare {
         request: u64,
@@ -732,6 +741,19 @@ pub enum Event {
         name: String,
         enabled: bool,
         result: Result<Box<HooksView>, HookError>,
+    },
+    LfsLoaded {
+        request: u64,
+        result: Result<Box<(LfsStatus, Vec<LfsFile>)>, String>,
+    },
+    LfsProgress {
+        request: u64,
+        phase: String,
+        percent: u8,
+    },
+    LfsFinished {
+        request: u64,
+        result: Result<(), String>,
     },
     CloneProgress {
         request: u64,
@@ -1760,6 +1782,72 @@ async fn run(
                                 enabled,
                                 result,
                             });
+                        });
+                    }
+                    Command::LfsLoad { request } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = async {
+                                let status = shared.git.lfs_status(&current.info).await?;
+                                let files = shared.git.list_lfs_files(&current.info).await?;
+                                Ok::<_, gitpoulpe_git::LfsError>(Box::new((status, files)))
+                            }
+                            .await
+                            .map_err(|e| e.to_string());
+                            shared.emit(Event::LfsLoaded { request, result });
+                        });
+                    }
+                    Command::LfsRun {
+                        request,
+                        kind,
+                        branch,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let cancel = Cancel::new();
+                        net_cancel = Some(cancel.clone());
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let remote = shared
+                                .git
+                                .list_remotes(&current.info)
+                                .await
+                                .ok()
+                                .and_then(|all| {
+                                    all.iter()
+                                        .find(|r| r.name == "origin")
+                                        .or_else(|| all.first())
+                                        .map(|r| r.name.clone())
+                                })
+                                .unwrap_or_default();
+                            let mut last = (String::new(), 101u8);
+                            let result = shared
+                                .git
+                                .lfs_transfer(
+                                    &current.info,
+                                    kind,
+                                    &remote,
+                                    &branch,
+                                    &cancel,
+                                    |progress| {
+                                        let key = (progress.phase.clone(), progress.percent);
+                                        if key != last {
+                                            shared.emit(Event::LfsProgress {
+                                                request,
+                                                phase: progress.phase,
+                                                percent: progress.percent,
+                                            });
+                                            last = key;
+                                        }
+                                    },
+                                )
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::LfsFinished { request, result });
                         });
                     }
                     Command::NetCancel => {
