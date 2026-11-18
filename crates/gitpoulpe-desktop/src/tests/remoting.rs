@@ -116,7 +116,7 @@ fn the_remote_screen_lists_remotes_and_never_shows_credentials() {
         .map(|r| r.name.clone())
         .collect();
     assert_eq!(listed, remotes(dir.path()));
-    assert!(shows(&rt, "https://user:***@example.org/a.git"));
+    assert!(shows(&rt, "https://***@example.org/a.git"));
     pick(&mut rt, "origin");
     assert!(shows(&rt, "identifiants"));
     for element in rt.elements() {
@@ -315,4 +315,33 @@ fn a_removal_confirmed_before_its_impact_is_known_does_nothing() {
     }
     assert!(!rt.state.remotes.busy);
     assert_eq!(remotes(dir.path()), ["mirror", "origin"]);
+}
+
+#[test]
+fn a_token_used_as_the_user_name_is_masked_everywhere_too() {
+    let dir = repo();
+    git(
+        dir.path(),
+        &[
+            "remote",
+            "add",
+            "tokened",
+            "https://ghp_t0kenvalue@github.com/o/r.git",
+        ],
+    );
+    let mut rt = screen(dir.path());
+    pick(&mut rt, "tokened");
+    click(&mut rt, "rm-remove");
+    settle(&mut rt, |s| {
+        matches!(&s.remotes.confirm_remove, Some((_, Some(_))))
+    });
+    for element in rt.elements() {
+        if let Some(text) = element.text.as_deref() {
+            assert!(!text.contains("t0kenvalue"), "leaked on screen: {text}");
+        }
+    }
+    click(&mut rt, "rm-remove-confirm");
+    settle(&mut rt, |s| idle(s) && s.remotes.remotes.len() == 2);
+    let notice = rt.state.notice.clone().unwrap_or_default();
+    assert!(!notice.contains("t0kenvalue"), "{notice}");
 }

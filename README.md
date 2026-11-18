@@ -68,7 +68,7 @@ Git runs as an external program, without a shell, with the repository's filters,
 - Adding a remote validates the name (`git check-ref-format`) and the URL; an existing name is refused and its configuration is never replaced. Accepted URLs are `https`, `http`, `ssh`, `git`, `file`, `host:path` and local paths. Transport helpers (`ext::`, `fd::`), options disguised as hosts (a leading `-`), blanks and control characters are refused, since they can run commands.
 - Changing the read URL, the push URL or the name only goes through if the remote still has the URLs that were displayed, and never rewrites a remote that has several URLs (edit those with `git config`). Renaming moves the remote-tracking branches and the branches' upstream setting with it. Everything applies to the open repository only.
 - Removing a remote first states its impact: how many remote-tracking branches go away and which local branches lose their upstream. Local branches and commits are kept. The `git remote add` command that restores it is shown.
-- URLs with embedded credentials (`https://user:token@host`) are shown with the secret masked, never prefilled in a field and never repeated in a recovery command; the new URL has to be typed in full.
+- URLs that can carry a secret are shown masked, never prefilled in a field and never repeated in a recovery command: any user part on `http`, `https` or `git` (a token is often used as the user name), a password on `ssh://`, and any query string or fragment. The new URL has to be typed in full.
 - Changes are written to the per-repository journal, with credentials masked.
 
 ## Committing

@@ -340,17 +340,38 @@ async fn a_change_applies_to_the_chosen_repository_only() {
 }
 
 #[test]
-fn credentials_in_a_url_are_detected_and_masked() {
-    assert!(url_has_secret("https://user:token@example.org/a.git"));
-    assert!(!url_has_secret("https://user@example.org/a.git"));
-    assert!(!url_has_secret("git@example.org:a.git"));
-    assert!(!url_has_secret("https://example.org/a@b:c.git"));
+fn anything_that_can_carry_a_secret_in_a_url_is_detected_and_masked() {
+    for secret in [
+        "https://user:token@example.org/a.git",
+        "https://ghp_abcdef123456@github.com/o/r.git",
+        "http://token@example.org/a.git",
+        "git://user@example.org/a.git",
+        "ssh://user:password@example.org/a.git",
+        "https://example.org/a.git?access_token=abc123",
+        "https://example.org/a.git#abc123",
+    ] {
+        assert!(url_has_secret(secret), "{secret}");
+        let masked = mask_url(secret);
+        for leaked in ["token", "ghp_abcdef123456", "password", "abc123"] {
+            assert!(!masked.contains(leaked), "{secret} -> {masked}");
+        }
+    }
+    for plain in [
+        "ssh://git@example.org/a.git",
+        "git@example.org:a.git",
+        "https://example.org/a@b:c.git",
+        "https://example.org/a.git",
+        "/srv/repo.git",
+    ] {
+        assert!(!url_has_secret(plain), "{plain}");
+        assert_eq!(mask_url(plain), plain);
+    }
     assert_eq!(
         mask_url("https://user:token@example.org/a.git"),
-        "https://user:***@example.org/a.git"
+        "https://***@example.org/a.git"
     );
     assert_eq!(
-        mask_url("https://example.org/a.git"),
-        "https://example.org/a.git"
+        mask_url("https://example.org/a.git?access_token=abc123"),
+        "https://example.org/a.git?***"
     );
 }
