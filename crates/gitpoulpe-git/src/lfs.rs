@@ -81,6 +81,16 @@ fn object_path(info: &SessionInfo, oid: &str) -> PathBuf {
         .join(oid)
 }
 
+fn read_head(path: &Path) -> Option<Vec<u8>> {
+    let mut buffer = Vec::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(POINTER_LIMIT as u64 + 1)
+        .read_to_end(&mut buffer)
+        .ok()?;
+    Some(buffer)
+}
+
 fn sha256_of(path: &Path) -> Option<String> {
     let mut file = std::fs::File::open(path).ok()?;
     let mut hasher = Sha256::new();
@@ -193,15 +203,22 @@ impl Git {
                         }
                     }
                     Ok(meta) => {
-                        let head = std::fs::read(&full)
-                            .ok()
-                            .filter(|b| b.len() <= POINTER_LIMIT);
-                        if head.as_deref().and_then(parse_pointer).is_some() {
+                        let stored = || {
                             if in_store {
                                 LfsFileState::PointerOnly
                             } else {
                                 LfsFileState::Missing
                             }
+                        };
+                        if !meta.is_file() {
+                            LfsFileState::Modified
+                        } else if meta.len() <= POINTER_LIMIT as u64
+                            && read_head(&full)
+                                .as_deref()
+                                .and_then(parse_pointer)
+                                .is_some()
+                        {
+                            stored()
                         } else if meta.len() == pointer.size
                             && sha256_of(&full).as_deref() == Some(pointer.oid.as_str())
                         {

@@ -401,3 +401,39 @@ async fn hostile_remote_and_branch_names_never_reach_the_tool() {
     assert!(!calls.contains("push"), "{calls}");
     let _: PathBuf = PathBuf::new();
 }
+
+#[tokio::test]
+async fn a_huge_file_or_a_symbolic_link_is_never_read_whole_or_followed() {
+    let e = env_with_path(None).await;
+    let outside = tempfile::tempdir().unwrap();
+    let target = outside.path().join("real");
+    let content = "x".repeat(target.display().to_string().len());
+    lfs_repo(&e, &[("huge.bin", b"a"), ("link.bin", content.as_bytes())]);
+    let huge = std::fs::File::create(e.path().join("huge.bin")).unwrap();
+    huge.set_len(6 * 1024 * 1024 * 1024).unwrap();
+    std::fs::write(&target, &content).unwrap();
+    std::fs::remove_file(e.path().join("link.bin")).unwrap();
+    std::os::unix::fs::symlink(&target, e.path().join("link.bin")).unwrap();
+    let link_len = std::fs::symlink_metadata(e.path().join("link.bin"))
+        .unwrap()
+        .len();
+    assert_eq!(
+        link_len,
+        content.len() as u64,
+        "same size, same hashed content through the link"
+    );
+    let started = std::time::Instant::now();
+    let files = e.git.list_lfs_files(&e.info).await.unwrap();
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
+    let state = |n: &str| files.iter().find(|f| f.path == Path::new(n)).unwrap().state;
+    assert_eq!(state("huge.bin"), LfsFileState::Modified);
+    assert_eq!(
+        state("link.bin"),
+        LfsFileState::Modified,
+        "a link to matching content is not the object"
+    );
+}
