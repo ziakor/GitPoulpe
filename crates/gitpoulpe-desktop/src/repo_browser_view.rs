@@ -2,6 +2,8 @@ use std::borrow::Cow;
 
 use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text};
 
+use gitpoulpe_core::Provider;
+
 use crate::state::State;
 use crate::theme;
 use crate::widgets::{action, field};
@@ -55,7 +57,17 @@ fn scopes(s: &State) -> El {
         .child(scope_item(
             s,
             "br-scope-me".to_owned(),
-            "Mes dépôts".to_owned(),
+            if s.accounts
+                .browser
+                .connection
+                .as_ref()
+                .and_then(|id| s.accounts.book.get(id))
+                .is_some_and(|c| c.provider == Provider::Gitlab)
+            {
+                "Mes projets".to_owned()
+            } else {
+                "Mes dépôts".to_owned()
+            },
             browser.scope.is_none(),
             None,
         ));
@@ -208,6 +220,14 @@ fn detail(s: &State) -> El {
                 .on_press(|s: &mut State| s.clone_forked_repo()),
         );
     }
+    let github = browser
+        .connection
+        .as_ref()
+        .and_then(|id| s.accounts.book.get(id))
+        .is_none_or(|c| c.provider == Provider::Github);
+    if !github {
+        return panel;
+    }
     panel = panel.child(
         text(
             if browser.fork_busy {
@@ -250,6 +270,11 @@ pub fn browser_screen(s: &State) -> El {
         .and_then(|id| s.accounts.book.get(id))
         .map(|c| format!("{}@{}", c.login, c.host_caption()))
         .unwrap_or_default();
+    let is_gitlab = browser
+        .connection
+        .as_ref()
+        .and_then(|id| s.accounts.book.get(id))
+        .is_some_and(|c| c.provider == Provider::Gitlab);
     let visible = browser.visible();
     let count = visible.len();
     let header = row()
@@ -259,12 +284,15 @@ pub fn browser_screen(s: &State) -> El {
         .py(10.0)
         .gap(12.0)
         .child(
-            text(format!("Dépôts · {who}"))
-                .key("br-title")
-                .font(theme::BODY_STRONG)
-                .color(p.text)
-                .grow(1.0)
-                .truncate(),
+            text(format!(
+                "{} · {who}",
+                if is_gitlab { "Projets" } else { "Dépôts" }
+            ))
+            .key("br-title")
+            .font(theme::BODY_STRONG)
+            .color(p.text)
+            .grow(1.0)
+            .truncate(),
         )
         .child(
             action(s, "br-refresh", "Actualiser", false)

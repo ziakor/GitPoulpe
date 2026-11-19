@@ -18,9 +18,14 @@ struct Fake {
 
 impl Fake {
     fn start() -> Self {
+        Self::start_script("fake_github.py")
+    }
+
+    fn start_script(name: &str) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let script = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../gitpoulpe-hosting/tests/common/fake_github.py");
+            .join("../gitpoulpe-hosting/tests/common")
+            .join(name);
         let mut child = Command::new("python3")
             .arg("-I")
             .arg(script)
@@ -307,4 +312,41 @@ fn a_fork_answer_arriving_after_another_repository_was_selected_is_dropped() {
     }
     let browser = &rt.state.accounts.browser;
     assert!(browser.fork_done.is_none() && browser.forked.is_none() && !browser.fork_busy);
+}
+
+#[test]
+fn a_gitlab_account_shows_groups_with_subgroups_and_projects_with_their_full_path_and_offers_no_fork()
+ {
+    let fake = Fake::start_script("fake_gitlab.py");
+    let mut rt = screen(Arc::new(MemoryStore::default()));
+    click(&mut rt, "ac-prov-gitlab");
+    settle(&mut rt, |s| {
+        s.accounts.provider == gitpoulpe_core::Provider::Gitlab
+    });
+    connect(&mut rt, &fake, "glgood");
+    browse(&mut rt);
+    assert!(shows(&rt, "Projets · Octo@"));
+    assert!(shows(&rt, "Mes projets"));
+    for path in ["acme/platform/infra/tool", "octo/notes", "shared/lib"] {
+        assert!(shows(&rt, path), "{path}");
+    }
+    assert!(shows(&rt, "acme/platform/infra") && shows(&rt, "acme/platform"));
+    click(&mut rt, "br-scope1");
+    settle(&mut rt, |s| {
+        s.accounts.browser.scope.as_deref() == Some("acme/platform") && !s.accounts.browser.loading
+    });
+    assert!(shows(&rt, "acme/platform/api"));
+    assert!(!shows(&rt, "octo/notes"));
+    click(&mut rt, "brk0");
+    step(&mut rt);
+    assert!(rect_of(&rt, "br-clone").is_some());
+    assert!(rect_of(&rt, "br-fork-me").is_none());
+    rt.state.fork_selected_repo(None);
+    assert!(!rt.state.accounts.browser.fork_busy);
+    click(&mut rt, "br-clone");
+    settle(&mut rt, |s| s.clone.open);
+    assert_eq!(
+        rt.state.clone.url.text,
+        "https://gitlab.test/acme/platform/api.git"
+    );
 }

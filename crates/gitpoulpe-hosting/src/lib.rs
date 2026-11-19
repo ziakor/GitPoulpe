@@ -3,6 +3,7 @@ mod device;
 mod forks;
 mod github;
 mod gitlab;
+mod gitlab_repos;
 mod http;
 mod pull_comments;
 mod pull_merge;

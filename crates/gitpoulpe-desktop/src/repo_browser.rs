@@ -233,6 +233,9 @@ impl State {
         let Some(connection) = self.browser_connection() else {
             return;
         };
+        if connection.provider != gitpoulpe_core::Provider::Github {
+            return;
+        }
         let browser = &mut self.accounts.browser;
         if browser.fork_busy {
             return;

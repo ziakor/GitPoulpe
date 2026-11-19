@@ -5,7 +5,7 @@ use crate::github::{GithubError, interpret_failure};
 use crate::http::{ApiClient, Token, next_link};
 use crate::secrets::SecretStore;
 
-const PAGE_SIZE: usize = 100;
+pub(crate) const PAGE_SIZE: usize = 100;
 const MAX_PAGES: usize = 50;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -128,6 +128,9 @@ pub async fn list_organizations(
     connection: &Connection,
 ) -> Result<Listing<Organization>, GithubError> {
     let client = client(store, connection)?;
+    if connection.provider == gitpoulpe_core::Provider::Gitlab {
+        return crate::gitlab_repos::list_groups(&client).await;
+    }
     let raw = pages(&client, format!("user/orgs?per_page={PAGE_SIZE}")).await?;
     let mut items: Vec<Organization> = raw
         .items
@@ -152,6 +155,9 @@ pub async fn list_repositories(
     organization: Option<&str>,
 ) -> Result<Listing<RepoSummary>, GithubError> {
     let client = client(store, connection)?;
+    if connection.provider == gitpoulpe_core::Provider::Gitlab {
+        return crate::gitlab_repos::list_projects(connection, &client, organization).await;
+    }
     let first = match organization {
         Some(org) if !valid_org(org) => return Err(GithubError::NotFound),
         Some(org) => format!("orgs/{org}/repos?type=all&per_page={PAGE_SIZE}"),
