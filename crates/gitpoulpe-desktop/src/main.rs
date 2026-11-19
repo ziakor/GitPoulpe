@@ -63,6 +63,8 @@ mod undos;
 mod undos_view;
 mod view;
 mod widgets;
+mod workspaces;
+mod workspaces_view;
 mod worktrees;
 mod worktrees_view;
 

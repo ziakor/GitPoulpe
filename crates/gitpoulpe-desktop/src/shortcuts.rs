@@ -270,6 +270,7 @@ impl State {
         self.close_file_edit();
         self.close_tools();
         self.close_terminal();
+        self.close_workspaces();
         self.profiles_open = false;
         let custom = std::mem::take(&mut self.shortcuts.custom);
         self.shortcuts = ShortcutState {

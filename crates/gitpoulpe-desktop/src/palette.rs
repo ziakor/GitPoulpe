@@ -101,6 +101,13 @@ pub const COMMANDS: &[PaletteCommand] = &[
         run: |s, _| s.open_shortcuts(),
     },
     PaletteCommand {
+        id: "workspaces",
+        label: "Espaces de travail…",
+        keywords: "groupe depots projets restaurer",
+        available: always,
+        run: |s, _| s.open_workspaces(),
+    },
+    PaletteCommand {
         id: "theme",
         label: "Changer de thème",
         keywords: "clair sombre dark light",

@@ -124,6 +124,7 @@ pub enum Screen {
 }
 
 pub struct Repo {
+    pub path: PathBuf,
     pub generation: Generation,
     pub snapshot: Arc<StatusSnapshot>,
     pub name: String,
@@ -208,6 +209,7 @@ pub struct State {
     pub terminal: crate::terminal::TerminalState,
     pub commands: crate::palette::PaletteState,
     pub shortcuts: crate::shortcuts::ShortcutState,
+    pub workspaces: crate::workspaces::WorkspacesState,
     pub publishing: crate::publishing::PublishSlot,
     pub pulling: crate::pulling::PullSlot,
     pub operation_kind: Option<gitpoulpe_core::OperationKind>,
@@ -357,6 +359,12 @@ impl State {
             file_edit: crate::file_edit::FileEditState::default(),
             terminal: crate::terminal::TerminalState::default(),
             commands: crate::palette::PaletteState::default(),
+            workspaces: crate::workspaces::WorkspacesState {
+                book: prefs
+                    .get::<gitpoulpe_core::WorkspaceBook>(crate::workspaces::WORKSPACES_KEY)
+                    .unwrap_or_default(),
+                ..crate::workspaces::WorkspacesState::default()
+            },
             shortcuts: crate::shortcuts::ShortcutState {
                 custom: prefs
                     .get::<std::collections::BTreeMap<String, String>>(
@@ -647,7 +655,12 @@ impl State {
                     .as_deref()
                     .and_then(Path::file_name)
                     .map_or_else(|| "dépôt".to_owned(), |n| n.to_string_lossy().into_owned());
+                let path = info
+                    .worktree
+                    .clone()
+                    .unwrap_or_else(|| info.git_dir.clone());
                 self.repo = Some(Repo {
+                    path,
                     generation: snapshot.generation,
                     snapshot: Arc::new(*snapshot),
                     name,
@@ -689,6 +702,7 @@ impl State {
                 self.refilter();
                 self.request_identity();
                 self.probe_operation();
+                self.apply_workspace_restore();
                 true
             }
             Event::Refreshed {
@@ -2092,6 +2106,7 @@ impl State {
         self.close_tools();
         self.close_terminal();
         self.close_shortcuts();
+        self.close_workspaces();
         let selected = self
             .active_profile()
             .or_else(|| self.book.profiles.first())
@@ -2461,6 +2476,7 @@ impl State {
         self.close_tools();
         self.close_terminal();
         self.close_shortcuts();
+        self.close_workspaces();
         self.start_history();
     }
 
@@ -2605,6 +2621,7 @@ impl State {
         self.close_tools();
         self.close_terminal();
         self.close_shortcuts();
+        self.close_workspaces();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::CommitInspect {

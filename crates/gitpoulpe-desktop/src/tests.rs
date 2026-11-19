@@ -44,6 +44,7 @@ mod submoduling;
 mod tagging;
 mod terminalling;
 mod undoing;
+mod workspacing;
 mod worktreeing;
 
 use crate::state::{Screen, State, ViewKind, path_from_args};

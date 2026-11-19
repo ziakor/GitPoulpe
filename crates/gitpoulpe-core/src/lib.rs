@@ -27,6 +27,7 @@ mod submodule;
 mod tag;
 mod tools;
 mod undo;
+mod workspace;
 mod worktree;
 mod write;
 
@@ -71,6 +72,7 @@ pub use submodule::{Submodule, SubmoduleState, SubmoduleUpdated};
 pub use tag::Tag;
 pub use tools::{ToolBook, ToolConfig, ToolKind};
 pub use undo::{UNDO_LIMIT, UndoDirection, UndoKind, UndoRecord, UndoState, push_undo};
+pub use workspace::{Workspace, WorkspaceBook, WorkspaceError, WorkspaceRepo};
 pub use worktree::{Worktree, WorktreeRemoval, WorktreeRemoved};
 pub use write::{
     FileStamp, HunkLines, HunkSpec, LineSelection, Refusal, StageOutcome, StageTarget, StampKind,

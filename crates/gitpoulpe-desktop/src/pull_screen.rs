@@ -98,6 +98,7 @@ impl State {
         self.close_tools();
         self.close_terminal();
         self.close_shortcuts();
+        self.close_workspaces();
         self.profiles_open = false;
         let request = self.pulls.request + 1;
         let list = std::mem::take(&mut self.pulls.list);
