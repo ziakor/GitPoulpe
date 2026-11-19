@@ -578,6 +578,8 @@ impl State {
             if let Some(anchor) = self.positions.get(&view).cloned() {
                 self.relocate(Some(anchor), &[], false);
             }
+            let rows = self.visible.clone();
+            self.on_visible(rows);
         }
     }
 

@@ -51,6 +51,7 @@ mod submoduling;
 mod tagging;
 mod terminalling;
 mod undoing;
+mod view_switching;
 mod workspacing;
 mod worktreeing;
 
