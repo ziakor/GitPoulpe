@@ -1,3 +1,4 @@
+mod blame;
 mod branch;
 mod cache;
 mod cancel;
@@ -41,6 +42,7 @@ mod undo;
 mod watch;
 mod worktree;
 
+pub use blame::{Blame, BlameLine};
 pub use branch::{BranchError, DeleteMode};
 pub use cache::{CacheConfig, CacheStats, DiffCache};
 pub use cancel::Cancel;

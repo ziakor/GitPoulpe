@@ -1,9 +1,17 @@
-use gitpoulpe_git::{FileHistory, FileRevisionView};
+use gitpoulpe_git::{Blame, FileHistory, FileRevisionView};
 
 use crate::engine::Command;
 use crate::state::State;
 
 pub const HISTORY_LIMIT: usize = 500;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PanelMode {
+    #[default]
+    Diff,
+    Content,
+    Blame,
+}
 
 #[derive(Default)]
 pub struct FileHistoryState {
@@ -19,7 +27,12 @@ pub struct FileHistoryState {
     pub revision: Option<FileRevisionView>,
     pub revision_loading: bool,
     pub revision_error: Option<String>,
-    pub show_content: bool,
+    pub mode: PanelMode,
+    pub blame: Option<Blame>,
+    pub blame_loading: bool,
+    pub blame_error: Option<String>,
+    pub blame_notice: Option<String>,
+    pub blame_request: u64,
     pub version: u32,
 }
 
@@ -46,11 +59,13 @@ impl State {
         self.profiles_open = false;
         let request = self.file_history.request + 1;
         let revision_request = self.file_history.revision_request + 1;
+        let blame_request = self.file_history.blame_request + 1;
         self.file_history = FileHistoryState {
             open: true,
             path,
             request,
             revision_request,
+            blame_request,
             ..FileHistoryState::default()
         };
         self.reload_file_history();
@@ -63,6 +78,8 @@ impl State {
         screen.revision_loading = false;
         screen.request += 1;
         screen.revision_request += 1;
+        screen.blame_request += 1;
+        screen.blame_loading = false;
     }
 
     pub fn reload_file_history(&mut self) {
@@ -143,6 +160,9 @@ impl State {
                 old_path: revision.old_path,
             });
         }
+        if self.file_history.mode == PanelMode::Blame {
+            self.load_file_blame();
+        }
     }
 
     pub fn apply_file_revision(
@@ -163,8 +183,87 @@ impl State {
         true
     }
 
-    pub fn file_history_show_content(&mut self, content: bool) {
-        self.file_history.show_content = content;
+    pub fn set_file_history_mode(&mut self, mode: PanelMode) {
+        self.file_history.mode = mode;
         self.file_history.version += 1;
+        if mode == PanelMode::Blame {
+            self.load_file_blame();
+        }
+    }
+
+    pub fn file_blame_of_working_copy(&mut self) {
+        let screen = &mut self.file_history;
+        screen.selected = None;
+        screen.revision = None;
+        screen.revision_error = None;
+        screen.revision_loading = false;
+        screen.revision_request += 1;
+        self.set_file_history_mode(PanelMode::Blame);
+    }
+
+    pub fn load_file_blame(&mut self) {
+        let screen = &mut self.file_history;
+        let revision = screen
+            .selected
+            .as_ref()
+            .and_then(|oid| {
+                screen
+                    .history
+                    .as_ref()?
+                    .revisions
+                    .iter()
+                    .find(|r| &r.oid == oid)
+            })
+            .map(|r| (r.oid.clone(), r.path.clone()));
+        let (rev, path) = match revision {
+            Some((oid, path)) => (Some(oid), path),
+            None => (None, screen.path.clone()),
+        };
+        screen.blame_request += 1;
+        screen.blame_loading = true;
+        screen.blame_error = None;
+        screen.blame_notice = None;
+        screen.blame = None;
+        screen.version += 1;
+        let request = screen.blame_request;
+        if let Some(engine) = &self.engine {
+            engine.send(Command::FileBlameLoad {
+                request,
+                revision: rev,
+                path,
+            });
+        }
+    }
+
+    pub fn apply_file_blame(&mut self, request: u64, result: Result<Blame, String>) -> bool {
+        let screen = &mut self.file_history;
+        if !screen.open || request != screen.blame_request {
+            return false;
+        }
+        screen.blame_loading = false;
+        match result {
+            Ok(blame) => screen.blame = Some(blame),
+            Err(message) => screen.blame_error = Some(message),
+        }
+        screen.version += 1;
+        true
+    }
+
+    pub fn blame_open_commit(&mut self, oid: String) {
+        let known = self
+            .file_history
+            .history
+            .as_ref()
+            .is_some_and(|h| h.revisions.iter().any(|r| r.oid == oid));
+        if !known {
+            self.file_history.blame_notice = Some(format!(
+                "Le commit {} n'est pas dans la liste chargée de l'historique de ce fichier.",
+                oid.chars().take(8).collect::<String>()
+            ));
+            self.file_history.version += 1;
+            return;
+        }
+        self.file_history.mode = PanelMode::Diff;
+        self.select_file_revision(oid);
     }
 }

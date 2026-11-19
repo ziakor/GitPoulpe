@@ -208,3 +208,116 @@ fn a_selection_that_left_the_history_is_dropped_with_a_visible_reason() {
     assert!(rt.state.file_history.selected.is_none() && rt.state.file_history.revision.is_none());
     assert!(shows(&rt, "n'est plus dans l'historique de ce fichier"));
 }
+
+fn blame_ready(rt: &mut Runtime<State>) {
+    settle(rt, |s| {
+        !s.file_history.blame_loading
+            && (s.file_history.blame.is_some() || s.file_history.blame_error.is_some())
+    });
+}
+
+#[test]
+fn the_local_file_blame_tells_unsaved_lines_from_historical_ones() {
+    let dir = lineage();
+    let mut rt = history_screen(dir.path());
+    click(&mut rt, "fh-blame-local");
+    blame_ready(&mut rt);
+    assert!(shows(
+        &rt,
+        "Blame de dir_c.txt · fichier local (copie de travail) · 2 ligne(s) dont 1 non enregistrée(s)"
+    ));
+    let blame = rt.state.file_history.blame.as_ref().unwrap();
+    assert!(blame.lines[0].oid.is_some() && blame.lines[1].oid.is_none());
+    assert_eq!(blame.lines[1].text, "local edit");
+    assert!(shows(&rt, "non enregistré"));
+}
+
+#[test]
+fn the_blame_of_a_revision_follows_the_selection_and_opens_the_attributed_commit() {
+    let dir = lineage();
+    let mut rt = history_screen(dir.path());
+    let edit = open_revision(&mut rt, "edit b");
+    click(&mut rt, "fh-show-blame");
+    blame_ready(&mut rt);
+    let blame = rt.state.file_history.blame.as_ref().unwrap().clone();
+    assert_eq!(blame.revision.as_deref(), Some(edit.as_str()));
+    assert_eq!(blame.path, "b.txt");
+    assert_eq!(blame.lines.len(), 6);
+    assert_eq!(blame.lines[5].oid.as_deref(), Some(edit.as_str()));
+    assert!(shows(&rt, "révision"));
+    let origin = blame.lines[0].oid.clone().unwrap();
+    click(&mut rt, "fbk0");
+    settle(&mut rt, |s| !s.file_history.revision_loading);
+    assert_eq!(
+        rt.state.file_history.mode,
+        crate::file_history::PanelMode::Diff
+    );
+    assert_eq!(
+        rt.state.file_history.selected.as_deref(),
+        Some(origin.as_str())
+    );
+    assert_eq!(
+        rt.state.file_history.revision.as_ref().unwrap().path,
+        "a.txt"
+    );
+}
+
+#[test]
+fn an_attributed_commit_missing_from_the_loaded_history_is_reported_not_guessed() {
+    let dir = lineage();
+    let mut rt = history_screen(dir.path());
+    click(&mut rt, "fh-blame-local");
+    blame_ready(&mut rt);
+    let before = rt.state.file_history.selected.clone();
+    rt.state.blame_open_commit("d".repeat(40));
+    step(&mut rt);
+    assert_eq!(rt.state.file_history.selected, before);
+    assert!(shows(&rt, "n'est pas dans la liste chargée"));
+    let request = rt.state.file_history.blame_request;
+    assert!(
+        !rt.state
+            .apply_file_blame(request - 1, Err("late".to_owned()))
+    );
+}
+
+#[test]
+fn a_large_file_is_attributed_without_mounting_every_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path();
+    git(p, &["init", "-q", "-b", "main"]);
+    let body: String = (0..5000).map(|n| format!("line {n}\n")).collect();
+    std::fs::write(p.join("big.txt"), &body).unwrap();
+    git(p, &["add", "-A"]);
+    git(p, &["commit", "-q", "-m", "big"]);
+    std::fs::write(
+        p.join("big.txt"),
+        body.replacen("line 10\n", "line 10 local\n", 1),
+    )
+    .unwrap();
+    let mut rt = history_screen(p);
+    click(&mut rt, "fh-blame-local");
+    blame_ready(&mut rt);
+    assert_eq!(
+        rt.state.file_history.blame.as_ref().unwrap().lines.len(),
+        5000
+    );
+    assert!(super::mounted(&rt, "fb-row") > 0 && super::mounted(&rt, "fb-row") < 200);
+}
+
+#[test]
+fn choosing_another_revision_while_reading_the_blame_attributes_that_revision() {
+    let dir = lineage();
+    let mut rt = history_screen(dir.path());
+    open_revision(&mut rt, "edit b");
+    click(&mut rt, "fh-show-blame");
+    blame_ready(&mut rt);
+    let other = open_revision(&mut rt, "rename to b");
+    settle(&mut rt, |s| {
+        s.file_history
+            .blame
+            .as_ref()
+            .is_some_and(|b| b.revision.as_deref() == Some(other.as_str()))
+    });
+    let blame = rt.state.file_history.blame.as_ref().unwrap();
+    assert_eq!(blame.lines.len(), 5);
+}

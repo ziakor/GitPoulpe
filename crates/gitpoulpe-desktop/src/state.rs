@@ -871,6 +871,7 @@ impl State {
             Event::FileRevisionLoaded { request, result } => {
                 self.apply_file_revision(request, result)
             }
+            Event::FileBlameLoaded { request, result } => self.apply_file_blame(request, result),
             Event::ReflogInspected { request, result } => {
                 self.apply_reflog_inspected(request, result)
             }

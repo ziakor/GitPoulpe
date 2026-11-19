@@ -371,6 +371,11 @@ pub enum Command {
         path: String,
         old_path: Option<String>,
     },
+    FileBlameLoad {
+        request: u64,
+        revision: Option<String>,
+        path: String,
+    },
     ReflogInspect {
         request: u64,
         oid: String,
@@ -735,6 +740,10 @@ pub enum Event {
     FileRevisionLoaded {
         request: u64,
         result: Result<gitpoulpe_git::FileRevisionView, String>,
+    },
+    FileBlameLoaded {
+        request: u64,
+        result: Result<gitpoulpe_git::Blame, String>,
     },
     ReflogInspected {
         request: u64,
@@ -1660,6 +1669,24 @@ async fn run(
                                 .await
                                 .map_err(|e| e.to_string());
                             shared.emit(Event::FileHistoryLoaded { request, result });
+                        });
+                    }
+                    Command::FileBlameLoad {
+                        request,
+                        revision,
+                        path,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .blame(&current.info, revision.as_deref(), &path)
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::FileBlameLoaded { request, result });
                         });
                     }
                     Command::FileRevisionLoad {

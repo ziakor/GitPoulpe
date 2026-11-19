@@ -15,6 +15,7 @@ const FIELD: u8 = 0x1f;
 pub enum InspectError {
     InvalidId,
     NotACommit,
+    TooLarge,
     GitUnavailable(Diagnostic),
     GitFailed(Diagnostic),
     Parse(String),
@@ -25,6 +26,7 @@ impl std::fmt::Display for InspectError {
         match self {
             Self::InvalidId => f.write_str("the commit id is not valid"),
             Self::NotACommit => f.write_str("no such commit"),
+            Self::TooLarge => f.write_str("the file is too large to attribute"),
             Self::GitUnavailable(d) => write!(f, "Git could not be started: {d}"),
             Self::GitFailed(d) => write!(f, "Git failed: {d}"),
             Self::Parse(m) => write!(f, "unexpected Git output: {m}"),

@@ -3,6 +3,7 @@ use std::borrow::Cow;
 use gitpoulpe_git::{FileChange, FileRevision};
 use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text};
 
+use crate::file_history::PanelMode;
 use crate::history_state::format_date;
 use crate::state::State;
 use crate::theme;
@@ -10,6 +11,7 @@ use crate::widgets::action;
 
 const ROW_HEIGHT: f32 = 52.0;
 const MAX_LINES: usize = 3000;
+const BLAME_ROW: f32 = 22.0;
 
 fn change_label(revision: &FileRevision) -> String {
     match (&revision.change, &revision.old_path) {
@@ -116,9 +118,165 @@ fn code_lines(s: &State, mut panel: El, body: &str, prefix: &str) -> El {
     panel
 }
 
+fn tabs(s: &State) -> El {
+    let mode = s.file_history.mode;
+    row()
+        .gap(8.0)
+        .child(
+            action(s, "fh-show-diff", "Diff", mode == PanelMode::Diff)
+                .on_press(|s: &mut State| s.set_file_history_mode(PanelMode::Diff)),
+        )
+        .child(
+            action(s, "fh-show-content", "Contenu", mode == PanelMode::Content)
+                .on_press(|s: &mut State| s.set_file_history_mode(PanelMode::Content)),
+        )
+        .child(
+            action(s, "fh-show-blame", "Blame", mode == PanelMode::Blame)
+                .on_press(|s: &mut State| s.set_file_history_mode(PanelMode::Blame)),
+        )
+}
+
+fn blame_row(s: &State, index: usize) -> El {
+    let p = s.palette;
+    let Some(line) = s
+        .file_history
+        .blame
+        .as_ref()
+        .and_then(|b| b.lines.get(index))
+    else {
+        return el().h(BLAME_ROW);
+    };
+    let label = match &line.oid {
+        Some(oid) => format!(
+            "{} {:<14.14} {:>5} │ {}",
+            oid.chars().take(8).collect::<String>(),
+            line.author,
+            line.line,
+            line.text
+        ),
+        None => format!(
+            "{:<8} {:<14} {:>5} │ {}",
+            "local", "non enregistré", line.line, line.text
+        ),
+    };
+    let mut item = row()
+        .key(format!("fb-row{index}"))
+        .w_full()
+        .h(BLAME_ROW)
+        .px(6.0)
+        .center_y()
+        .child(
+            text(label.clone())
+                .font(theme::CODE)
+                .color(if line.oid.is_some() { p.text } else { p.accent })
+                .truncate(),
+        );
+    match line.oid.clone() {
+        Some(oid) => {
+            item = item
+                .role("button")
+                .label(format!("Ouvrir le commit {} : {}", oid, line.summary))
+                .hover(p.hover)
+                .on_press(move |s: &mut State| s.blame_open_commit(oid.clone()));
+        }
+        None => item = item.fill(p.raised),
+    }
+    item
+}
+
+fn blame_panel(s: &State) -> El {
+    let p = s.palette;
+    let screen = &s.file_history;
+    let mut panel = col()
+        .w(560.0)
+        .h_full()
+        .px(16.0)
+        .py(14.0)
+        .gap(8.0)
+        .fill(p.panel)
+        .border(1.0, p.line)
+        .child(tabs(s));
+    if screen.blame_loading {
+        return panel.child(
+            text("Attribution des lignes…".to_owned())
+                .key("fb-loading")
+                .font(theme::SMALL)
+                .color(p.muted),
+        );
+    }
+    if let Some(error) = &screen.blame_error {
+        return panel.child(
+            text(format!("Blame impossible : {error}"))
+                .key("fb-error")
+                .font(theme::SMALL)
+                .color(p.red)
+                .wrap(),
+        );
+    }
+    let Some(blame) = &screen.blame else {
+        return panel;
+    };
+    let local = blame.lines.iter().filter(|l| l.oid.is_none()).count();
+    let scope = match &blame.revision {
+        Some(rev) => format!("révision {}", rev.chars().take(8).collect::<String>()),
+        None => "fichier local (copie de travail)".to_owned(),
+    };
+    panel = panel.child(
+        text(format!(
+            "Blame de {} · {scope} · {} ligne(s){}",
+            blame.path,
+            blame.lines.len(),
+            if local > 0 {
+                format!(" dont {local} non enregistrée(s)")
+            } else {
+                String::new()
+            }
+        ))
+        .key("fb-title")
+        .font(theme::PATH_SMALL)
+        .color(p.text)
+        .wrap(),
+    );
+    if let Some(notice) = &screen.blame_notice {
+        panel = panel.child(
+            text(notice.clone())
+                .key("fb-notice")
+                .font(theme::SMALL)
+                .color(p.red)
+                .wrap(),
+        );
+    }
+    panel.child(
+        col()
+            .key("fb-viewport")
+            .w_full()
+            .grow(1.0)
+            .min_h(0.0)
+            .scroll(ScrollSpec {
+                stick_bottom: false,
+            })
+            .child(
+                col()
+                    .key("fb-rows")
+                    .w_full()
+                    .growth(GrowthSpec::default())
+                    .virtual_rows_version((screen.version, s.dark))
+                    .virtual_rows(
+                        blame.lines.len(),
+                        BLAME_ROW,
+                        |_: &State, i| Cow::Owned(format!("fbk{i}")),
+                        blame_row,
+                    ),
+            ),
+    )
+}
+
 fn detail(s: &State) -> El {
     let p = s.palette;
     let screen = &s.file_history;
+    if screen.mode == PanelMode::Blame {
+        return blame_panel(s);
+    }
     let mut panel = col()
         .key("fh-panel")
         .w(560.0)
@@ -171,19 +329,8 @@ fn detail(s: &State) -> El {
                 .wrap()
                 .selectable(true),
         )
-        .child(
-            row()
-                .gap(8.0)
-                .child(
-                    action(s, "fh-show-diff", "Diff", !screen.show_content)
-                        .on_press(|s: &mut State| s.file_history_show_content(false)),
-                )
-                .child(
-                    action(s, "fh-show-content", "Contenu", screen.show_content)
-                        .on_press(|s: &mut State| s.file_history_show_content(true)),
-                ),
-        );
-    if screen.show_content {
+        .child(tabs(s));
+    if screen.mode == PanelMode::Content {
         let note = if view.deleted {
             Some("Le fichier est supprimé à cette révision : il n'a pas de contenu.")
         } else if view.binary {
@@ -252,6 +399,10 @@ pub fn file_history_screen(s: &State) -> El {
                 .color(p.text)
                 .grow(1.0)
                 .truncate(),
+        )
+        .child(
+            action(s, "fh-blame-local", "Blame du fichier local", false)
+                .on_press(|s: &mut State| s.file_blame_of_working_copy()),
         )
         .child(
             action(s, "fh-refresh", "Actualiser", false)
