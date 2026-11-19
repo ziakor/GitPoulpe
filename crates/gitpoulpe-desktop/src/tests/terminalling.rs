@@ -128,7 +128,7 @@ fn the_terminal_opens_in_the_selected_worktree_and_says_where() {
     });
     click(&mut rt, "wt-terminal");
     step(&mut rt);
-    assert!(rt.state.terminal.open == false && rt.state.notice.is_some());
+    assert!(!rt.state.terminal.open && rt.state.notice.is_some());
     rt.state.select_worktree(setup.linked.clone());
     step(&mut rt);
     click(&mut rt, "wt-terminal");

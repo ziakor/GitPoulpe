@@ -6,7 +6,7 @@ use crate::view::row_key;
 const LINES_PER_KEY: usize = 3;
 const SIDEWAYS_STEP: f32 = 96.0;
 
-const TEXT_INPUTS: [&str; 37] = [
+const TEXT_INPUTS: [&str; 38] = [
     "ac-server",
     "ac-token",
     "br-filter",
@@ -44,6 +44,7 @@ const TEXT_INPUTS: [&str; 37] = [
     "pf-name",
     "pf-email",
     "pf-key",
+    "pal-input",
 ];
 
 pub fn open_dialog(tx: &mut Tx) {
@@ -148,6 +149,9 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         return copy_selection(s, tx);
     }
     s.notice = None;
+    if s.commands.open && s.palette_key(&event.key, tx) {
+        return true;
+    }
     if s.tools.open && event.key == Key::Escape {
         s.close_tools();
         return true;
@@ -277,6 +281,14 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         return true;
     }
     if event.mods.cmd {
+        if event.is_command('k') {
+            if s.commands.open {
+                s.close_palette(tx, true);
+            } else {
+                s.open_palette(tx);
+            }
+            return true;
+        }
         if event.is_command('o') {
             open_dialog(tx);
             return true;
@@ -306,6 +318,7 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         || s.file_history.open
         || s.file_edit.open
         || s.terminal.open
+        || s.commands.open
         || s.undo_screen.open
         || s.worktrees.open
         || s.hooks.open

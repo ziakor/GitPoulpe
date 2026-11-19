@@ -26,6 +26,8 @@ mod initialize_view;
 mod keys;
 mod lfs_screen;
 mod lfs_screen_view;
+mod palette;
+mod palette_view;
 mod perf;
 mod profiles;
 mod profiles_view;

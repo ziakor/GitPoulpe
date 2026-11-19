@@ -206,6 +206,7 @@ pub struct State {
     pub file_edit: crate::file_edit::FileEditState,
     pub tools: crate::external_tools::ToolsState,
     pub terminal: crate::terminal::TerminalState,
+    pub commands: crate::palette::PaletteState,
     pub publishing: crate::publishing::PublishSlot,
     pub pulling: crate::pulling::PullSlot,
     pub operation_kind: Option<gitpoulpe_core::OperationKind>,
@@ -354,6 +355,7 @@ impl State {
             file_history: crate::file_history::FileHistoryState::default(),
             file_edit: crate::file_edit::FileEditState::default(),
             terminal: crate::terminal::TerminalState::default(),
+            commands: crate::palette::PaletteState::default(),
             tools: crate::external_tools::ToolsState {
                 book: prefs
                     .get::<gitpoulpe_core::ToolBook>(crate::external_tools::TOOLS_KEY)

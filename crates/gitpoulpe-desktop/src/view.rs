@@ -90,6 +90,16 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
     } else {
         body
     };
+    let body = if s.commands.open {
+        col()
+            .w_full()
+            .grow(1.0)
+            .min_h(0.0)
+            .child(crate::palette_view::palette_bar(s))
+            .child(body)
+    } else {
+        body
+    };
     col()
         .w_full()
         .h_full()
@@ -126,7 +136,7 @@ fn footer(s: &State) -> El {
         .child(text(message).font(theme::SMALL).color(p.muted).truncate())
 }
 
-const HINTS: &str = "/ filtrer · j et k : fichier suivant ou précédent · 1 et 2 : changer de vue · m : unifié ou séparé · ↑ ↓ ← → PgUp PgDn : lire · r : actualiser · s : indexer · u : désindexer · x : sélectionner · Maj+S : appliquer à la sélection · clic sur un numéro de ligne : sélectionner (Maj pour étendre) · Ctrl+O : ouvrir un dépôt";
+const HINTS: &str = "/ filtrer · j et k : fichier suivant ou précédent · 1 et 2 : changer de vue · m : unifié ou séparé · ↑ ↓ ← → PgUp PgDn : lire · r : actualiser · s : indexer · u : désindexer · x : sélectionner · Maj+S : appliquer à la sélection · clic sur un numéro de ligne : sélectionner (Maj pour étendre) · Ctrl+O : ouvrir un dépôt · Ctrl+K : palette de commandes";
 
 fn open_button(p: &Palette, primary: bool) -> El {
     let (fill, ink) = if primary {

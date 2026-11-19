@@ -73,7 +73,7 @@ fn placeholders_are_replaced_inside_one_argument_and_unknown_ones_are_refused() 
         expand_args("{left}", &vars).unwrap_err(),
         ToolError::UnknownPlaceholder("left".to_owned())
     );
-    assert!(matches!(expand_args("{file", &vars), Ok(_)));
+    assert!(expand_args("{file", &vars).is_ok());
     assert_eq!(
         expand_args("{file}{file}", &[("file", "$x")]).unwrap(),
         ["$x$x"]
