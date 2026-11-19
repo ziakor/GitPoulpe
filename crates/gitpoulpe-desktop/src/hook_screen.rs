@@ -38,6 +38,7 @@ impl State {
         self.close_gitflow();
         self.close_pulls();
         self.close_file_history();
+        self.close_file_edit();
         self.profiles_open = false;
         self.hooks.open = true;
         self.reload_hooks();

@@ -41,6 +41,7 @@ mod tag;
 mod undo;
 mod watch;
 mod worktree;
+mod worktree_file;
 
 pub use blame::{Blame, BlameLine};
 pub use branch::{BranchError, DeleteMode};
@@ -84,6 +85,10 @@ pub use tag::TagError;
 pub use undo::UndoError;
 pub use watch::{MAX_WAIT, QUIET_PERIOD, RepoWatcher, Signal, WatchError, coalesce, is_relevant};
 pub use worktree::{BranchChoice, WorktreeError};
+pub use worktree_file::{
+    EDIT_LIMIT, EditError, FileToken, LineEnding, WorktreeFile, read_worktree_file,
+    save_worktree_file,
+};
 
 use std::ffi::OsString;
 

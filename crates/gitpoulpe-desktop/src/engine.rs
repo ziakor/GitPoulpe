@@ -376,6 +376,16 @@ pub enum Command {
         revision: Option<String>,
         path: String,
     },
+    FileEditRead {
+        request: u64,
+        path: String,
+    },
+    FileEditSave {
+        request: u64,
+        original: Box<gitpoulpe_git::WorktreeFile>,
+        text: String,
+        overwrite: bool,
+    },
     ReflogInspect {
         request: u64,
         oid: String,
@@ -744,6 +754,14 @@ pub enum Event {
     FileBlameLoaded {
         request: u64,
         result: Result<gitpoulpe_git::Blame, String>,
+    },
+    FileEditLoaded {
+        request: u64,
+        result: Result<gitpoulpe_git::WorktreeFile, String>,
+    },
+    FileEditSaved {
+        request: u64,
+        result: Result<gitpoulpe_git::WorktreeFile, (String, bool)>,
     },
     ReflogInspected {
         request: u64,
@@ -1669,6 +1687,51 @@ async fn run(
                                 .await
                                 .map_err(|e| e.to_string());
                             shared.emit(Event::FileHistoryLoaded { request, result });
+                        });
+                    }
+                    Command::FileEditRead { request, path } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = tokio::task::spawn_blocking(move || {
+                                gitpoulpe_git::read_worktree_file(&current.info, &path)
+                                    .map_err(|e| e.to_string())
+                            })
+                            .await
+                            .unwrap_or_else(|e| Err(e.to_string()));
+                            shared.emit(Event::FileEditLoaded { request, result });
+                        });
+                    }
+                    Command::FileEditSave {
+                        request,
+                        original,
+                        text,
+                        overwrite,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = tokio::task::spawn_blocking(move || {
+                                gitpoulpe_git::save_worktree_file(
+                                    &current.info,
+                                    &original,
+                                    &text,
+                                    overwrite,
+                                )
+                                .map_err(|e| {
+                                    (
+                                        e.to_string(),
+                                        e == gitpoulpe_git::EditError::ExternalChange,
+                                    )
+                                })
+                            })
+                            .await
+                            .unwrap_or_else(|e| Err((e.to_string(), false)));
+                            shared.emit(Event::FileEditSaved { request, result });
                         });
                     }
                     Command::FileBlameLoad {

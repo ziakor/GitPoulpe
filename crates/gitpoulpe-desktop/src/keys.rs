@@ -213,6 +213,10 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         s.close_file_history();
         return true;
     }
+    if s.file_edit.open && event.key == Key::Escape {
+        s.file_edit_close_request();
+        return true;
+    }
     if s.stashes.open && event.key == Key::Escape {
         if s.stashes.confirm_drop.is_some() {
             s.stash_cancel_drop();
@@ -293,6 +297,7 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         || s.stashes.open
         || s.reflog.open
         || s.file_history.open
+        || s.file_edit.open
         || s.undo_screen.open
         || s.worktrees.open
         || s.hooks.open

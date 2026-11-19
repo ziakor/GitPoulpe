@@ -203,6 +203,7 @@ pub struct State {
     pub sequencing: crate::sequencing::SequenceSlot,
     pub reflog: crate::reflogs::ReflogState,
     pub file_history: crate::file_history::FileHistoryState,
+    pub file_edit: crate::file_edit::FileEditState,
     pub publishing: crate::publishing::PublishSlot,
     pub pulling: crate::pulling::PullSlot,
     pub operation_kind: Option<gitpoulpe_core::OperationKind>,
@@ -349,6 +350,7 @@ impl State {
             sequencing: crate::sequencing::SequenceSlot::default(),
             reflog: crate::reflogs::ReflogState::default(),
             file_history: crate::file_history::FileHistoryState::default(),
+            file_edit: crate::file_edit::FileEditState::default(),
             publishing: crate::publishing::PublishSlot::default(),
             pulling: crate::pulling::PullSlot::default(),
             operation_kind: None,
@@ -652,6 +654,7 @@ impl State {
                 self.sequencing = crate::sequencing::SequenceSlot::default();
                 self.reflog = crate::reflogs::ReflogState::default();
                 self.file_history = crate::file_history::FileHistoryState::default();
+                self.file_edit = crate::file_edit::FileEditState::default();
                 self.publishing = crate::publishing::PublishSlot::default();
                 self.pulling = crate::pulling::PullSlot::default();
                 self.operation_kind = None;
@@ -872,6 +875,10 @@ impl State {
                 self.apply_file_revision(request, result)
             }
             Event::FileBlameLoaded { request, result } => self.apply_file_blame(request, result),
+            Event::FileEditLoaded { request, result } => {
+                self.apply_file_edit_loaded(request, result)
+            }
+            Event::FileEditSaved { request, result } => self.apply_file_edit_saved(request, result),
             Event::ReflogInspected { request, result } => {
                 self.apply_reflog_inspected(request, result)
             }
@@ -2058,6 +2065,7 @@ impl State {
         self.close_gitflow();
         self.close_pulls();
         self.close_file_history();
+        self.close_file_edit();
         let selected = self
             .active_profile()
             .or_else(|| self.book.profiles.first())
@@ -2423,6 +2431,7 @@ impl State {
         self.close_gitflow();
         self.close_pulls();
         self.close_file_history();
+        self.close_file_edit();
         self.start_history();
     }
 
@@ -2563,6 +2572,7 @@ impl State {
         self.close_gitflow();
         self.close_pulls();
         self.close_file_history();
+        self.close_file_edit();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::CommitInspect {

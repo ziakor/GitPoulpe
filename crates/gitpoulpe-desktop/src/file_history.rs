@@ -56,6 +56,7 @@ impl State {
         self.close_submodules();
         self.close_gitflow();
         self.close_pulls();
+        self.close_file_edit();
         self.profiles_open = false;
         let request = self.file_history.request + 1;
         let revision_request = self.file_history.revision_request + 1;

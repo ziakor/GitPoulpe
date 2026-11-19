@@ -67,6 +67,8 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
         crate::reflogs_view::reflog_screen(s)
     } else if s.file_history.open {
         crate::file_history_view::file_history_screen(s)
+    } else if s.file_edit.open {
+        crate::file_edit_view::file_edit_screen(s)
     } else if s.undo_screen.open {
         crate::undos_view::undo_screen(s)
     } else if s.worktrees.open {
@@ -1323,6 +1325,7 @@ fn header_row(s: &State, index: usize, entry: &ChangeEntry) -> El {
                                 .min_w(0.0)
                                 .truncate(),
                         )
+                        .child(edit_action(s, index, entry, &path))
                         .child(history_action(s, index, entry, &path))
                         .child(header_action(s, index, entry, &path)),
                 )
@@ -1340,6 +1343,23 @@ fn header_row(s: &State, index: usize, entry: &ChangeEntry) -> El {
                     line
                 }),
         )
+}
+
+fn edit_action(s: &State, index: usize, entry: &ChangeEntry, label: &str) -> El {
+    if s.view != ViewKind::Unstaged || entry.is_conflict() || !entry.is_unstaged() {
+        return el().w(0.0);
+    }
+    let Some(target) = entry.path.to_str().map(str::to_owned) else {
+        return el().w(0.0);
+    };
+    stage_button(
+        s,
+        format!("ed{index}"),
+        format!("Éditer {label}"),
+        "Éditer".to_owned(),
+        false,
+    )
+    .on_press(move |s: &mut State| s.open_file_edit(target.clone()))
 }
 
 fn history_action(s: &State, index: usize, entry: &ChangeEntry, label: &str) -> El {

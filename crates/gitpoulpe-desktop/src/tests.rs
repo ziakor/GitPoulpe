@@ -15,6 +15,7 @@ mod browsing;
 mod cloning;
 mod committing;
 mod conflicting;
+mod file_editing;
 mod file_histories;
 mod gitflowing;
 mod history;
