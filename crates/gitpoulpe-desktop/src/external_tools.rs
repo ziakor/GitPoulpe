@@ -20,6 +20,7 @@ pub struct ToolsState {
     pub editor: ToolForm,
     pub diff: ToolForm,
     pub merge: ToolForm,
+    pub shell: ToolForm,
     pub error: Option<String>,
     pub notice: Option<String>,
     pub running: Option<String>,
@@ -35,6 +36,7 @@ impl ToolsState {
             ToolKind::Editor => &self.editor,
             ToolKind::Diff => &self.diff,
             ToolKind::Merge => &self.merge,
+            ToolKind::Shell => &self.shell,
         }
     }
 
@@ -43,6 +45,7 @@ impl ToolsState {
             ToolKind::Editor => &mut self.editor,
             ToolKind::Diff => &mut self.diff,
             ToolKind::Merge => &mut self.merge,
+            ToolKind::Shell => &mut self.shell,
         }
     }
 }

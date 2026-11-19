@@ -775,6 +775,7 @@ pub enum Event {
         request: u64,
         result: Result<gitpoulpe_git::Blame, String>,
     },
+    TerminalOutput,
     ToolFinished {
         request: u64,
         result: Result<(), String>,

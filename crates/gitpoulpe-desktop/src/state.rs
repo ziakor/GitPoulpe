@@ -205,6 +205,7 @@ pub struct State {
     pub file_history: crate::file_history::FileHistoryState,
     pub file_edit: crate::file_edit::FileEditState,
     pub tools: crate::external_tools::ToolsState,
+    pub terminal: crate::terminal::TerminalState,
     pub publishing: crate::publishing::PublishSlot,
     pub pulling: crate::pulling::PullSlot,
     pub operation_kind: Option<gitpoulpe_core::OperationKind>,
@@ -352,6 +353,7 @@ impl State {
             reflog: crate::reflogs::ReflogState::default(),
             file_history: crate::file_history::FileHistoryState::default(),
             file_edit: crate::file_edit::FileEditState::default(),
+            terminal: crate::terminal::TerminalState::default(),
             tools: crate::external_tools::ToolsState {
                 book: prefs
                     .get::<gitpoulpe_core::ToolBook>(crate::external_tools::TOOLS_KEY)
@@ -662,6 +664,7 @@ impl State {
                 self.reflog = crate::reflogs::ReflogState::default();
                 self.file_history = crate::file_history::FileHistoryState::default();
                 self.file_edit = crate::file_edit::FileEditState::default();
+                self.terminal = crate::terminal::TerminalState::default();
                 self.publishing = crate::publishing::PublishSlot::default();
                 self.pulling = crate::pulling::PullSlot::default();
                 self.operation_kind = None;
@@ -883,6 +886,7 @@ impl State {
             }
             Event::FileBlameLoaded { request, result } => self.apply_file_blame(request, result),
             Event::ToolFinished { request, result } => self.apply_tool_finished(request, result),
+            Event::TerminalOutput => self.apply_terminal_output(),
             Event::FileEditLoaded { request, result } => {
                 self.apply_file_edit_loaded(request, result)
             }
@@ -2075,6 +2079,7 @@ impl State {
         self.close_file_history();
         self.close_file_edit();
         self.close_tools();
+        self.close_terminal();
         let selected = self
             .active_profile()
             .or_else(|| self.book.profiles.first())
@@ -2442,6 +2447,7 @@ impl State {
         self.close_file_history();
         self.close_file_edit();
         self.close_tools();
+        self.close_terminal();
         self.start_history();
     }
 
@@ -2584,6 +2590,7 @@ impl State {
         self.close_file_history();
         self.close_file_edit();
         self.close_tools();
+        self.close_terminal();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::CommitInspect {

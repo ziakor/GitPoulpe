@@ -34,6 +34,7 @@ fn section(s: &State, kind: ToolKind) -> El {
         ToolKind::Editor => ("tl-editor-program", "tl-editor-args"),
         ToolKind::Diff => ("tl-diff-program", "tl-diff-args"),
         ToolKind::Merge => ("tl-merge-program", "tl-merge-args"),
+        ToolKind::Shell => ("tl-shell-program", "tl-shell-args"),
     };
     let variables = kind
         .variables()
@@ -67,6 +68,10 @@ fn section(s: &State, kind: ToolKind) -> El {
         ToolKind::Merge => (
             program.on_edit(|s: &mut State| &mut s.tools.merge.program),
             args.on_edit(|s: &mut State| &mut s.tools.merge.args),
+        ),
+        ToolKind::Shell => (
+            program.on_edit(|s: &mut State| &mut s.tools.shell.program),
+            args.on_edit(|s: &mut State| &mut s.tools.shell.args),
         ),
     };
     col()

@@ -84,6 +84,7 @@ impl State {
         self.close_file_history();
         self.close_file_edit();
         self.close_tools();
+        self.close_terminal();
         self.profiles_open = false;
         self.ignored.open = true;
         self.ignored.target = None;

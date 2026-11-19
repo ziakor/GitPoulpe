@@ -141,6 +141,9 @@ fn copy_selection(s: &mut State, tx: &Tx) -> bool {
 }
 
 pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
+    if s.terminal.open && s.terminal.session.is_some() {
+        return s.terminal_key(event);
+    }
     if event.mods.cmd && event.is_command('c') {
         return copy_selection(s, tx);
     }
@@ -302,6 +305,7 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         || s.reflog.open
         || s.file_history.open
         || s.file_edit.open
+        || s.terminal.open
         || s.undo_screen.open
         || s.worktrees.open
         || s.hooks.open

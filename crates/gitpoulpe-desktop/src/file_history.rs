@@ -58,6 +58,7 @@ impl State {
         self.close_pulls();
         self.close_file_edit();
         self.close_tools();
+        self.close_terminal();
         self.profiles_open = false;
         let request = self.file_history.request + 1;
         let revision_request = self.file_history.revision_request + 1;

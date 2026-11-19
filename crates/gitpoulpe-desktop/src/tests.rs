@@ -40,6 +40,7 @@ mod staging;
 mod stashing;
 mod submoduling;
 mod tagging;
+mod terminalling;
 mod undoing;
 mod worktreeing;
 
@@ -423,6 +424,7 @@ fn step(rt: &mut Runtime<State>) {
             s.apply_copy(tx);
             s.apply_anchor(tx);
             s.apply_reveal(tx);
+            s.apply_terminal(tx);
         });
         rt.frame(1.0 / 60.0);
         std::thread::sleep(Duration::from_millis(3));

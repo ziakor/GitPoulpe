@@ -5,16 +5,18 @@ pub enum ToolKind {
     Editor,
     Diff,
     Merge,
+    Shell,
 }
 
 impl ToolKind {
-    pub const ALL: [Self; 3] = [Self::Editor, Self::Diff, Self::Merge];
+    pub const ALL: [Self; 4] = [Self::Editor, Self::Diff, Self::Merge, Self::Shell];
 
     pub fn caption(self) -> &'static str {
         match self {
             Self::Editor => "Éditeur",
             Self::Diff => "Outil de comparaison",
             Self::Merge => "Outil de fusion",
+            Self::Shell => "Terminal (shell)",
         }
     }
 
@@ -23,6 +25,7 @@ impl ToolKind {
             Self::Editor => &["file", "repo"],
             Self::Diff => &["left", "right", "file", "repo"],
             Self::Merge => &["base", "ours", "theirs", "merged", "repo"],
+            Self::Shell => &["repo"],
         }
     }
 
@@ -31,6 +34,7 @@ impl ToolKind {
             Self::Editor => "--wait {file}",
             Self::Diff => "--diff {left} {right}",
             Self::Merge => "--merge {base} {ours} {theirs} {merged}",
+            Self::Shell => "-l",
         }
     }
 }
@@ -48,10 +52,12 @@ impl ToolConfig {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ToolBook {
     pub editor: ToolConfig,
     pub diff: ToolConfig,
     pub merge: ToolConfig,
+    pub shell: ToolConfig,
 }
 
 impl ToolBook {
@@ -60,6 +66,7 @@ impl ToolBook {
             ToolKind::Editor => &self.editor,
             ToolKind::Diff => &self.diff,
             ToolKind::Merge => &self.merge,
+            ToolKind::Shell => &self.shell,
         }
     }
 
@@ -68,6 +75,7 @@ impl ToolBook {
             ToolKind::Editor => self.editor = config,
             ToolKind::Diff => self.diff = config,
             ToolKind::Merge => self.merge = config,
+            ToolKind::Shell => self.shell = config,
         }
     }
 }

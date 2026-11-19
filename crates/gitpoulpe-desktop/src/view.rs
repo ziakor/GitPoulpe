@@ -71,6 +71,8 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
         crate::file_history_view::file_history_screen(s)
     } else if s.file_edit.open {
         crate::file_edit_view::file_edit_screen(s)
+    } else if s.terminal.open {
+        crate::terminal_view::terminal_screen(s)
     } else if s.undo_screen.open {
         crate::undos_view::undo_screen(s)
     } else if s.worktrees.open {

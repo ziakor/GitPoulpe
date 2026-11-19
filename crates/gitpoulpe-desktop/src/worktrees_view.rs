@@ -324,6 +324,10 @@ pub fn worktrees_screen(s: &State) -> El {
                 .on_press(|s: &mut State| s.worktree_prune()),
         )
         .child(
+            action(s, "wt-terminal", "Terminal ici", false)
+                .on_press(|s: &mut State| s.worktree_open_terminal()),
+        )
+        .child(
             action(s, "wt-branches", "Branches", false).on_press(|s: &mut State| s.open_branches()),
         )
         .child(

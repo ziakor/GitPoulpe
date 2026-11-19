@@ -13,6 +13,7 @@ path = "src/main.rs"
 gitpoulpe-core = { path = "../gitpoulpe-core" }
 gitpoulpe-git = { path = "../gitpoulpe-git" }
 gitpoulpe-hosting = { path = "../gitpoulpe-hosting" }
+gitpoulpe-terminal = { path = "../gitpoulpe-terminal" }
 rune.workspace = true
 tokio.workspace = true
 

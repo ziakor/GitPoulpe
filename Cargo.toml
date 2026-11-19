@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/gitpoulpe-core", "crates/gitpoulpe-git", "crates/gitpoulpe-hosting", "crates/gitpoulpe-desktop"]
+members = ["crates/gitpoulpe-core", "crates/gitpoulpe-git", "crates/gitpoulpe-hosting", "crates/gitpoulpe-desktop", "crates/gitpoulpe-terminal"]
 
 [workspace.package]
 version = "0.0.0"

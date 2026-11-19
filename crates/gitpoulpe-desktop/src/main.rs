@@ -52,6 +52,8 @@ mod submodule_screen;
 mod submodule_screen_view;
 mod tags;
 mod tags_view;
+mod terminal;
+mod terminal_view;
 mod theme;
 mod undos;
 mod undos_view;
@@ -101,11 +103,12 @@ fn main() {
         setup: Some(|state, waker| state.setup(waker)),
         poll: Some(|state, t, tx| {
             state.perf_frame(t, tx);
-            let changed = state.drain();
+            let mut changed = state.drain();
             state.apply_follow(tx);
             state.apply_copy(tx);
             state.apply_anchor(tx);
             state.apply_reveal(tx);
+            changed |= state.apply_terminal(tx);
             changed
         }),
         scenes: &[
