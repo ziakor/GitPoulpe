@@ -2,7 +2,7 @@
 
 A free, open-source native Git client written in Rust, with the [Rune](https://github.com/anomalyco/rune) UI toolkit (GPLv3). Linux first; Windows and macOS will follow.
 
-Status: milestone M1, "local inspection", is delivered. Milestone M2, "local work", is in progress: so far the app can stage and unstage whole files, single blocks and selected lines, manage local Git profiles and create commits. Reading a repository never modifies it; the only writes are the explicit actions listed under "Writing".
+Status: Linux only. Local reading and writing, branches, history rewriting with recovery, conflicts, GitHub pull requests and GitLab merge requests, patches, workspaces and the other features described below are delivered; Windows, macOS, WSL, Bitbucket, Azure DevOps, Jira, Trello, in-app updates and AI features are not. Provider features have been tested against simulated servers, not real accounts. Start with the [user guide](docs/USER_GUIDE.md), which lists what is and is not supported. Reading a repository never modifies it; the only writes are the explicit actions described in each section.
 
 The interface is currently in French only.
 

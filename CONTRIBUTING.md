@@ -18,9 +18,12 @@ cargo +1.100.0 fmt --all -- --check
 cargo +1.100.0 clippy --workspace --all-targets --locked -- -D warnings
 cargo +1.100.0 test --workspace --locked
 python3 scripts/check-licenses.py
+python3 scripts/check-docs.py
 ```
 
 Run the whole test suite once before proposing a change; while working, run only the tests your change touches (`cargo +1.100.0 test -p gitpoulpe-desktop <name>`). The desktop tests drive the real UI runtime and take a few minutes together. Read the clippy output: a clean exit is the bar, not a skimmed log.
+
+`scripts/check-docs.py` verifies Markdown links and that `docs/USER_GUIDE.md` lists exactly the palette commands of the app, so update the guide when you add or rename one.
 
 `packaging/linux/test.sh` rebuilds the Linux package and exercises install and uninstall in temporary directories. It needs a release build (several minutes) and is only required for packaging changes. The reference-repository performance check is opt-in: `GITPOULPE_REFERENCE_REPO=/path/to/large/repo cargo +1.100.0 test --release -p gitpoulpe-desktop reference_repository_cpu_budget -- --ignored --nocapture`. Include its numbers when you change rendering, diff loading or watching.
 
