@@ -248,3 +248,63 @@ fn a_restricted_or_revoked_token_shows_its_own_message_and_never_falls_back_to_a
     });
     assert!(shows(&rt, "expiré, révoqué ou invalide"));
 }
+
+fn open_acme_tool(rt: &mut Runtime<State>, fake: &Fake) {
+    connect(rt, fake, "good");
+    rt.state.accounts.second_ms = 1;
+    browse(rt);
+    click(rt, "br-scope0");
+    settle(rt, |s| {
+        s.accounts.browser.scope.as_deref() == Some("acme") && !s.accounts.browser.loading
+    });
+    click(rt, "brk0");
+    step(rt);
+    assert_eq!(
+        rt.state.accounts.browser.selected.as_deref(),
+        Some("acme/tool")
+    );
+}
+
+#[test]
+fn a_fork_is_created_once_traced_to_its_source_and_can_be_cloned() {
+    let fake = Fake::start();
+    let mut rt = screen(Arc::new(MemoryStore::default()));
+    open_acme_tool(&mut rt, &fake);
+    click(&mut rt, "br-fork-me");
+    settle(&mut rt, |s| {
+        !s.accounts.browser.fork_busy && s.accounts.browser.fork_done.is_some()
+    });
+    assert!(shows(&rt, "Fork créé : octo/tool (fork de acme/tool)."));
+    click(&mut rt, "br-fork-me");
+    settle(&mut rt, |s| {
+        !s.accounts.browser.fork_busy
+            && s.accounts
+                .browser
+                .fork_done
+                .as_deref()
+                .is_some_and(|d| d.contains("existe déjà"))
+    });
+    assert!(shows(&rt, "Rien n'a été créé"));
+    click(&mut rt, "br-clone-fork");
+    settle(&mut rt, |s| s.clone.open);
+    assert_eq!(
+        rt.state.clone.url.text,
+        "https://example.test/octo/tool.git"
+    );
+}
+
+#[test]
+fn a_fork_answer_arriving_after_another_repository_was_selected_is_dropped() {
+    let fake = Fake::start();
+    let mut rt = screen(Arc::new(MemoryStore::default()));
+    open_acme_tool(&mut rt, &fake);
+    rt.state.fork_selected_repo(None);
+    assert!(rt.state.accounts.browser.fork_busy);
+    rt.state.select_browser_repo("acme/other".to_owned());
+    for _ in 0..60 {
+        step(&mut rt);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let browser = &rt.state.accounts.browser;
+    assert!(browser.fork_done.is_none() && browser.forked.is_none() && !browser.fork_busy);
+}

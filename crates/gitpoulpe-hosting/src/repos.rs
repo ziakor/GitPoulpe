@@ -26,6 +26,7 @@ pub struct RepoSummary {
     pub default_branch: Option<String>,
     pub clone_url: String,
     pub can_push: bool,
+    pub parent: Option<String>,
 }
 
 impl RepoSummary {
@@ -40,7 +41,10 @@ pub struct Listing<T> {
     pub truncated: bool,
 }
 
-fn client(store: &dyn SecretStore, connection: &Connection) -> Result<ApiClient, GithubError> {
+pub(crate) fn client(
+    store: &dyn SecretStore,
+    connection: &Connection,
+) -> Result<ApiClient, GithubError> {
     let token = store
         .get(&connection.secret_key())?
         .map(|t| Token::new(&t))
@@ -84,7 +88,7 @@ fn text(value: &Value, key: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-fn parse_repo(connection: &Connection, value: &Value) -> Option<RepoSummary> {
+pub(crate) fn parse_repo(connection: &Connection, value: &Value) -> Option<RepoSummary> {
     let name = text(value, "name")?;
     let owner = text(value.get("owner")?, "login")?;
     let clone_url = text(value, "clone_url")?;
@@ -99,6 +103,7 @@ fn parse_repo(connection: &Connection, value: &Value) -> Option<RepoSummary> {
         archived: flag("archived"),
         default_branch: text(value, "default_branch"),
         clone_url,
+        parent: value.get("parent").and_then(|p| text(p, "full_name")),
         can_push: value
             .get("permissions")
             .and_then(|p| p.get("push"))
@@ -107,7 +112,7 @@ fn parse_repo(connection: &Connection, value: &Value) -> Option<RepoSummary> {
     })
 }
 
-fn valid_org(login: &str) -> bool {
+pub(crate) fn valid_org(login: &str) -> bool {
     !login.is_empty()
         && login.len() <= 100
         && login

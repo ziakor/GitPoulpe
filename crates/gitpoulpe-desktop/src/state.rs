@@ -918,6 +918,7 @@ impl State {
             Event::AccountConnected { request, result } => {
                 self.apply_account_connected(request, result)
             }
+            Event::BrowserFork { request, result } => self.apply_browser_fork(request, result),
             Event::BrowserOrgs { request, result } => self.apply_browser_orgs(request, result),
             Event::BrowserRepos { request, result } => self.apply_browser_repos(request, result),
             Event::AccountDeviceCode { request, code } => {

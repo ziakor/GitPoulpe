@@ -47,6 +47,8 @@ pub enum GithubError {
     NotConnected,
     DeviceDenied,
     DeviceExpired,
+    ForkPending,
+    NameTaken(String),
 }
 
 impl std::fmt::Display for GithubError {
@@ -72,6 +74,13 @@ impl std::fmt::Display for GithubError {
             Self::Http(e) => write!(f, "{e}"),
             Self::Secret(e) => write!(f, "{e}"),
             Self::NotConnected => f.write_str("aucun jeton n'est enregistré pour cette connexion"),
+            Self::ForkPending => f.write_str(
+                "le fork est en cours de création chez GitHub : réessayez dans un instant",
+            ),
+            Self::NameTaken(name) => write!(
+                f,
+                "{name} existe déjà et n'est pas un fork de ce dépôt : choisissez une autre destination"
+            ),
             Self::DeviceDenied => f.write_str("l'autorisation a été refusée dans le navigateur"),
             Self::DeviceExpired => {
                 f.write_str("le code a expiré avant l'autorisation : recommencez la connexion")

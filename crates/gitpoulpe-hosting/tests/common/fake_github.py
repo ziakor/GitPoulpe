@@ -5,6 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 LOG = sys.argv[1]
 POLLS = [0]
+FORKS = {}
 USERS = {
     "good": {"login": "Octo", "name": "Octo Cat", "scopes": "repo, read:org"},
     "fine": {"login": "Octo", "name": "Octo Cat", "scopes": None},
@@ -15,6 +16,8 @@ USERS = {
 
 
 class Handler(BaseHTTPRequestHandler):
+    host = "example.test"
+
     def log_message(self, *args):
         pass
 
@@ -69,6 +72,34 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, pages[page], headers)
         return self.reply(404, {"message": "Not Found"})
 
+    def repo_get(self, token):
+        name = self.path[len("/repos/"):].split("?")[0].lower()
+        sources = {"acme/tool": None, "octo/taken": None,
+                   "octo/existing": "acme/existing", "acme/existing": None}
+        if name in sources:
+            extra = {"fork": True, "parent": {"full_name": sources[name]}} if sources[name] else {}
+            return self.reply(200, self.repo(*name.split("/"), **extra))
+        if name in FORKS:
+            FORKS[name] += 1
+            if FORKS[name] <= FORKS.get("lag", 0) + 1:
+                return self.reply(404, {"message": "Not Found"})
+            return self.reply(200, self.repo(*name.split("/"), fork=True,
+                                             parent={"full_name": "acme/" + name.split("/")[1]}))
+        self.reply(404, {"message": "Not Found"})
+
+    def fork_post(self, body):
+        parts = self.path.split("/")
+        source = parts[2] + "/" + parts[3]
+        dest = (body.get("organization") or "octo") + "/" + parts[3]
+        if body.get("organization") == "locked":
+            return self.reply(403, {"message": "You do not have permission to fork into this organization"})
+        if dest in FORKS and not dest.endswith("/never"):
+            return self.reply(202, self.repo(*dest.split("/")))
+        FORKS[dest] = 0
+        if parts[3] == "never":
+            FORKS["lag"] = 99
+        self.reply(202, self.repo(*dest.split("/"), fork=True, parent={"full_name": source}))
+
     def do_POST(self):
         length = int(self.headers.get("Content-Length", "0"))
         raw = self.rfile.read(length).decode()
@@ -76,6 +107,10 @@ class Handler(BaseHTTPRequestHandler):
             f.write(json.dumps({"path": self.path, "auth": self.headers.get("Authorization"),
                                 "accept": self.headers.get("Accept"), "body": raw}) + "\n")
         body = json.loads(raw or "{}")
+        if self.path.startswith("/api/v3/"):
+            self.path = self.path[len("/api/v3"):]
+        if self.path.startswith("/repos/") and self.path.endswith("/forks"):
+            return self.fork_post(body)
         if body.get("client_id") != "client-1":
             return self.reply(200, {"error": "incorrect_client_credentials"})
         if self.path == "/login/device/code":
@@ -116,6 +151,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
+        if self.path.startswith("/repos/"):
+            return self.repo_get(token)
         if self.path.startswith(("/user/orgs", "/user/repos", "/orgs/")):
             return self.listing(token)
         if self.path != "/user":

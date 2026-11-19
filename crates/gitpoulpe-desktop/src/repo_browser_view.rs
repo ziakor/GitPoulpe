@@ -179,10 +179,66 @@ fn detail(s: &State) -> El {
     if !tags.is_empty() {
         panel = panel.child(text(tags).key("br-tags").font(theme::SMALL).color(p.muted));
     }
-    panel.child(
+    panel = panel.child(
         action(s, "br-clone", "Cloner ce dépôt", true)
             .on_press(|s: &mut State| s.clone_selected_repo()),
-    )
+    );
+    let browser = &s.accounts.browser;
+    if let Some(done) = &browser.fork_done {
+        panel = panel.child(
+            text(done.clone())
+                .key("br-fork-ok")
+                .font(theme::SMALL)
+                .color(p.text)
+                .wrap(),
+        );
+    }
+    if let Some(error) = &browser.fork_error {
+        panel = panel.child(
+            text(error.clone())
+                .key("br-fork-error")
+                .font(theme::SMALL)
+                .color(p.red)
+                .wrap(),
+        );
+    }
+    if browser.forked.is_some() {
+        panel = panel.child(
+            action(s, "br-clone-fork", "Cloner le fork", false)
+                .on_press(|s: &mut State| s.clone_forked_repo()),
+        );
+    }
+    panel = panel.child(
+        text(
+            if browser.fork_busy {
+                "Création du fork en cours…"
+            } else {
+                "Créer un fork"
+            }
+            .to_owned(),
+        )
+        .font(theme::BODY_STRONG)
+        .color(p.text),
+    );
+    if !browser.fork_busy {
+        panel = panel.child(
+            action(s, "br-fork-me", "Forker vers mon compte", false)
+                .on_press(|s: &mut State| s.fork_selected_repo(None)),
+        );
+        for (i, org) in browser.orgs.iter().enumerate() {
+            let login = org.login.clone();
+            panel = panel.child(
+                action(
+                    s,
+                    &format!("br-fork{i}"),
+                    &format!("Forker vers {}", org.login),
+                    false,
+                )
+                .on_press(move |s: &mut State| s.fork_selected_repo(Some(login.clone()))),
+            );
+        }
+    }
+    panel
 }
 
 pub fn browser_screen(s: &State) -> El {
