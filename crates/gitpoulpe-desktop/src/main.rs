@@ -1,3 +1,4 @@
+mod about;
 mod accounts;
 mod accounts_view;
 mod branches;
@@ -114,6 +115,10 @@ fn demo_light(state: &mut State) {
 }
 
 fn main() {
+    if let Some(text) = about::text_for_args(std::env::args_os()) {
+        print!("{text}");
+        return;
+    }
     rune::App::new(AppSpec::<State> {
         fonts: theme::FONTS,
         families: theme::FAMILIES,

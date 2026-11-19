@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=GitPoulpe
+GenericName=Git client
+Comment=Native Git client
+Exec=@PREFIX@/bin/gitpoulpe %u
+Terminal=false
+Categories=Development;RevisionControl;
+MimeType=x-scheme-handler/gitpoulpe;
+StartupWMClass=gitpoulpe
