@@ -75,6 +75,10 @@ pub async fn list_reviews(
     name: &str,
     number: u64,
 ) -> Result<Vec<Review>, GithubError> {
+    if connection.provider == gitpoulpe_core::Provider::Gitlab {
+        let client = client(store, connection)?;
+        return crate::gitlab_review::list_reviews(&client, (owner, name), number).await;
+    }
     if !valid_org(owner) || !valid_org(name) {
         return Err(GithubError::NotFound);
     }
@@ -88,8 +92,14 @@ pub async fn list_reviews(
 }
 
 pub fn review_exists(reviews: &[Review], login: &str, submission: &ReviewSubmission) -> bool {
+    let state = match submission.decision {
+        ReviewDecision::Comment => "COMMENTED",
+        ReviewDecision::Approve => "APPROVED",
+        ReviewDecision::RequestChanges => "CHANGES_REQUESTED",
+    };
     reviews.iter().any(|r| {
-        r.author.eq_ignore_ascii_case(login)
+        r.state == state
+            && r.author.eq_ignore_ascii_case(login)
             && r.commit_sha == submission.commit_sha
             && r.body.trim() == submission.body.trim()
     })
@@ -103,6 +113,17 @@ pub async fn submit_review(
     number: u64,
     submission: &ReviewSubmission,
 ) -> Result<Review, GithubError> {
+    if connection.provider == gitpoulpe_core::Provider::Gitlab {
+        let client = client(store, connection)?;
+        return crate::gitlab_review::submit_review(
+            &client,
+            connection,
+            (owner, name),
+            number,
+            submission,
+        )
+        .await;
+    }
     if !valid_org(owner) || !valid_org(name) {
         return Err(GithubError::NotFound);
     }

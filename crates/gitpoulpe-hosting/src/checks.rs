@@ -79,8 +79,13 @@ pub async fn load_checks(
     connection: &Connection,
     owner: &str,
     name: &str,
+    number: u64,
     sha: &str,
 ) -> Result<Checks, GithubError> {
+    if connection.provider == gitpoulpe_core::Provider::Gitlab {
+        let client = client(store, connection)?;
+        return crate::gitlab_merge::load_checks(&client, (owner, name), number, sha).await;
+    }
     let sha_ok =
         !sha.is_empty() && sha.len() <= 64 && sha.chars().all(|c| c.is_ascii_alphanumeric());
     if !valid_org(owner) || !valid_org(name) || !sha_ok {

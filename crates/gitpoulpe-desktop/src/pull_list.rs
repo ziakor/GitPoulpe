@@ -468,9 +468,6 @@ impl State {
     }
 
     pub fn load_pull_merge_info(&mut self) {
-        if self.pull_is_gitlab() {
-            return;
-        }
         let Some((connection, owner, name)) = self.pull_list_target() else {
             return;
         };
@@ -605,6 +602,11 @@ impl State {
         unknown: bool,
         result: Result<HostedMerge, String>,
     ) -> bool {
+        let noun = if self.pull_is_gitlab() {
+            "Merge request"
+        } else {
+            "Pull request"
+        };
         let list = &mut self.pulls.list;
         if !list.open || request != list.merge_request || list.selected != Some(number) {
             return false;
@@ -613,9 +615,9 @@ impl State {
         let merged = match result {
             Ok(outcome) => {
                 list.merge_notice = Some(if outcome.verified_merged {
-                    format!("Pull request fusionnée (commit {}).", short(&outcome.sha))
+                    format!("{noun} fusionnée (commit {}).", short(&outcome.sha))
                 } else {
-                    "GitHub a répondu que la fusion est faite, mais l'état distant ne la confirme pas encore : actualisez avant de conclure.".to_owned()
+                    "Le serveur a répondu que la fusion est faite, mais l'état distant ne la confirme pas encore : actualisez avant de conclure.".to_owned()
                 });
                 outcome.verified_merged
             }
@@ -701,9 +703,6 @@ impl State {
     }
 
     pub fn load_pull_checks(&mut self) {
-        if self.pull_is_gitlab() {
-            return;
-        }
         let Some((connection, owner, name)) = self.pull_list_target() else {
             return;
         };
@@ -729,7 +728,7 @@ impl State {
         let sender = self.event_tx();
         let waker = self.waker_slot();
         self.hosting.runtime.spawn(async move {
-            let result = load_checks(secrets.as_ref(), &connection, &owner, &name, &sha)
+            let result = load_checks(secrets.as_ref(), &connection, &owner, &name, number, &sha)
                 .await
                 .map_err(|e| e.to_string());
             let _ = sender.send(Event::PullChecksLoaded {
@@ -776,9 +775,6 @@ impl State {
     }
 
     pub fn reload_pull_comments(&mut self) {
-        if self.pull_is_gitlab() {
-            return;
-        }
         let Some(number) = self.pulls.list.selected else {
             return;
         };
@@ -1193,9 +1189,6 @@ impl State {
     }
 
     pub fn reload_reviews(&mut self, verify: bool) {
-        if self.pull_is_gitlab() {
-            return;
-        }
         let Some(number) = self.pulls.list.selected else {
             return;
         };
@@ -1284,7 +1277,7 @@ impl State {
         } else if submission.decision != ReviewDecision::Comment
             && author.eq_ignore_ascii_case(&login)
         {
-            Some("Vous êtes l'auteur de cette pull request : GitHub n'autorise ni l'approbation ni la demande de changements sur sa propre PR.".to_owned())
+            Some("Vous êtes l'auteur de cette pull request : le fournisseur n'autorise ni l'approbation ni la demande de changements sur sa propre PR.".to_owned())
         } else {
             None
         };

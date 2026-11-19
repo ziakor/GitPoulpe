@@ -137,6 +137,10 @@ pub async fn list_comments(
     name: &str,
     number: u64,
 ) -> Result<PullComments, GithubError> {
+    if connection.provider == gitpoulpe_core::Provider::Gitlab {
+        let client = client(store, connection)?;
+        return crate::gitlab_review::list_comments(&client, (owner, name), number).await;
+    }
     checked(owner, name)?;
     let client = client(store, connection)?;
     let issue = pages(
@@ -163,6 +167,10 @@ pub async fn post_comment(
     number: u64,
     body: &str,
 ) -> Result<IssueComment, GithubError> {
+    if connection.provider == gitpoulpe_core::Provider::Gitlab {
+        let client = client(store, connection)?;
+        return crate::gitlab_review::post_comment(&client, (owner, name), number, body).await;
+    }
     checked(owner, name)?;
     let body = nonempty(body)?;
     let client = client(store, connection)?;
@@ -187,6 +195,10 @@ pub async fn current_head(
     name: &str,
     number: u64,
 ) -> Result<String, GithubError> {
+    if connection.provider == gitpoulpe_core::Provider::Gitlab {
+        let client = client(store, connection)?;
+        return crate::gitlab_review::current_head(&client, (owner, name), number).await;
+    }
     checked(owner, name)?;
     let client = client(store, connection)?;
     let response = client
@@ -211,6 +223,17 @@ pub async fn post_line_comment(
     anchor: &LineAnchor,
     body: &str,
 ) -> Result<ReviewComment, GithubError> {
+    if connection.provider == gitpoulpe_core::Provider::Gitlab {
+        let client = client(store, connection)?;
+        return crate::gitlab_review::post_line_comment(
+            &client,
+            (owner, name),
+            number,
+            anchor,
+            body,
+        )
+        .await;
+    }
     checked(owner, name)?;
     let body = nonempty(body)?;
     if anchor.line == 0 || anchor.start_line.is_some_and(|s| s == 0 || s > anchor.line) {
@@ -260,6 +283,17 @@ pub async fn reply_to_comment(
     comment_id: u64,
     body: &str,
 ) -> Result<ReviewComment, GithubError> {
+    if connection.provider == gitpoulpe_core::Provider::Gitlab {
+        let client = client(store, connection)?;
+        return crate::gitlab_review::reply_to_comment(
+            &client,
+            (owner, name),
+            number,
+            comment_id,
+            body,
+        )
+        .await;
+    }
     checked(owner, name)?;
     let body = nonempty(body)?;
     let client = client(store, connection)?;

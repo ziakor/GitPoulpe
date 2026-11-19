@@ -86,6 +86,10 @@ pub async fn prepare_merge(
     name: &str,
     number: u64,
 ) -> Result<MergeReadiness, GithubError> {
+    if connection.provider == gitpoulpe_core::Provider::Gitlab {
+        let client = client(store, connection)?;
+        return crate::gitlab_merge::prepare_merge(&client, (owner, name), number).await;
+    }
     if !valid_org(owner) || !valid_org(name) {
         return Err(GithubError::NotFound);
     }
@@ -167,7 +171,7 @@ pub async fn prepare_merge(
         }
         _ => return Err(interpret_failure(&protection)),
     };
-    let checks = load_checks(store, connection, owner, name, &head_sha).await?;
+    let checks = load_checks(store, connection, owner, name, number, &head_sha).await?;
     let required_checks: Vec<RequiredCheck> = contexts
         .into_iter()
         .map(|context| RequiredCheck {
@@ -252,6 +256,17 @@ pub async fn merge_pull(
     number: u64,
     request: &MergeRequest,
 ) -> Result<HostedMerge, GithubError> {
+    if connection.provider == gitpoulpe_core::Provider::Gitlab {
+        let client = client(store, connection)?;
+        return crate::gitlab_merge::merge_pull(
+            &client,
+            connection,
+            (owner, name),
+            number,
+            request,
+        )
+        .await;
+    }
     if !valid_org(owner) || !valid_org(name) {
         return Err(GithubError::NotFound);
     }
@@ -307,6 +322,9 @@ pub async fn is_merged(
     number: u64,
 ) -> Result<bool, GithubError> {
     let client = client(store, connection)?;
+    if connection.provider == gitpoulpe_core::Provider::Gitlab {
+        return crate::gitlab_merge::is_merged(&client, (owner, name), number).await;
+    }
     let response = client
         .get(&format!("repos/{owner}/{name}/pulls/{number}"))
         .await?;

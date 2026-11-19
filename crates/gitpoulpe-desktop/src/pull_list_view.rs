@@ -180,15 +180,7 @@ fn detail(s: &State) -> El {
                 .wrap(),
         );
     }
-    if s.pull_is_gitlab() {
-        panel = panel.child(
-            text("Commentaires, revue, pipelines et fusion ne sont pas encore disponibles pour les merge requests GitLab : cette vue ne montre que les changements, les commits et la description.".to_owned())
-                .key("prl-gitlab-limits")
-                .font(theme::SMALL)
-                .color(p.red)
-                .wrap(),
-        );
-    } else {
+    {
         panel = panel
             .child(checks_panel(s))
             .child(merge_panel(s))
@@ -286,9 +278,7 @@ fn detail(s: &State) -> El {
                     }
                     panel = panel.child(line_el);
                 }
-                if !s.pull_is_gitlab() {
-                    panel = panel.child(threads(s, &file.change.path, i));
-                }
+                panel = panel.child(threads(s, &file.change.path, i));
             }
         }
     }
@@ -523,7 +513,7 @@ fn merge_panel(s: &State) -> El {
     };
     if ready.protection_unreadable {
         block = block.child(
-            text("Les règles de protection de la branche ne sont pas lisibles avec ce compte : elles seront appliquées par GitHub à la fusion.".to_owned())
+            text("Les règles de protection de la branche ne sont pas lisibles avec ce compte : elles seront appliquées par le serveur à la fusion.".to_owned())
                 .key("mrg-protection")
                 .font(theme::SMALL)
                 .color(p.muted)
@@ -722,6 +712,39 @@ fn checks_panel(s: &State) -> El {
     block
 }
 
+fn decisions(s: &State) -> El {
+    let mut buttons = row()
+        .gap(8.0)
+        .child(decision_button(
+            s,
+            "prv-dec-comment",
+            "Commenter",
+            ReviewDecision::Comment,
+        ))
+        .child(decision_button(
+            s,
+            "prv-dec-approve",
+            "Approuver",
+            ReviewDecision::Approve,
+        ));
+    if s.pull_is_gitlab() {
+        buttons = buttons.child(
+            text("Demander des changements n'est pas possible par l'API GitLab.".to_owned())
+                .key("prv-dec-changes-note")
+                .font(theme::SMALL)
+                .color(s.palette.muted),
+        );
+    } else {
+        buttons = buttons.child(decision_button(
+            s,
+            "prv-dec-changes",
+            "Demander des changements",
+            ReviewDecision::RequestChanges,
+        ));
+    }
+    buttons
+}
+
 fn decision_button(s: &State, key: &str, caption: &str, decision: ReviewDecision) -> El {
     action(s, key, caption, s.pulls.list.decision == decision)
         .on_press(move |st: &mut State| st.pull_set_decision(decision))
@@ -818,49 +841,28 @@ fn review_panel(s: &State) -> El {
             )
             .on_edit(|s: &mut State| &mut s.pulls.list.review_body),
         )
-        .child(
-            row()
-                .gap(8.0)
-                .child(decision_button(
+        .child(decisions(s));
+    block = block.child(
+        row()
+            .gap(8.0)
+            .child(
+                action(
                     s,
-                    "prv-dec-comment",
-                    "Commenter",
-                    ReviewDecision::Comment,
-                ))
-                .child(decision_button(
-                    s,
-                    "prv-dec-approve",
-                    "Approuver",
-                    ReviewDecision::Approve,
-                ))
-                .child(decision_button(
-                    s,
-                    "prv-dec-changes",
-                    "Demander des changements",
-                    ReviewDecision::RequestChanges,
-                )),
-        )
-        .child(
-            row()
-                .gap(8.0)
-                .child(
-                    action(
-                        s,
-                        "prv-submit",
-                        if list.review_sending {
-                            "Envoi…"
-                        } else {
-                            "Soumettre la revue"
-                        },
-                        true,
-                    )
-                    .on_press(|s: &mut State| s.pull_submit_review()),
+                    "prv-submit",
+                    if list.review_sending {
+                        "Envoi…"
+                    } else {
+                        "Soumettre la revue"
+                    },
+                    true,
                 )
-                .child(
-                    action(s, "prv-discard", "Abandonner le brouillon", false)
-                        .on_press(|s: &mut State| s.pull_discard_draft()),
-                ),
-        );
+                .on_press(|s: &mut State| s.pull_submit_review()),
+            )
+            .child(
+                action(s, "prv-discard", "Abandonner le brouillon", false)
+                    .on_press(|s: &mut State| s.pull_discard_draft()),
+            ),
+    );
     if let Some(notice) = &list.review_notice {
         block = block.child(
             text(notice.clone())

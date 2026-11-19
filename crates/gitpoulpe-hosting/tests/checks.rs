@@ -26,7 +26,7 @@ async fn pending_success_failure_cancelled_and_skipped_checks_are_told_apart_acr
     let api = FakeApi::start("fake_github.py");
     let conn = connection(&api);
     let store = stored(&conn);
-    let checks = load_checks(&store, &conn, "acme", "proj", "sha1")
+    let checks = load_checks(&store, &conn, "acme", "proj", 1, "sha1")
         .await
         .unwrap();
     assert_eq!(checks.sha, "sha1");
@@ -56,12 +56,12 @@ async fn a_revision_without_checks_is_absent_not_green_and_a_legacy_status_is_re
     let api = FakeApi::start("fake_github.py");
     let conn = connection(&api);
     let store = stored(&conn);
-    let none = load_checks(&store, &conn, "acme", "proj", "newsha")
+    let none = load_checks(&store, &conn, "acme", "proj", 1, "newsha")
         .await
         .unwrap();
     assert!(none.items.is_empty());
     assert_eq!(none.overall(), None);
-    let legacy = load_checks(&store, &conn, "acme", "proj", "sha2")
+    let legacy = load_checks(&store, &conn, "acme", "proj", 1, "sha2")
         .await
         .unwrap();
     assert_eq!(legacy.overall(), Some(CheckState::Pending));
@@ -74,14 +74,14 @@ async fn an_unavailable_api_is_an_error_never_an_empty_or_successful_list() {
     let conn = connection(&api);
     let store = stored(&conn);
     assert_eq!(
-        load_checks(&store, &conn, "acme", "proj", "sha5")
+        load_checks(&store, &conn, "acme", "proj", 1, "sha5")
             .await
             .unwrap_err(),
         GithubError::Server(500)
     );
     for bad in ["", "../x", "a b", "sha1/status"] {
         assert_eq!(
-            load_checks(&store, &conn, "acme", "proj", bad)
+            load_checks(&store, &conn, "acme", "proj", 1, bad)
                 .await
                 .unwrap_err(),
             GithubError::NotFound

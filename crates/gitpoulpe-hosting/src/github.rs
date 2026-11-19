@@ -88,10 +88,10 @@ impl std::fmt::Display for GithubError {
                 f,
                 "{name} existe déjà et n'est pas un fork de ce dépôt : choisissez une autre destination"
             ),
-            Self::Validation(why) => write!(f, "GitHub refuse la demande : {why}"),
+            Self::Validation(why) => write!(f, "le serveur refuse la demande : {why}"),
             Self::PullExists(number, url) => write!(
                 f,
-                "une pull request est déjà ouverte pour cette branche : #{number} ({url})"
+                "une demande de fusion est déjà ouverte pour cette branche : #{number} ({url})"
             ),
             Self::BranchNotPublished(branch) => write!(
                 f,
@@ -99,9 +99,9 @@ impl std::fmt::Display for GithubError {
             ),
             Self::AnchorStale { prepared, current } => write!(
                 f,
-                "la pull request a été mise à jour ({prepared} → {current}) : l'ancrage du commentaire est périmé, relisez le diff avant de publier"
+                "la demande de fusion a été mise à jour ({prepared} → {current}) : l'ancrage du commentaire est périmé, relisez le diff avant de publier"
             ),
-            Self::MergeRefused(why) => write!(f, "fusion refusée par GitHub : {why}"),
+            Self::MergeRefused(why) => write!(f, "fusion refusée par le serveur : {why}"),
             Self::MergeNotAllowed(why) => write!(f, "fusion impossible : {why}"),
             Self::DeviceDenied => f.write_str("l'autorisation a été refusée dans le navigateur"),
             Self::DeviceExpired => {

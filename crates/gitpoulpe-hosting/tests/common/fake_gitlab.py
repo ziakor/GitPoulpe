@@ -3,9 +3,9 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 LOG = sys.argv[1]
-IDS = {"acme/platform/api": 100, "octo/api": 200, "octo/notes": 300}
+IDS = {"acme/platform/api": 100, "octo/api": 200, "octo/notes": 300, "acme/platform/dev": 400}
 BRANCHES = {"acme/platform/api": {"main", "feature/x", "feature/dup", "shared/br"}, "octo/api": {"main", "feature/y", "feature/z", "shared/br"},
-            "octo/notes": {"main"}}
+            "octo/notes": {"main"}, "acme/platform/dev": {"main"}}
 SHA = lambda c: c * 40
 
 
@@ -28,6 +28,51 @@ MRS = [mr(3, "merged", "feature/m", "main"), mr(4, "closed", "feature/c", "main"
 READS = {}
 
 
+def rmr(iid, sha, status="mergeable", project=100, pipeline="success", **extra):
+    base = mr(iid, "opened", f"feature/r{iid}", "main", source_project=project, sha=sha,
+              detailed_merge_status=status, has_conflicts=status == "conflict",
+              blocking_discussions_resolved=status != "discussions_not_resolved",
+              head_pipeline=None if pipeline is None else {"status": pipeline, "sha": SHA(sha)})
+    base["target_project_id"] = 400 if project == 400 else 100
+    base.update(extra)
+    return base
+
+
+RMRS = [rmr(20, "2"), rmr(21, "3", "not_approved"), rmr(22, "4", "conflict"),
+        rmr(23, "5", "ci_still_running", pipeline="running"), rmr(24, "7", "need_rebase"),
+        rmr(25, "8"), rmr(27, "1"), rmr(28, "a"), rmr(31, "b", "ci_must_pass", pipeline="failed"),
+        rmr(32, "c", "ci_must_pass", pipeline=None), rmr(33, "d", "requested_changes"),
+        rmr(34, "e", pipeline="success", source_project_id=200), rmr(40, "f", project=400, pipeline=None),
+        rmr(41, "9", "checking")]
+for item in RMRS:
+    if item["iid"] == 34:
+        item["source_project_id"] = 200
+APPROVALS = {21: (2, ["alice"]), 22: (0, ["alice"]), 20: (0, []), 41: (1, [])}
+NOTE_IDS = [1000]
+DISC = {20: [
+    {"id": "g1", "individual_note": True, "notes": [
+        {"id": 501, "type": None, "system": False, "body": "General remark", "author": {"username": "octo2"},
+         "created_at": "2026-11-12T09:00:00Z"}]},
+    {"id": "d1", "individual_note": False, "notes": [
+        {"id": 601, "type": "DiffNote", "system": False, "body": "Fix this", "author": {"username": "octo2"},
+         "created_at": "2026-11-12T09:01:00Z",
+         "position": {"new_path": "src/a.rs", "old_path": "src/a.rs", "new_line": 3, "old_line": None,
+                      "head_sha": SHA("2")}},
+        {"id": 602, "type": "DiffNote", "system": False, "body": "Done", "author": {"username": "Octo"},
+         "created_at": "2026-11-12T09:02:00Z",
+         "position": {"new_path": "src/a.rs", "old_path": "src/a.rs", "new_line": 3, "old_line": None,
+                      "head_sha": SHA("2")}}]},
+    {"id": "d2", "individual_note": False, "notes": [
+        {"id": 603, "type": "DiffNote", "system": False, "body": "Old", "author": {"username": "octo2"},
+         "created_at": "2026-11-12T09:03:00Z",
+         "position": {"new_path": "src/a.rs", "old_path": "src/a.rs", "new_line": None, "old_line": 2,
+                      "head_sha": SHA("0")}}]},
+    {"id": "s1", "individual_note": True, "notes": [
+        {"id": 700, "type": None, "system": True, "body": "added 1 commit", "author": {"username": "octo2"},
+         "created_at": "2026-11-12T09:04:00Z"}]}]}
+DRAFTS = {}
+
+
 def diff_entry(path, text, **flags):
     entry = {"old_path": path, "new_path": path, "new_file": False, "renamed_file": False,
              "deleted_file": False, "diff": text}
@@ -43,6 +88,8 @@ DIFFS = {
     5: [[diff_entry("one.txt", "@@ -1 +1 @@\n-a\n+b\n")]],
     8: [[diff_entry("legacy.txt", "@@ -1 +1 @@\n-a\n+b\n")]],
     9: [[diff_entry("race.txt", "@@ -1 +1 @@\n-a\n+b\n")]],
+    20: [[diff_entry("docs/readme.md", "@@ -1 +1 @@\n-x\n+y\n"),
+          diff_entry("src/a.rs", "@@ -1,3 +1,4 @@\n keep\n-old\n+new\n+more\n tail\n")]],
 }
 USERS = {
     "glgood": {"username": "Octo", "name": "Octo Cat", "scopes": ["read_api", "read_repository", "write_repository"],
@@ -59,7 +106,7 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def reply(self, status, body, headers=None):
-        data = json.dumps(body).encode()
+        data = b"" if status == 204 else json.dumps(body).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
@@ -92,16 +139,27 @@ class Handler(BaseHTTPRequestHandler):
         return self.projects_routes(path, token)
 
     def do_POST(self):
+        self.write("POST")
+
+    def do_PUT(self):
+        self.write("PUT")
+
+    def do_DELETE(self):
+        self.write("DELETE")
+
+    def write(self, method):
         length = int(self.headers.get("Content-Length", "0"))
         raw = self.rfile.read(length).decode()
         auth = self.headers.get("Authorization", "")
         with open(LOG, "a") as f:
-            f.write(json.dumps({"path": self.path, "auth": auth, "body": raw}) + "\n")
+            f.write(json.dumps({"method": method, "path": self.path, "auth": auth, "body": raw}) + "\n")
         token = auth.removeprefix("Bearer ").strip()
         if token not in USERS:
             return self.reply(401, {"message": "401 Unauthorized"})
         from urllib.parse import unquote
         route = self.path[len("/api/v4"):]
+        if "/merge_requests/" in route:
+            return self.mr_write(method, route, json.loads(raw or "{}"))
         if not (route.startswith("/projects/") and route.endswith("/merge_requests")):
             return self.reply(404, {"message": "404 Not Found"})
         full = unquote(route[len("/projects/"):-len("/merge_requests")])
@@ -176,6 +234,8 @@ class Handler(BaseHTTPRequestHandler):
         rest = route[len("/projects/"):]
         enc, _, tail = rest.partition("/")
         full = unquote(enc)
+        if full.isdigit():
+            full = next((k for k, v in IDS.items() if v == int(full)), full)
         params = {k: unquote(v) for k, v in params.items()}
         if full not in IDS:
             return self.reply(404, {"message": "404 Project Not Found"})
@@ -183,7 +243,27 @@ class Handler(BaseHTTPRequestHandler):
             extra = {"id": IDS[full]}
             if full == "octo/api":
                 extra["forked_from_project"] = {"path_with_namespace": "acme/platform/api"}
+                extra.update(merge_method="merge", squash_option="always")
+            if full == "acme/platform/api":
+                extra.update(merge_method="merge", squash_option="default_off",
+                             only_allow_merge_if_pipeline_succeeds=True)
+            if full == "acme/platform/dev":
+                extra.update(merge_method="ff", squash_option="default_on",
+                             only_allow_merge_if_pipeline_succeeds=False,
+                             permissions={"project_access": {"access_level": 30}, "group_access": None})
+            if full == "octo/notes":
+                extra.update(merge_method="rebase_merge", squash_option="never",
+                             only_allow_merge_if_pipeline_succeeds=False)
             return self.reply(200, self.project(full, **extra))
+        if tail.startswith("protected_branches/"):
+            if full == "octo/notes":
+                return self.reply(403, {"message": "403 Forbidden"})
+            level = {"acme/platform/api": 30, "acme/platform/dev": 40}.get(full)
+            if level is None:
+                return self.reply(404, {"message": "404 Not Found"})
+            return self.reply(200, {"name": "main", "merge_access_levels": [{"access_level": level}]})
+        if tail.startswith("pipelines/") and tail.endswith("/jobs"):
+            return self.jobs(tail, params)
         if tail.startswith("repository/branches/"):
             branch = unquote(tail[len("repository/branches/"):])
             if branch in BRANCHES[full]:
@@ -219,7 +299,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def mr_detail(self, tail, params):
         iid_text, _, sub = tail.partition("/")
-        found = next((m for m in MRS if str(m["iid"]) == iid_text), None)
+        found = next((m for m in MRS + RMRS if str(m["iid"]) == iid_text), None)
         if found is None:
             return self.reply(404, {"message": "404 Not Found"})
         iid = found["iid"]
@@ -229,13 +309,27 @@ class Handler(BaseHTTPRequestHandler):
             if iid == 9 and READS[iid] > 1:
                 return self.reply(200, dict(found, sha=SHA("0")))
             return self.reply(200, found)
+        if sub == "discussions":
+            return self.reply(200, DISC.get(iid, []))
+        if sub == "approvals":
+            required, who = APPROVALS.get(iid, (0, []))
+            return self.reply(200, {"approvals_required": required,
+                                    "approved_by": [{"user": {"username": u, "id": 5}} for u in who]})
+        if sub == "pipelines":
+            shas = {20: [900], 34: [901]}.get(iid, [])
+            pipes = [{"id": p, "sha": found["sha"], "status": "success",
+                      "web_url": f"https://gitlab.test/p/{p}", "project_id": 200 if p == 901 else 100}
+                     for p in shas]
+            if iid == 21:
+                pipes = [{"id": 902, "sha": SHA("0"), "status": "success", "web_url": "x", "project_id": 100}]
+            return self.reply(200, pipes)
         if sub == "commits":
             return self.reply(200, [{"id": found["sha"], "title": "Second", "author_name": "Octo"},
                                     {"id": SHA("2"), "title": "First", "author_name": "Octo"}])
         if sub == "diffs":
             if iid == 8:
                 return self.reply(404, {"message": "404 Not Found"})
-            chunks = DIFFS[iid]
+            chunks = DIFFS.get(iid, [[diff_entry("f.txt", "@@ -1 +1 @@\n-a\n+b\n")]])
             page = int(params.get("page", "1"))
             headers = {}
             if page < len(chunks):
@@ -244,6 +338,97 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, chunks[page - 1], headers)
         if sub == "changes" and iid == 8:
             return self.reply(200, dict(found, changes=DIFFS[8][0], overflow=True))
+        return self.reply(404, {"message": "404 Not Found"})
+
+    def jobs(self, tail, params):
+        pid = int(tail[len("pipelines/"):-len("/jobs")])
+        port = self.server.server_address[1]
+        page = int(params.get("page", "1"))
+        names = [("build", "success"), ("test", "failed"), ("lint", "manual"), ("deploy", "canceled"),
+                 ("docs", "skipped"), ("e2e", "running")]
+        jobs = [{"name": n, "status": st, "web_url": f"https://gitlab.test/j/{pid}/{n}"} for n, st in names]
+        chunks = [jobs[:4], jobs[4:]] if pid == 900 else [jobs[:1]]
+        headers = {}
+        if page < len(chunks):
+            headers["Link"] = f'<http://127.0.0.1:{port}/api/v4/projects/acme%2Fplatform%2Fapi/pipelines/{pid}/jobs?page={page + 1}>; rel="next"'
+        return self.reply(200, chunks[page - 1], headers)
+
+    def mr_write(self, method, route, body):
+        from urllib.parse import unquote
+        rest = route[len("/projects/"):]
+        enc, _, tail = rest.partition("/merge_requests/")
+        found_project = unquote(enc)
+        iid_text, _, sub = tail.partition("/")
+        found = next((m for m in MRS + RMRS if str(m["iid"]) == iid_text), None)
+        if found is None or found_project not in IDS:
+            return self.reply(404, {"message": "404 Not Found"})
+        iid = found["iid"]
+        author = {"username": "Octo"}
+        note_id = lambda: NOTE_IDS.append(NOTE_IDS[-1] + 1) or NOTE_IDS[-1]
+
+        def note(text, position=None):
+            made = {"id": note_id(), "type": "DiffNote" if position else None, "system": False, "body": text,
+                    "author": author, "created_at": "2026-11-19T10:00:00Z"}
+            if position:
+                made["position"] = position
+            return made
+
+        def valid_position(position):
+            return (position.get("position_type") == "text" and position.get("head_sha") == found["sha"]
+                    and position.get("new_path") and position.get("old_path")
+                    and (position.get("new_line") or position.get("old_line")))
+
+        if method == "POST" and sub == "notes":
+            made = note(body["body"])
+            DISC.setdefault(iid, []).append({"id": f"g{made['id']}", "individual_note": True, "notes": [made]})
+            return self.reply(201, made)
+        if method == "POST" and sub == "discussions":
+            position = body.get("position")
+            if position is not None and not valid_position(position):
+                return self.reply(400, {"message": "400 Bad request - Note {:position=>[\"is invalid\"]}"})
+            made = note(body["body"], position)
+            disc = {"id": f"d{made['id']}", "individual_note": position is None, "notes": [made]}
+            DISC.setdefault(iid, []).append(disc)
+            return self.reply(201, disc)
+        if method == "POST" and sub.startswith("discussions/") and sub.endswith("/notes"):
+            disc = next((d for d in DISC.get(iid, []) if d["id"] == sub.split("/")[1]), None)
+            if disc is None:
+                return self.reply(404, {"message": "404 Discussion Not Found"})
+            made = note(body["body"], disc["notes"][0].get("position"))
+            disc["notes"].append(made)
+            return self.reply(201, made)
+        if method == "POST" and sub == "draft_notes":
+            position = body.get("position")
+            if body.get("note") == "boom" or (position is not None and not valid_position(position)):
+                return self.reply(400, {"message": "400 Bad request"})
+            draft = {"id": note_id(), "note": body["note"], "position": position}
+            DRAFTS.setdefault(iid, []).append(draft)
+            return self.reply(201, {"id": draft["id"], "note": draft["note"]})
+        if method == "DELETE" and sub.startswith("draft_notes/"):
+            DRAFTS[iid] = [d for d in DRAFTS.get(iid, []) if str(d["id"]) != sub.split("/")[1]]
+            return self.reply(204, None)
+        if method == "POST" and sub == "draft_notes/bulk_publish":
+            for draft in DRAFTS.pop(iid, []):
+                made = note(draft["note"], draft["position"])
+                DISC.setdefault(iid, []).append({"id": f"d{made['id']}", "individual_note": draft["position"] is None,
+                                                 "notes": [made]})
+            return self.reply(204, None)
+        if method == "POST" and sub == "approve":
+            if iid == 25 or body.get("sha") != found["sha"]:
+                return self.reply(401, {"message": "401 Unauthorized"})
+            required, who = APPROVALS.get(iid, (0, []))
+            APPROVALS[iid] = (required, who + ["Octo"])
+            return self.reply(201, {"approved_by": []})
+        if method == "PUT" and sub == "merge":
+            if iid == 27:
+                return self.reply(405, {"message": "405 Method Not Allowed"})
+            if iid == 28:
+                return self.reply(401, {"message": "401 Unauthorized"})
+            if body.get("sha") != found["sha"]:
+                return self.reply(409, {"message": "SHA does not match HEAD of source branch"})
+            found["state"] = "merged"
+            found["merge_commit_sha"] = SHA("m")
+            return self.reply(200, found)
         return self.reply(404, {"message": "404 Not Found"})
 
 

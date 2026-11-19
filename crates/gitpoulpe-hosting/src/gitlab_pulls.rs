@@ -17,19 +17,19 @@ struct Project {
     repo: RepoSummary,
 }
 
-fn text(value: &Value, key: &str) -> Option<String> {
+pub(crate) fn text(value: &Value, key: &str) -> Option<String> {
     value.get(key).and_then(Value::as_str).map(str::to_owned)
 }
 
-fn flag(value: &Value, key: &str) -> bool {
+pub(crate) fn flag(value: &Value, key: &str) -> bool {
     value.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
-fn valid_path(owner: &str, name: &str) -> bool {
+pub(crate) fn valid_path(owner: &str, name: &str) -> bool {
     valid_namespace(owner) && valid_org(name)
 }
 
-fn project_path(owner: &str, name: &str) -> String {
+pub(crate) fn project_path(owner: &str, name: &str) -> String {
     encode(&format!("{owner}/{name}"))
 }
 
@@ -404,7 +404,7 @@ pub(crate) async fn list_mrs(
     Ok((items, raw.truncated))
 }
 
-async fn get_json(client: &ApiClient, url: &str) -> Result<Value, GithubError> {
+pub(crate) async fn get_json(client: &ApiClient, url: &str) -> Result<Value, GithubError> {
     let response = client.get(url).await?;
     if !response.ok() {
         return Err(interpret_failure(&response));
@@ -438,22 +438,7 @@ pub(crate) async fn load_mr(
             })
         })
         .collect();
-    let (changes, files_truncated) = match pages(client, format!("{base}/diffs?per_page=100")).await
-    {
-        Ok(raw) => (raw.items, raw.truncated),
-        Err(GithubError::NotFound) => {
-            let legacy = get_json(client, &format!("{base}/changes")).await?;
-            (
-                legacy
-                    .get("changes")
-                    .and_then(Value::as_array)
-                    .cloned()
-                    .unwrap_or_default(),
-                flag(&legacy, "overflow"),
-            )
-        }
-        Err(other) => return Err(other),
-    };
+    let (changes, files_truncated) = fetch_changes(client, &base).await?;
     let files: Vec<PullFile> = changes.iter().filter_map(parse_change).collect();
     let after = get_json(client, &base).await?;
     let changed_during_load = text(&after, "sha") != text(&value, "sha");
@@ -465,4 +450,32 @@ pub(crate) async fn load_mr(
         files,
         changed_during_load,
     })
+}
+
+pub(crate) fn mr_base(repo: (&str, &str), number: u64) -> String {
+    format!(
+        "projects/{}/merge_requests/{number}",
+        project_path(repo.0, repo.1)
+    )
+}
+
+pub(crate) async fn fetch_changes(
+    client: &ApiClient,
+    base: &str,
+) -> Result<(Vec<Value>, bool), GithubError> {
+    match pages(client, format!("{base}/diffs?per_page=100")).await {
+        Ok(raw) => Ok((raw.items, raw.truncated)),
+        Err(GithubError::NotFound) => {
+            let legacy = get_json(client, &format!("{base}/changes")).await?;
+            Ok((
+                legacy
+                    .get("changes")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default(),
+                flag(&legacy, "overflow"),
+            ))
+        }
+        Err(other) => Err(other),
+    }
 }
