@@ -4,6 +4,7 @@ mod github;
 mod http;
 mod pull_comments;
 mod pull_read;
+mod pull_review;
 mod pulls;
 mod remote_url;
 mod repos;
@@ -22,6 +23,9 @@ pub use pull_comments::{
 };
 pub use pull_read::{
     PullCommit, PullDetail, PullFile, PullFilter, PullState, PullSummary, list_pulls, load_pull,
+};
+pub use pull_review::{
+    DraftLine, Review, ReviewDecision, ReviewSubmission, list_reviews, review_exists, submit_review,
 };
 pub use pulls::{
     ChangedFile, Comparison, HostedPull, PullDraft, PullTarget, create_pull_request, prepare_pull,

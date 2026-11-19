@@ -528,3 +528,208 @@ fn a_comment_answer_arriving_after_another_pull_request_was_selected_is_dropped(
     assert!(list.comments.issue.iter().all(|c| c.body != "late note") || list.selected == Some(4));
     assert!(list.send_error.is_none());
 }
+
+fn open_one(rt: &mut Runtime<State>, number: u64, row: usize) {
+    click(rt, &format!("prlk{row}"));
+    loaded(rt, number);
+    settle(rt, |s| !s.pulls.list.comments.review.is_empty());
+}
+
+fn add_to_draft(rt: &mut Runtime<State>, line_key: &str, text: &str) {
+    click(rt, line_key);
+    step(rt);
+    compose(rt, text);
+    click(rt, "prc-add-draft");
+    step(rt);
+}
+
+fn draft_len(rt: &Runtime<State>) -> usize {
+    rt.state.current_draft().map_or(0, |d| d.entries.len())
+}
+
+#[test]
+fn a_multi_file_draft_is_submitted_as_one_review_with_the_chosen_decision_and_the_effective_account()
+ {
+    let fake = Fake::start();
+    let (_dir, mut rt) = list_screen(&fake);
+    open_one(&mut rt, 1, 0);
+    add_to_draft(&mut rt, "prl-f0l2", "first remark");
+    add_to_draft(&mut rt, "prl-f1l2", "second remark");
+    assert_eq!(draft_len(&rt), 2);
+    assert!(shows(&rt, "Revue en tant que Octo@"));
+    assert!(shows(&rt, "2 commentaire(s) dans le brouillon"));
+    rt.state.pulls.list.review_body = TextEdit::new("please fix");
+    step(&mut rt);
+    click(&mut rt, "prv-dec-changes");
+    step(&mut rt);
+    click(&mut rt, "prv-submit");
+    settle(&mut rt, |s| {
+        !s.pulls.list.review_sending && s.pulls.list.review_notice.is_some()
+    });
+    assert!(shows(
+        &rt,
+        "Revue publiée par Octo : changements demandés sur la révision sha1"
+    ));
+    assert_eq!(draft_len(&rt), 0);
+    assert!(
+        rt.state
+            .pulls
+            .list
+            .reviews
+            .iter()
+            .any(|r| r.author == "Octo"
+                && r.state == "CHANGES_REQUESTED"
+                && r.body == "please fix")
+    );
+    assert_eq!(rt.state.pulls.list.review_body.text, "");
+}
+
+#[test]
+fn drafts_stay_with_their_own_pull_request_when_switching_and_coming_back() {
+    let fake = Fake::start();
+    let (_dir, mut rt) = list_screen(&fake);
+    open_one(&mut rt, 1, 0);
+    add_to_draft(&mut rt, "prl-f0l2", "kept remark");
+    rt.state.pulls.list.review_body = TextEdit::new("kept message");
+    step(&mut rt);
+    click(&mut rt, "prlk1");
+    loaded(&mut rt, 4);
+    assert_eq!(draft_len(&rt), 0);
+    assert_eq!(rt.state.pulls.list.review_body.text, "");
+    click(&mut rt, "prlk0");
+    loaded(&mut rt, 1);
+    assert_eq!(draft_len(&rt), 1);
+    assert_eq!(rt.state.pulls.list.review_body.text, "kept message");
+    assert_eq!(
+        rt.state.current_draft().unwrap().entries[0].line.body,
+        "kept remark"
+    );
+}
+
+#[test]
+fn an_update_during_the_review_flags_what_to_reread_without_losing_the_work_and_blocks_the_send() {
+    let fake = Fake::start();
+    let (_dir, mut rt) = list_screen(&fake);
+    open_one(&mut rt, 1, 0);
+    add_to_draft(&mut rt, "prl-f0l2", "remark one");
+    add_to_draft(&mut rt, "prl-f1l2", "remark two");
+    let key = rt.state.review_key().unwrap();
+    {
+        let draft = rt.state.pulls.list.drafts.get_mut(&key).unwrap();
+        draft.head_sha = "older00".to_owned();
+        draft.entries[0].patch_hash = 1;
+    }
+    rt.state.load_pull_detail();
+    settle(&mut rt, |s| {
+        !s.pulls.list.detail_loading && s.current_draft().is_some_and(|d| d.stale)
+    });
+    assert_eq!(draft_len(&rt), 2);
+    let flags: Vec<bool> = rt
+        .state
+        .current_draft()
+        .unwrap()
+        .entries
+        .iter()
+        .map(|e| e.to_reread)
+        .collect();
+    assert_eq!(flags, [true, false]);
+    assert!(shows(
+        &rt,
+        "mise à jour depuis la préparation du brouillon (révision older00)"
+    ));
+    assert!(shows(&rt, "À RELIRE"));
+    rt.state.pulls.list.review_body = TextEdit::new("msg");
+    step(&mut rt);
+    click(&mut rt, "prv-submit");
+    step(&mut rt);
+    assert!(shows(&rt, "adoptez la révision actuelle"));
+    click(&mut rt, "prv-adopt");
+    step(&mut rt);
+    click(&mut rt, "prv-submit");
+    step(&mut rt);
+    assert!(shows(&rt, "1 commentaire(s) du brouillon sont à relire"));
+    click(&mut rt, "prv-read0");
+    step(&mut rt);
+    click(&mut rt, "prv-submit");
+    settle(&mut rt, |s| {
+        !s.pulls.list.review_sending && s.pulls.list.review_notice.is_some()
+    });
+    assert!(shows(&rt, "Revue publiée par Octo"));
+}
+
+#[test]
+fn a_missing_permission_an_obsolete_revision_and_a_lost_answer_never_look_like_a_success() {
+    let fake = Fake::start();
+    let (_dir, mut rt) = list_screen(&fake);
+    open_one(&mut rt, 1, 0);
+    rt.state.pulls.list.detail.as_mut().unwrap().summary.author = "Octo".to_owned();
+    click(&mut rt, "prv-dec-approve");
+    step(&mut rt);
+    click(&mut rt, "prv-submit");
+    step(&mut rt);
+    assert!(shows(&rt, "Vous êtes l'auteur de cette pull request"));
+    assert!(!rt.state.pulls.list.review_sending);
+    rt.state.pulls.list.detail.as_mut().unwrap().summary.author = "author1".to_owned();
+    rt.state
+        .pulls
+        .list
+        .detail
+        .as_mut()
+        .unwrap()
+        .summary
+        .head_sha = "zzz9999".to_owned();
+    rt.state.pulls.list.review_body = TextEdit::new("fine");
+    step(&mut rt);
+    click(&mut rt, "prv-submit");
+    settle(&mut rt, |s| {
+        !s.pulls.list.review_sending && s.pulls.list.review_error.is_some()
+    });
+    assert!(shows(&rt, "a été mise à jour (zzz9999 → sha1)"));
+    assert!(rt.state.pulls.list.review_notice.is_none());
+    rt.state
+        .pulls
+        .list
+        .detail
+        .as_mut()
+        .unwrap()
+        .summary
+        .head_sha = "sha1".to_owned();
+    rt.state.pulls.list.drafts.clear();
+    rt.state.pulls.list.review_body = TextEdit::new("FLAKY words");
+    step(&mut rt);
+    click(&mut rt, "prv-dec-comment");
+    step(&mut rt);
+    click(&mut rt, "prv-submit");
+    settle(&mut rt, |s| {
+        !s.pulls.list.review_sending && s.pulls.list.review_unverified
+    });
+    assert!(shows(&rt, "Le résultat de l'envoi est inconnu"));
+    click(&mut rt, "prv-verify");
+    settle(&mut rt, |s| {
+        !s.pulls.list.review_verifying && !s.pulls.list.review_unverified
+    });
+    assert!(shows(&rt, "La revue est déjà publiée : ne la renvoyez pas"));
+    click(&mut rt, "prv-discard");
+    step(&mut rt);
+    assert!(shows(&rt, "Brouillon de revue abandonné"));
+    assert_eq!(rt.state.pulls.list.review_body.text, "");
+}
+
+#[test]
+fn a_review_answer_arriving_after_another_pull_request_was_selected_is_dropped() {
+    let fake = Fake::start();
+    let (_dir, mut rt) = list_screen(&fake);
+    rt.state.select_pull(1);
+    loaded(&mut rt, 1);
+    rt.state.pulls.list.review_body = TextEdit::new("late review");
+    rt.state.pull_submit_review();
+    assert!(rt.state.pulls.list.review_sending);
+    rt.state.select_pull(4);
+    for _ in 0..60 {
+        step(&mut rt);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let list = &rt.state.pulls.list;
+    assert!(list.review_notice.is_none() && !list.review_sending);
+    assert!(list.reviews.iter().all(|r| r.body != "late review"));
+}

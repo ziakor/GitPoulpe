@@ -7,6 +7,7 @@ LOG = sys.argv[1]
 POLLS = [0]
 FORKS = {}
 SENT = []
+REVIEWS = []
 USERS = {
     "good": {"login": "Octo", "name": "Octo Cat", "scopes": "repo, read:org"},
     "fine": {"login": "Octo", "name": "Octo Cat", "scopes": None},
@@ -137,6 +138,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, [
                 {"sha": "c0", "commit": {"message": "first\n\nbody", "author": {"name": "A"}}, "author": {"login": "authorx"}},
                 {"sha": last, "commit": {"message": "second", "author": {"name": "B"}}, "author": None}])
+        if parts[4] == "reviews":
+            return self.reply(200, [{"id": 1, "user": {"login": "reviewer"}, "state": "APPROVED", "body": "ok",
+                                     "commit_id": "sha1", "submitted_at": "t0"}] + REVIEWS)
         if parts[4] == "comments":
             base = [
                 {"id": 10, "user": {"login": "reviewer"}, "body": "root", "path": "f1.rs", "line": 1, "side": "RIGHT",
@@ -178,6 +182,25 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, self.repo(*name.split("/"), fork=True,
                                              parent={"full_name": "acme/" + name.split("/")[1]}))
         self.reply(404, {"message": "Not Found"})
+
+    def review_post(self, body):
+        parts = self.path.split("/")
+        text = body.get("body", "")
+        if parts[3] == "locked":
+            return self.reply(403, {"message": "Resource not accessible by personal access token"})
+        if body.get("event") == "APPROVE" and "self" in text:
+            return self.reply(422, {"message": "Unprocessable Entity",
+                                    "errors": ["Can not approve your own pull request"]})
+        state = {"APPROVE": "APPROVED", "REQUEST_CHANGES": "CHANGES_REQUESTED", "COMMENT": "COMMENTED"}[body["event"]]
+        review = {"id": 50 + len(REVIEWS), "user": {"login": "Octo"}, "state": state, "body": text,
+                  "commit_id": body["commit_id"], "submitted_at": "t9", "n_comments": len(body.get("comments", []))}
+        REVIEWS.append(review)
+        if "FLAKY" in text:
+            self.send_response(502)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        self.reply(200, review)
 
     def comment_post(self, body):
         parts = self.path.split("/")
@@ -237,6 +260,8 @@ class Handler(BaseHTTPRequestHandler):
         body = json.loads(raw or "{}")
         if self.path.startswith("/api/v3/"):
             self.path = self.path[len("/api/v3"):]
+        if self.path.startswith("/repos/") and self.path.endswith("/reviews"):
+            return self.review_post(body)
         if self.path.startswith("/repos/acme/proj/") and "/comments" in self.path:
             return self.comment_post(body)
         if self.path.startswith("/repos/") and self.path.endswith("/pulls"):

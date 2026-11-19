@@ -1,6 +1,10 @@
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+
 use gitpoulpe_hosting::{
-    LineAnchor, PullComments, PullDetail, PullFilter, PullSummary, Side, list_comments, list_pulls,
-    load_pull, post_comment, post_line_comment, reply_to_comment,
+    DraftLine, LineAnchor, PullComments, PullDetail, PullFilter, PullSummary, Review,
+    ReviewDecision, ReviewSubmission, Side, list_comments, list_pulls, list_reviews, load_pull,
+    post_comment, post_line_comment, reply_to_comment, review_exists, submit_review,
 };
 use rune::TextEdit;
 
@@ -22,7 +26,42 @@ pub enum CommentKind {
     Reply,
 }
 
+#[derive(Clone, Debug)]
+pub struct DraftEntry {
+    pub line: DraftLine,
+    pub patch_hash: u64,
+    pub to_reread: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct ReviewDraft {
+    pub head_sha: String,
+    pub stale: bool,
+    pub entries: Vec<DraftEntry>,
+    pub body: String,
+    pub decision: ReviewDecision,
+}
+
+fn patch_hash(detail: &PullDetail, path: &str) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    match detail.files.iter().find(|f| f.change.path == path) {
+        Some(file) => file.patch.hash(&mut hasher),
+        None => 0u8.hash(&mut hasher),
+    }
+    hasher.finish()
+}
+
 pub struct PullListState {
+    pub drafts: HashMap<String, ReviewDraft>,
+    pub review_body: TextEdit,
+    pub decision: ReviewDecision,
+    pub review_request: u64,
+    pub review_sending: bool,
+    pub review_error: Option<String>,
+    pub review_notice: Option<String>,
+    pub review_unverified: bool,
+    pub review_verifying: bool,
+    pub reviews: Vec<Review>,
     pub comments: PullComments,
     pub comments_request: u64,
     pub comment_request: u64,
@@ -55,6 +94,16 @@ pub struct PullListState {
 impl Default for PullListState {
     fn default() -> Self {
         Self {
+            drafts: HashMap::new(),
+            review_body: TextEdit::new(""),
+            decision: ReviewDecision::Comment,
+            review_request: 0,
+            review_sending: false,
+            review_error: None,
+            review_notice: None,
+            review_unverified: false,
+            review_verifying: false,
+            reviews: Vec::new(),
             comments: PullComments::default(),
             comments_request: 0,
             comment_request: 0,
@@ -110,7 +159,11 @@ impl State {
         let detail_request = self.pulls.list.detail_request + 1;
         let comments_request = self.pulls.list.comments_request + 1;
         let comment_request = self.pulls.list.comment_request + 1;
+        let review_request = self.pulls.list.review_request + 1;
+        let drafts = std::mem::take(&mut self.pulls.list.drafts);
         self.pulls.list = PullListState {
+            drafts,
+            review_request,
             open: true,
             list_request,
             detail_request,
@@ -128,6 +181,7 @@ impl State {
         list.detail_request += 1;
         list.comments_request += 1;
         list.comment_request += 1;
+        list.review_request += 1;
         list.version += 1;
     }
 
@@ -190,9 +244,19 @@ impl State {
 
     pub fn select_pull(&mut self, number: u64) {
         let previous = self.pulls.list.selected;
+        if previous != Some(number) {
+            self.save_review_text();
+        }
         self.pulls.list.selected = Some(number);
         if previous != Some(number) {
             let list = &mut self.pulls.list;
+            list.review_request += 1;
+            list.review_sending = false;
+            list.review_error = None;
+            list.review_notice = None;
+            list.review_unverified = false;
+            list.review_verifying = false;
+            list.reviews = Vec::new();
             list.detail = None;
             list.notice = None;
             list.comments = PullComments::default();
@@ -207,6 +271,7 @@ impl State {
             list.unverified = None;
             list.verifying = false;
             list.compose = TextEdit::new("");
+            self.load_review_text();
         }
         self.load_pull_detail();
     }
@@ -225,6 +290,7 @@ impl State {
         list.version += 1;
         let request = list.detail_request;
         self.reload_pull_comments();
+        self.reload_reviews(false);
         let secrets = self.hosting.secrets.clone();
         let sender = self.event_tx();
         let waker = self.waker_slot();
@@ -250,6 +316,7 @@ impl State {
         number: u64,
         result: Result<Box<PullDetail>, String>,
     ) -> bool {
+        let key = self.review_key().unwrap_or_default();
         let list = &mut self.pulls.list;
         if !list.open || request != list.detail_request || list.selected != Some(number) {
             return false;
@@ -274,7 +341,20 @@ impl State {
                         "La pull request a changé pendant le chargement : actualisez pour relire une version cohérente.".to_owned()
                     })
                 });
-                list.detail = Some(*detail);
+                let fresh = *detail;
+                if let Some(draft) = list
+                    .drafts
+                    .get_mut(&key)
+                    .filter(|d| d.head_sha != fresh.summary.head_sha)
+                {
+                    draft.stale = true;
+                    for entry in &mut draft.entries {
+                        if patch_hash(&fresh, &entry.line.path) != entry.patch_hash {
+                            entry.to_reread = true;
+                        }
+                    }
+                }
+                list.detail = Some(fresh);
             }
             Err(message) => {
                 list.detail = None;
@@ -523,6 +603,419 @@ impl State {
         self.pulls.list.verifying = true;
         self.pulls.list.send_error = None;
         self.reload_pull_comments();
+    }
+}
+
+impl State {
+    pub fn review_key(&self) -> Option<String> {
+        let (connection, owner, name) = self.pull_list_target()?;
+        let number = self.pulls.list.selected?;
+        Some(format!("{}|{owner}/{name}#{number}", connection.id))
+    }
+
+    fn save_review_text(&mut self) {
+        let Some(key) = self.review_key() else {
+            return;
+        };
+        let text = self.pulls.list.review_body.text.clone();
+        let decision = self.pulls.list.decision;
+        match self.pulls.list.drafts.get_mut(&key) {
+            Some(draft) => {
+                draft.body = text;
+                draft.decision = decision;
+            }
+            None if !text.trim().is_empty() => {
+                let head = self
+                    .pulls
+                    .list
+                    .detail
+                    .as_ref()
+                    .map(|d| d.summary.head_sha.clone())
+                    .unwrap_or_default();
+                self.pulls.list.drafts.insert(
+                    key,
+                    ReviewDraft {
+                        head_sha: head,
+                        stale: false,
+                        entries: Vec::new(),
+                        body: text,
+                        decision,
+                    },
+                );
+            }
+            None => {}
+        }
+    }
+
+    fn load_review_text(&mut self) {
+        let draft = self
+            .review_key()
+            .and_then(|k| self.pulls.list.drafts.get(&k).cloned());
+        let list = &mut self.pulls.list;
+        match draft {
+            Some(d) => {
+                list.review_body = TextEdit::new(&d.body);
+                list.decision = d.decision;
+            }
+            None => {
+                list.review_body = TextEdit::new("");
+                list.decision = ReviewDecision::Comment;
+            }
+        }
+    }
+
+    pub fn current_draft(&self) -> Option<&ReviewDraft> {
+        self.pulls.list.drafts.get(&self.review_key()?)
+    }
+
+    pub fn pull_add_to_draft(&mut self) {
+        let Some(key) = self.review_key() else {
+            return;
+        };
+        let list = &mut self.pulls.list;
+        let (Some(pick), Some(detail)) = (list.pick.clone(), list.detail.as_ref()) else {
+            return;
+        };
+        let body = list.compose.text.trim().to_owned();
+        if body.is_empty() {
+            list.send_error =
+                Some("Écrivez le commentaire avant de l'ajouter à la revue.".to_owned());
+            list.version += 1;
+            return;
+        }
+        let head = detail.summary.head_sha.clone();
+        let hash = patch_hash(detail, &pick.path);
+        let draft = list.drafts.entry(key).or_insert_with(|| ReviewDraft {
+            head_sha: head.clone(),
+            stale: false,
+            entries: Vec::new(),
+            body: String::new(),
+            decision: ReviewDecision::Comment,
+        });
+        if draft.head_sha != head {
+            draft.stale = true;
+            list.send_error = Some(
+                "Le brouillon porte sur une autre révision : adoptez la révision actuelle avant d'ajouter des commentaires.".to_owned(),
+            );
+            list.version += 1;
+            return;
+        }
+        draft.entries.push(DraftEntry {
+            line: DraftLine {
+                path: pick.path,
+                line: pick.line,
+                start_line: pick.start,
+                side: pick.side,
+                body,
+            },
+            patch_hash: hash,
+            to_reread: false,
+        });
+        list.compose = TextEdit::new("");
+        list.pick = None;
+        list.range_start = None;
+        list.send_error = None;
+        list.send_notice = Some("Commentaire ajouté au brouillon de revue.".to_owned());
+        list.version += 1;
+    }
+
+    pub fn pull_remove_draft_line(&mut self, index: usize) {
+        if let Some(key) = self.review_key()
+            && let Some(draft) = self.pulls.list.drafts.get_mut(&key)
+            && index < draft.entries.len()
+        {
+            draft.entries.remove(index);
+        }
+        self.pulls.list.version += 1;
+    }
+
+    pub fn pull_mark_read(&mut self, index: usize) {
+        if let Some(key) = self.review_key()
+            && let Some(entry) = self
+                .pulls
+                .list
+                .drafts
+                .get_mut(&key)
+                .and_then(|d| d.entries.get_mut(index))
+        {
+            entry.to_reread = false;
+        }
+        self.pulls.list.version += 1;
+    }
+
+    pub fn pull_adopt_head(&mut self) {
+        let Some(key) = self.review_key() else {
+            return;
+        };
+        let Some(head) = self
+            .pulls
+            .list
+            .detail
+            .as_ref()
+            .map(|d| d.summary.head_sha.clone())
+        else {
+            return;
+        };
+        if let Some(draft) = self.pulls.list.drafts.get_mut(&key) {
+            draft.head_sha = head;
+            draft.stale = false;
+        }
+        self.pulls.list.version += 1;
+    }
+
+    pub fn pull_discard_draft(&mut self) {
+        if let Some(key) = self.review_key() {
+            self.pulls.list.drafts.remove(&key);
+        }
+        let list = &mut self.pulls.list;
+        list.review_body = TextEdit::new("");
+        list.decision = ReviewDecision::Comment;
+        list.review_error = None;
+        list.review_unverified = false;
+        list.review_notice = Some("Brouillon de revue abandonné.".to_owned());
+        list.version += 1;
+    }
+
+    pub fn pull_set_decision(&mut self, decision: ReviewDecision) {
+        self.pulls.list.decision = decision;
+        self.pulls.list.version += 1;
+    }
+
+    pub fn reload_reviews(&mut self, verify: bool) {
+        let Some(number) = self.pulls.list.selected else {
+            return;
+        };
+        let Some((connection, owner, name)) = self.pull_list_target() else {
+            return;
+        };
+        self.pulls.list.review_request += 1;
+        let request = self.pulls.list.review_request;
+        let secrets = self.hosting.secrets.clone();
+        let sender = self.event_tx();
+        let waker = self.waker_slot();
+        self.hosting.runtime.spawn(async move {
+            let result = list_reviews(secrets.as_ref(), &connection, &owner, &name, number)
+                .await
+                .map_err(|e| e.to_string());
+            let _ = sender.send(Event::PullReviewsLoaded {
+                request,
+                number,
+                verify,
+                result,
+            });
+            if let Some(wake) = waker.lock().unwrap().as_ref() {
+                wake();
+            }
+        });
+    }
+
+    pub fn pull_login(&self) -> String {
+        self.pulls
+            .candidates
+            .get(self.pulls.choice)
+            .map(|c| c.connection.login.clone())
+            .unwrap_or_default()
+    }
+
+    fn pending_submission(&self) -> Option<ReviewSubmission> {
+        let list = &self.pulls.list;
+        let detail = list.detail.as_ref()?;
+        let draft = self.current_draft();
+        Some(ReviewSubmission {
+            commit_sha: draft
+                .map(|d| d.head_sha.clone())
+                .unwrap_or_else(|| detail.summary.head_sha.clone()),
+            body: list.review_body.text.clone(),
+            decision: list.decision,
+            lines: draft
+                .map(|d| d.entries.iter().map(|e| e.line.clone()).collect())
+                .unwrap_or_default(),
+        })
+    }
+
+    pub fn pull_submit_review(&mut self) {
+        self.save_review_text();
+        let Some((connection, owner, name)) = self.pull_list_target() else {
+            return;
+        };
+        let login = self.pull_login();
+        let Some(submission) = self.pending_submission() else {
+            return;
+        };
+        let draft = self.current_draft().cloned();
+        let list = &mut self.pulls.list;
+        let Some(number) = list.selected else {
+            return;
+        };
+        if list.review_sending {
+            return;
+        }
+        list.review_error = None;
+        list.review_notice = None;
+        let author = list
+            .detail
+            .as_ref()
+            .map(|d| d.summary.author.clone())
+            .unwrap_or_default();
+        let refusal = if draft.as_ref().is_some_and(|d| d.stale) {
+            Some("La pull request a été mise à jour depuis la préparation de la revue : adoptez la révision actuelle et relisez les commentaires signalés avant d'envoyer.".to_owned())
+        } else if let Some(count) = draft
+            .as_ref()
+            .map(|d| d.entries.iter().filter(|e| e.to_reread).count())
+            .filter(|c| *c > 0)
+        {
+            Some(format!(
+                "{count} commentaire(s) du brouillon sont à relire (fichier modifié) : marquez-les relus ou retirez-les."
+            ))
+        } else if submission.decision != ReviewDecision::Comment
+            && author.eq_ignore_ascii_case(&login)
+        {
+            Some("Vous êtes l'auteur de cette pull request : GitHub n'autorise ni l'approbation ni la demande de changements sur sa propre PR.".to_owned())
+        } else {
+            None
+        };
+        if let Some(message) = refusal {
+            list.review_error = Some(message);
+            list.version += 1;
+            return;
+        }
+        list.review_request += 1;
+        list.review_sending = true;
+        list.review_unverified = false;
+        list.version += 1;
+        let request = list.review_request;
+        let secrets = self.hosting.secrets.clone();
+        let sender = self.event_tx();
+        let waker = self.waker_slot();
+        self.hosting.runtime.spawn(async move {
+            let result = submit_review(
+                secrets.as_ref(),
+                &connection,
+                &owner,
+                &name,
+                number,
+                &submission,
+            )
+            .await;
+            let unknown = matches!(
+                result,
+                Err(gitpoulpe_hosting::GithubError::Http(_)
+                    | gitpoulpe_hosting::GithubError::Server(_))
+            );
+            let _ = sender.send(Event::PullReviewSent {
+                request,
+                number,
+                unknown,
+                result: result.map_err(|e| e.to_string()),
+            });
+            if let Some(wake) = waker.lock().unwrap().as_ref() {
+                wake();
+            }
+        });
+    }
+
+    pub fn apply_pull_review_sent(
+        &mut self,
+        request: u64,
+        number: u64,
+        unknown: bool,
+        result: Result<Review, String>,
+    ) -> bool {
+        let key = self.review_key();
+        let login = self.pull_login();
+        let list = &mut self.pulls.list;
+        if !list.open || request != list.review_request || list.selected != Some(number) {
+            return false;
+        }
+        list.review_sending = false;
+        match result {
+            Ok(review) => {
+                if let Some(key) = key {
+                    list.drafts.remove(&key);
+                }
+                list.review_body = TextEdit::new("");
+                list.decision = ReviewDecision::Comment;
+                list.review_notice = Some(format!(
+                    "Revue publiée par {login} : {} sur la révision {}.",
+                    review_state_label(&review.state),
+                    short(&review.commit_sha)
+                ));
+                list.reviews.push(review);
+            }
+            Err(message) => {
+                list.review_error = Some(message);
+                list.review_unverified = unknown;
+            }
+        }
+        list.version += 1;
+        true
+    }
+
+    pub fn pull_verify_review(&mut self) {
+        if !self.pulls.list.review_unverified {
+            return;
+        }
+        self.pulls.list.review_verifying = true;
+        self.pulls.list.review_error = None;
+        self.reload_reviews(true);
+    }
+
+    pub fn apply_pull_reviews(
+        &mut self,
+        request: u64,
+        number: u64,
+        verify: bool,
+        result: Result<Vec<Review>, String>,
+    ) -> bool {
+        let key = self.review_key();
+        let login = self.pull_login();
+        let submission = self.pending_submission();
+        let list = &mut self.pulls.list;
+        if !list.open || request != list.review_request || list.selected != Some(number) {
+            return false;
+        }
+        match result {
+            Ok(reviews) => {
+                if verify && list.review_verifying {
+                    list.review_verifying = false;
+                    let sent = submission
+                        .as_ref()
+                        .is_some_and(|s| review_exists(&reviews, &login, s));
+                    if sent {
+                        if let Some(key) = key {
+                            list.drafts.remove(&key);
+                        }
+                        list.review_body = TextEdit::new("");
+                        list.review_unverified = false;
+                        list.review_notice =
+                            Some("La revue est déjà publiée : ne la renvoyez pas.".to_owned());
+                    } else {
+                        list.review_unverified = false;
+                        list.review_notice = Some(
+                            "La revue n'a pas été publiée : votre brouillon est intact, vous pouvez réessayer.".to_owned(),
+                        );
+                    }
+                }
+                list.reviews = reviews;
+            }
+            Err(message) => {
+                list.review_verifying = false;
+                list.review_error = Some(message);
+            }
+        }
+        list.version += 1;
+        true
+    }
+}
+
+pub fn review_state_label(state: &str) -> &'static str {
+    match state {
+        "APPROVED" => "approbation",
+        "CHANGES_REQUESTED" => "changements demandés",
+        "COMMENTED" => "commentaire",
+        "DISMISSED" => "écartée",
+        "PENDING" => "brouillon",
+        _ => "revue",
     }
 }
 

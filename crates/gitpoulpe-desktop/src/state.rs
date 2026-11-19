@@ -920,6 +920,19 @@ impl State {
             Event::AccountConnected { request, result } => {
                 self.apply_account_connected(request, result)
             }
+            Event::PullReviewSent {
+                request,
+                number,
+                unknown,
+                result,
+                ..
+            } => self.apply_pull_review_sent(request, number, unknown, result),
+            Event::PullReviewsLoaded {
+                request,
+                number,
+                verify,
+                result,
+            } => self.apply_pull_reviews(request, number, verify, result),
             Event::PullCommentsLoaded {
                 request,
                 number,

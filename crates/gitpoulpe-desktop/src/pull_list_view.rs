@@ -1,9 +1,9 @@
 use std::borrow::Cow;
 
-use gitpoulpe_hosting::{PullFilter, PullState, PullSummary};
+use gitpoulpe_hosting::{PullFilter, PullState, PullSummary, ReviewDecision};
 use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text};
 
-use crate::pull_list::{CommentKind, numbered_lines, short};
+use crate::pull_list::{CommentKind, numbered_lines, review_state_label, short};
 use crate::state::State;
 use crate::theme;
 use crate::widgets::{action, field, toggle};
@@ -157,7 +157,7 @@ fn detail(s: &State) -> El {
                 .wrap(),
         );
     }
-    panel = panel.child(compose(s));
+    panel = panel.child(compose(s)).child(review_panel(s));
     panel = panel.child(
         text(format!("{} commit(s)", detail.commits.len()))
             .font(theme::BODY_STRONG)
@@ -349,6 +349,12 @@ fn compose(s: &State) -> El {
                     .on_press(|s: &mut State| s.pull_send_comment(CommentKind::Line)),
             );
         }
+        if list.pick.is_some() {
+            buttons = buttons.child(
+                action(s, "prc-add-draft", "Ajouter à la revue", false)
+                    .on_press(|s: &mut State| s.pull_add_to_draft()),
+            );
+        }
         buttons = buttons.child(
             action(
                 s,
@@ -399,6 +405,200 @@ fn compose(s: &State) -> El {
                 action(s, "prc-verify", "Vérifier si le commentaire est parti", false)
                     .on_press(|s: &mut State| s.pull_verify_comment()),
             );
+    }
+    block
+}
+
+fn decision_button(s: &State, key: &str, caption: &str, decision: ReviewDecision) -> El {
+    action(s, key, caption, s.pulls.list.decision == decision)
+        .on_press(move |st: &mut State| st.pull_set_decision(decision))
+}
+
+fn review_panel(s: &State) -> El {
+    let p = s.palette;
+    let list = &s.pulls.list;
+    let draft = s.current_draft();
+    let count = draft.map(|d| d.entries.len()).unwrap_or(0);
+    let mut block = col().gap(6.0).child(
+        text(format!(
+            "Revue en tant que {}@{} · {count} commentaire(s) dans le brouillon",
+            s.pull_login(),
+            s.pulls
+                .candidates
+                .get(s.pulls.choice)
+                .map(|c| c.connection.host_caption())
+                .unwrap_or_default()
+        ))
+        .key("prv-title")
+        .font(theme::BODY_STRONG)
+        .color(p.text)
+        .wrap(),
+    );
+    if let Some(draft) = draft {
+        if draft.stale {
+            block = block
+                .child(
+                    text(format!(
+                        "La pull request a été mise à jour depuis la préparation du brouillon (révision {}) : relisez les éléments signalés.",
+                        short(&draft.head_sha)
+                    ))
+                    .key("prv-stale")
+                    .font(theme::SMALL)
+                    .color(p.red)
+                    .wrap(),
+                )
+                .child(
+                    action(s, "prv-adopt", "Adopter la révision actuelle", false)
+                        .on_press(|s: &mut State| s.pull_adopt_head()),
+                );
+        }
+        for (i, entry) in draft.entries.iter().enumerate() {
+            block = block.child(
+                text(format!(
+                    "{}:{}{} ({}) — {}{}",
+                    entry.line.path,
+                    entry
+                        .line
+                        .start_line
+                        .map(|l| format!("{l}–"))
+                        .unwrap_or_default(),
+                    entry.line.line,
+                    if entry.line.side == gitpoulpe_hosting::Side::Left {
+                        "ancien"
+                    } else {
+                        "nouveau"
+                    },
+                    entry.line.body,
+                    if entry.to_reread {
+                        " — À RELIRE"
+                    } else {
+                        ""
+                    }
+                ))
+                .key(format!("prv-entry{i}"))
+                .font(theme::SMALL)
+                .color(if entry.to_reread { p.red } else { p.muted })
+                .wrap(),
+            );
+            let mut buttons = row().gap(8.0);
+            if entry.to_reread {
+                buttons = buttons.child(
+                    action(s, &format!("prv-read{i}"), "Marquer relu", false)
+                        .on_press(move |s: &mut State| s.pull_mark_read(i)),
+                );
+            }
+            buttons = buttons.child(
+                action(s, &format!("prv-del{i}"), "Retirer", false)
+                    .on_press(move |s: &mut State| s.pull_remove_draft_line(i)),
+            );
+            block = block.child(buttons);
+        }
+    }
+    block = block
+        .child(
+            field(
+                s,
+                "prv-body",
+                "Message de la revue",
+                &list.review_body,
+                "Message de la revue",
+            )
+            .on_edit(|s: &mut State| &mut s.pulls.list.review_body),
+        )
+        .child(
+            row()
+                .gap(8.0)
+                .child(decision_button(
+                    s,
+                    "prv-dec-comment",
+                    "Commenter",
+                    ReviewDecision::Comment,
+                ))
+                .child(decision_button(
+                    s,
+                    "prv-dec-approve",
+                    "Approuver",
+                    ReviewDecision::Approve,
+                ))
+                .child(decision_button(
+                    s,
+                    "prv-dec-changes",
+                    "Demander des changements",
+                    ReviewDecision::RequestChanges,
+                )),
+        )
+        .child(
+            row()
+                .gap(8.0)
+                .child(
+                    action(
+                        s,
+                        "prv-submit",
+                        if list.review_sending {
+                            "Envoi…"
+                        } else {
+                            "Soumettre la revue"
+                        },
+                        true,
+                    )
+                    .on_press(|s: &mut State| s.pull_submit_review()),
+                )
+                .child(
+                    action(s, "prv-discard", "Abandonner le brouillon", false)
+                        .on_press(|s: &mut State| s.pull_discard_draft()),
+                ),
+        );
+    if let Some(notice) = &list.review_notice {
+        block = block.child(
+            text(notice.clone())
+                .key("prv-notice")
+                .font(theme::SMALL)
+                .color(p.text)
+                .wrap(),
+        );
+    }
+    if let Some(error) = &list.review_error {
+        block = block.child(
+            text(error.clone())
+                .key("prv-error")
+                .font(theme::SMALL)
+                .color(p.red)
+                .wrap(),
+        );
+    }
+    if list.review_unverified {
+        block = block
+            .child(
+                text("Le résultat de l'envoi est inconnu : vérifiez avant de réessayer, pour ne pas publier deux fois.".to_owned())
+                    .key("prv-unknown")
+                    .font(theme::SMALL)
+                    .color(p.red)
+                    .wrap(),
+            )
+            .child(
+                action(s, "prv-verify", "Vérifier si la revue est partie", false)
+                    .on_press(|s: &mut State| s.pull_verify_review()),
+            );
+    }
+    block = block.child(
+        text(format!("{} revue(s) publiée(s)", list.reviews.len()))
+            .key("prv-published-title")
+            .font(theme::SMALL)
+            .color(p.muted),
+    );
+    for (i, review) in list.reviews.iter().enumerate() {
+        block = block.child(
+            text(format!(
+                "{} : {} sur {}",
+                review.author,
+                review_state_label(&review.state),
+                short(&review.commit_sha)
+            ))
+            .key(format!("prv-published{i}"))
+            .font(theme::PATH_SMALL)
+            .color(p.muted)
+            .truncate(),
+        );
     }
     block
 }
