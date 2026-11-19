@@ -6,7 +6,7 @@ use crate::view::row_key;
 const LINES_PER_KEY: usize = 3;
 const SIDEWAYS_STEP: f32 = 96.0;
 
-const TEXT_INPUTS: [&str; 45] = [
+const TEXT_INPUTS: [&str; 46] = [
     "ac-server",
     "ac-token",
     "br-filter",
@@ -49,6 +49,7 @@ const TEXT_INPUTS: [&str; 45] = [
     "ws-new-name",
     "pt-revision",
     "pt-dest",
+    "lk-input",
     "ws-name",
     "fv-search",
     "is-query",
@@ -201,6 +202,10 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         return copy_selection(s, tx);
     }
     s.notice = None;
+    if s.links.open && event.key == Key::Escape {
+        s.close_deep_link();
+        return true;
+    }
     if s.patches.open && event.key == Key::Escape {
         s.close_patch_import();
         return true;
@@ -397,6 +402,7 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         || s.notices.open
         || s.issues.open
         || s.patches.open
+        || s.links.open
         || s.undo_screen.open
         || s.worktrees.open
         || s.hooks.open

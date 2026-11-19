@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use gitpoulpe_core::{Notice, NoticeBook, NoticeKind, Pushed};
-use gitpoulpe_git::remote_urls;
+use gitpoulpe_git::{commit_exists, remote_urls};
 use gitpoulpe_hosting::{RawNotice, fetch_notifications, parse_remote};
 use rune::TextEdit;
 
@@ -15,6 +15,7 @@ pub const NOTICES_KEY: &str = "notices";
 pub enum Target {
     Conflicts,
     Pull { number: Option<u64> },
+    Commit(String),
 }
 
 pub struct Pending {
@@ -113,6 +114,7 @@ impl State {
         self.close_overview();
         self.close_issues();
         self.close_patch_import();
+        self.close_deep_link();
         self.accounts.open = false;
         self.profiles_open = false;
         self.notices.open = true;
@@ -324,7 +326,7 @@ impl State {
         }
     }
 
-    fn notices_go(&mut self, path: String, target: Target) {
+    pub fn notices_go(&mut self, path: String, target: Target) {
         let same = self.repo.as_ref().is_some_and(|r| {
             r.path.canonicalize().ok() == PathBuf::from(&path).canonicalize().ok()
         });
@@ -353,6 +355,11 @@ impl State {
         }
         match pending.target {
             Target::Conflicts => self.open_conflicts(),
+            Target::Commit(sha) => {
+                if commit_exists(&repo, &sha) {
+                    self.open_commit(sha, 0);
+                }
+            }
             Target::Pull { number, .. } => {
                 self.notices.pull_number = number;
                 self.open_pulls();

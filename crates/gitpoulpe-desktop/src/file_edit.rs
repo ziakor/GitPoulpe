@@ -59,6 +59,7 @@ impl State {
         self.close_notices();
         self.close_issues();
         self.close_patch_import();
+        self.close_deep_link();
         self.profiles_open = false;
         let request = self.file_edit.request + 1;
         self.file_edit = FileEditState {

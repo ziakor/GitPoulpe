@@ -108,6 +108,13 @@ pub const COMMANDS: &[PaletteCommand] = &[
         run: |s, _| s.open_patch_import(),
     },
     PaletteCommand {
+        id: "open-link",
+        label: "Ouvrir un lien…",
+        keywords: "lien profond url pull request commit gitpoulpe",
+        available: always,
+        run: |s, _| s.open_deep_link(None),
+    },
+    PaletteCommand {
         id: "patch-export",
         label: "Exporter en patch…",
         keywords: "export diff format-patch fichier patch partager",

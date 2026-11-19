@@ -105,6 +105,7 @@ impl State {
         self.close_notices();
         self.close_issues();
         self.close_patch_import();
+        self.close_deep_link();
         self.profiles_open = false;
         self.gitflow = GitflowState {
             open: true,

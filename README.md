@@ -342,6 +342,10 @@ The list shows opened, closed (including merged) or all merge requests with thei
 
 "Exporter en patch…" (command palette) writes a patch file from one of three sources: tracked local changes, the index, or commits (a single revision or a range such as `main..HEAD`, written as `git format-patch` mail patches). You type the absolute destination path. An existing file is only replaced after you tick the replacement box. The file is written to a temporary file in the destination folder and renamed, so a failed write never leaves a partial patch. Untracked files are not included; stage them first. Patches over 8 MiB are refused.
 
+## Opening a link
+
+"Ouvrir un lien…" (command palette) accepts `gitpoulpe://open/<host>/<owner>/<repo>[/commit/<sha> | /pull/<n>]` or the https address of a repository, commit or pull/merge request on GitHub or GitLab (nested GitLab groups and `/-/` paths included). The same `gitpoulpe://` link can be passed as a command-line argument. The link is checked strictly (no query string, fragment, credentials, encoding or extra path), then matched by host and path against the remotes of the open repository, workspace repositories and local favorites. Nothing happens until you click "Ouvrir ici": opening a link only navigates, never runs a Git operation, and uses only the connected account that matches the repository's remote. Registering `gitpoulpe://` with the operating system is part of the packaging work and is not done yet, so links from a browser do not launch the app.
+
 ## Build and run
 
 Requirements: Rust 1.100.0 (`rustup toolchain install 1.100.0`), Git on the `PATH` (tested with 2.53.0), a GPU and a Linux graphical session. The folder picker uses the XDG desktop portal.

@@ -41,7 +41,9 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
             message_screen(&p, "Impossible d'ouvrir ce dépôt", &detail, true, here)
         }
     };
-    let body = if s.patches.open {
+    let body = if s.links.open {
+        crate::deep_link_view::deep_link_screen(s)
+    } else if s.patches.open {
         crate::patch_import_view::patch_import_screen(s)
     } else if s.issues.open {
         crate::issues_view::issues_screen(s)

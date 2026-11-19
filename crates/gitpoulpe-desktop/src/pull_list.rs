@@ -294,7 +294,7 @@ impl State {
                 self.select_pull(number);
             } else if self.pulls.list.error.is_none() {
                 self.pulls.list.notice = Some(format!(
-                    "La demande #{number} de la notification n'existe plus ou n'est plus accessible avec ce compte."
+                    "La demande #{number} visée n'existe plus ou n'est plus accessible avec ce compte."
                 ));
             }
         }
@@ -469,6 +469,7 @@ impl State {
         self.close_notices();
         self.close_issues();
         self.close_patch_import();
+        self.close_deep_link();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::PullInspect {

@@ -6,6 +6,8 @@ mod cloning;
 mod cloning_view;
 mod conflicts;
 mod conflicts_view;
+mod deep_link;
+mod deep_link_view;
 mod engine;
 mod external_tools;
 mod external_tools_view;

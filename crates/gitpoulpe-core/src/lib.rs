@@ -1,6 +1,7 @@
 mod branch;
 mod commit;
 mod connection;
+mod deep_link;
 mod diff;
 mod error;
 mod favorite;
@@ -39,6 +40,7 @@ pub use commit::{
     JOURNAL_LIMIT, JournalEntry, Signature, SignatureKind, push_journal,
 };
 pub use connection::{Connection, ConnectionBook, Provider};
+pub use deep_link::{DeepLink, LINK_SCHEME, LinkError, LinkTarget, parse_link, remote_host_path};
 pub use diff::{
     BuildState, CommitRange, DiffKey, DiffLine, DiffLineKind, DiffSide, DocumentKind, DocumentMeta,
     FileRef, Hunk, RangeData, RangeError,

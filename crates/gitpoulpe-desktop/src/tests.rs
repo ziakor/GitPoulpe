@@ -27,6 +27,7 @@ mod initializing;
 mod inspecting;
 mod issuing;
 mod lfsing;
+mod linking;
 mod merging;
 mod noticing;
 mod overviewing;

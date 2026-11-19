@@ -389,6 +389,11 @@ pub enum Command {
         patch: std::sync::Arc<Vec<u8>>,
         mode: gitpoulpe_git::ApplyMode,
     },
+    LinkResolve {
+        request: u64,
+        link: gitpoulpe_core::DeepLink,
+        paths: Vec<String>,
+    },
     PatchExport {
         request: u64,
         source: gitpoulpe_git::ExportSource,
@@ -811,6 +816,10 @@ pub enum Event {
     PatchChecked {
         request: u64,
         result: Result<(), String>,
+    },
+    LinkResolved {
+        request: u64,
+        matches: Vec<String>,
     },
     PatchExported {
         request: u64,
@@ -1872,6 +1881,28 @@ async fn run(
                                 .await
                                 .map_err(|e| e.to_string());
                             shared.emit(Event::PatchChecked { request, result });
+                        });
+                    }
+                    Command::LinkResolve {
+                        request,
+                        link,
+                        paths,
+                    } => {
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let matches = tokio::task::spawn_blocking(move || {
+                                paths
+                                    .into_iter()
+                                    .filter(|path| {
+                                        gitpoulpe_git::remote_urls(std::path::Path::new(path))
+                                            .iter()
+                                            .any(|url| link.matches_remote(url))
+                                    })
+                                    .collect::<Vec<_>>()
+                            })
+                            .await
+                            .unwrap_or_default();
+                            shared.emit(Event::LinkResolved { request, matches });
                         });
                     }
                     Command::PatchExport {

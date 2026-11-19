@@ -215,6 +215,8 @@ pub struct State {
     pub notices: crate::notices::NoticesState,
     pub issues: crate::issues::IssuesState,
     pub patches: crate::patch_import::PatchState,
+    pub links: crate::deep_link::LinkState,
+    initial_link: Option<String>,
     pub publishing: crate::publishing::PublishSlot,
     pub pulling: crate::pulling::PullSlot,
     pub operation_kind: Option<gitpoulpe_core::OperationKind>,
@@ -269,7 +271,9 @@ fn initial_path() -> Option<PathBuf> {
 
 impl Default for State {
     fn default() -> Self {
-        Self::new(initial_path(), Prefs::open("gitpoulpe"))
+        let mut state = Self::new(initial_path(), Prefs::open("gitpoulpe"));
+        state.initial_link = crate::deep_link::link_from_args(std::env::args_os());
+        state
     }
 }
 
@@ -365,6 +369,8 @@ impl State {
             terminal: crate::terminal::TerminalState::default(),
             commands: crate::palette::PaletteState::default(),
             patches: crate::patch_import::PatchState::default(),
+            links: crate::deep_link::LinkState::default(),
+            initial_link: None,
             issues: crate::issues::IssuesState::default(),
             notices: crate::notices::NoticesState {
                 book: prefs
@@ -452,6 +458,9 @@ impl State {
         }
         if let Some(path) = self.initial_path.take() {
             self.open_path(path);
+        }
+        if let Some(link) = self.initial_link.take() {
+            self.open_deep_link(Some(link));
         }
     }
 
@@ -938,6 +947,7 @@ impl State {
             }
             Event::PatchChecked { request, result } => self.apply_patch_checked(request, result),
             Event::PatchExported { request, result } => self.apply_patch_exported(request, result),
+            Event::LinkResolved { request, matches } => self.apply_link_resolved(request, matches),
             Event::PatchApplied { request, result } => self.apply_patch_applied(request, result),
             Event::IssuesListed { request, result } => self.apply_issues_listed(request, result),
             Event::IssueLoaded {
@@ -2153,6 +2163,7 @@ impl State {
         self.close_notices();
         self.close_issues();
         self.close_patch_import();
+        self.close_deep_link();
         let selected = self
             .active_profile()
             .or_else(|| self.book.profiles.first())
@@ -2528,6 +2539,7 @@ impl State {
         self.close_notices();
         self.close_issues();
         self.close_patch_import();
+        self.close_deep_link();
         self.start_history();
     }
 
@@ -2678,6 +2690,7 @@ impl State {
         self.close_notices();
         self.close_issues();
         self.close_patch_import();
+        self.close_deep_link();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::CommitInspect {
