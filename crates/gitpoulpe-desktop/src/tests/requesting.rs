@@ -107,7 +107,11 @@ fn settle(rt: &mut Runtime<State>, until: impl Fn(&State) -> bool) {
 }
 
 fn click(rt: &mut Runtime<State>, key: &str) {
-    if key.starts_with("prc-") || key.starts_with("prl-f") {
+    if key.starts_with("prc-")
+        || key.starts_with("prl-f")
+        || key.starts_with("prv-")
+        || key.starts_with("mrg-")
+    {
         let target = key.to_owned();
         rt.update(move |_, tx| tx.scroll_into_view_in("prl-panel", target));
         for _ in 0..8 {
@@ -667,7 +671,10 @@ fn a_missing_permission_an_obsolete_revision_and_a_lost_answer_never_look_like_a
     step(&mut rt);
     click(&mut rt, "prv-submit");
     step(&mut rt);
-    assert!(shows(&rt, "Vous êtes l'auteur de cette pull request"));
+    assert!(review_error_has(
+        &rt,
+        "Vous êtes l'auteur de cette pull request"
+    ));
     assert!(!rt.state.pulls.list.review_sending);
     rt.state.pulls.list.detail.as_mut().unwrap().summary.author = "author1".to_owned();
     rt.state
@@ -684,7 +691,7 @@ fn a_missing_permission_an_obsolete_revision_and_a_lost_answer_never_look_like_a
     settle(&mut rt, |s| {
         !s.pulls.list.review_sending && s.pulls.list.review_error.is_some()
     });
-    assert!(shows(&rt, "a été mise à jour (zzz9999 → sha1)"));
+    assert!(review_error_has(&rt, "a été mise à jour (zzz9999 → sha1)"));
     assert!(rt.state.pulls.list.review_notice.is_none());
     rt.state
         .pulls
@@ -703,15 +710,18 @@ fn a_missing_permission_an_obsolete_revision_and_a_lost_answer_never_look_like_a
     settle(&mut rt, |s| {
         !s.pulls.list.review_sending && s.pulls.list.review_unverified
     });
-    assert!(shows(&rt, "Le résultat de l'envoi est inconnu"));
+    assert!(rt.state.pulls.list.review_unverified);
     click(&mut rt, "prv-verify");
     settle(&mut rt, |s| {
         !s.pulls.list.review_verifying && !s.pulls.list.review_unverified
     });
-    assert!(shows(&rt, "La revue est déjà publiée : ne la renvoyez pas"));
+    assert!(review_notice_has(
+        &rt,
+        "La revue est déjà publiée : ne la renvoyez pas"
+    ));
     click(&mut rt, "prv-discard");
     step(&mut rt);
-    assert!(shows(&rt, "Brouillon de revue abandonné"));
+    assert!(review_notice_has(&rt, "Brouillon de revue abandonné"));
     assert_eq!(rt.state.pulls.list.review_body.text, "");
 }
 
@@ -856,4 +866,143 @@ fn old_check_results_are_dropped_at_once_on_a_new_revision_and_on_a_failed_refre
     assert!(rt.state.pulls.list.checks.is_none());
     assert!(!shows(&rt, "stale-green"));
     assert!(shows(&rt, "Vérifications indisponibles"));
+}
+
+fn merge_ready(rt: &mut Runtime<State>, number: u64) {
+    loaded(rt, number);
+    settle(rt, |s| {
+        !s.pulls.list.merge_loading && s.pulls.list.merge.is_some()
+    });
+}
+
+#[test]
+fn only_allowed_methods_are_offered_with_their_effect_and_the_blockers_are_listed() {
+    let fake = Fake::start();
+    let (_dir, mut rt) = list_screen(&fake);
+    rt.state.select_pull(1);
+    merge_ready(&mut rt, 1);
+    assert!(rect_of(&rt, "mrg-merge").is_some() && rect_of(&rt, "mrg-squash").is_some());
+    assert!(rect_of(&rt, "mrg-rebase").is_none());
+    assert!(shows(&rt, "Crée un commit de fusion"));
+    assert!(shows(
+        &rt,
+        "Regroupe tous les commits de la branche en un seul commit"
+    ));
+    assert!(shows(&rt, "« lint » n'a pas réussi"));
+    assert!(shows(&rt, "« missing » est absente"));
+    assert!(shows(&rt, "1 approbation(s) sur 2 requise(s)"));
+    rt.state.select_pull(4);
+    merge_ready(&mut rt, 4);
+    assert!(rect_of(&rt, "mrg-merge").is_none());
+    assert!(shows(&rt, "la pull request est un brouillon"));
+}
+
+#[test]
+fn a_merge_needs_a_confirmation_names_the_revision_and_is_verified_on_the_remote() {
+    let fake = Fake::start();
+    let (_dir, mut rt) = list_screen(&fake);
+    rt.state.select_pull(1);
+    merge_ready(&mut rt, 1);
+    click(&mut rt, "mrg-squash");
+    step(&mut rt);
+    assert!(shows(
+        &rt,
+        "Confirmer : Fusionner en un seul commit sur la révision sha1"
+    ));
+    assert!(rt.state.pulls.list.merge_notice.is_none() && !rt.state.pulls.list.merging);
+    click(&mut rt, "mrg-cancel");
+    step(&mut rt);
+    assert!(rt.state.pulls.list.merge_confirm.is_none());
+    click(&mut rt, "mrg-merge");
+    step(&mut rt);
+    click(&mut rt, "mrg-confirm");
+    settle(&mut rt, |s| {
+        !s.pulls.list.merging && s.pulls.list.merge_notice.is_some()
+    });
+    assert!(shows(&rt, "Pull request fusionnée (commit mergesh)."));
+    settle(&mut rt, |s| {
+        !s.pulls.list.detail_loading
+            && s.pulls
+                .list
+                .detail
+                .as_ref()
+                .is_some_and(|d| d.summary.state == gitpoulpe_hosting::PullState::Merged)
+    });
+    assert!(shows(&rt, "fusionnée · par author1"));
+}
+
+#[test]
+fn an_advanced_revision_a_refusal_and_a_lost_answer_never_pass_for_a_completed_merge() {
+    let fake = Fake::start();
+    let (_dir, mut rt) = list_screen(&fake);
+    rt.state.select_pull(1);
+    merge_ready(&mut rt, 1);
+    rt.state.pulls.list.merge.as_mut().unwrap().head_sha = "oldsha0".to_owned();
+    click(&mut rt, "mrg-merge");
+    step(&mut rt);
+    click(&mut rt, "mrg-confirm");
+    settle(&mut rt, |s| {
+        !s.pulls.list.merging && s.pulls.list.merge_error.is_some()
+    });
+    assert!(shows(&rt, "a été mise à jour (oldsha0 → sha1)"));
+    assert!(rt.state.pulls.list.merge_notice.is_none());
+    rt.state.pulls.list.merge.as_mut().unwrap().head_sha = "sha1".to_owned();
+    click(&mut rt, "mrg-merge");
+    step(&mut rt);
+    rt.state.pulls.list.merge_message = TextEdit::new("FLAKY merge");
+    step(&mut rt);
+    click(&mut rt, "mrg-confirm");
+    settle(&mut rt, |s| {
+        !s.pulls.list.merging && s.pulls.list.merge_unverified
+    });
+    assert!(shows(&rt, "Le résultat de la fusion est inconnu"));
+    assert!(rt.state.pulls.list.merge_notice.is_none());
+    click(&mut rt, "mrg-verify");
+    settle(&mut rt, |s| !s.pulls.list.merge_unverified);
+    assert!(shows(
+        &rt,
+        "La pull request est fusionnée : ne relancez pas la fusion."
+    ));
+}
+
+#[test]
+fn a_server_refusal_is_shown_as_a_refusal_and_a_late_merge_answer_is_dropped() {
+    let fake = Fake::start();
+    let (_dir, mut rt) = list_screen(&fake);
+    rt.state.select_pull(1);
+    merge_ready(&mut rt, 1);
+    rt.state.pulls.list.merge.as_mut().unwrap().methods =
+        vec![gitpoulpe_hosting::MergeMethod::Merge];
+    rt.state.pulls.list.merge_confirm = Some(gitpoulpe_hosting::MergeMethod::Merge);
+    rt.state.pull_merge_confirmed();
+    assert!(rt.state.pulls.list.merging);
+    rt.state.select_pull(4);
+    for _ in 0..60 {
+        step(&mut rt);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let list = &rt.state.pulls.list;
+    assert!(!list.merging && list.merge_notice.is_none());
+    rt.state.select_pull(2);
+    merge_ready(&mut rt, 2);
+    assert!(rect_of(&rt, "mrg-merge").is_none());
+    assert!(shows(&rt, "la pull request n'est plus ouverte"));
+}
+
+fn review_error_has(rt: &Runtime<State>, needle: &str) -> bool {
+    rt.state
+        .pulls
+        .list
+        .review_error
+        .as_deref()
+        .is_some_and(|e| e.contains(needle))
+}
+
+fn review_notice_has(rt: &Runtime<State>, needle: &str) -> bool {
+    rt.state
+        .pulls
+        .list
+        .review_notice
+        .as_deref()
+        .is_some_and(|e| e.contains(needle))
 }

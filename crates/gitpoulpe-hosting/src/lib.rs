@@ -4,6 +4,7 @@ mod forks;
 mod github;
 mod http;
 mod pull_comments;
+mod pull_merge;
 mod pull_read;
 mod pull_review;
 mod pulls;
@@ -22,6 +23,10 @@ pub use http::{ApiClient, HttpError, Response, Token, next_link, validate_base};
 pub use pull_comments::{
     IssueComment, LineAnchor, PullComments, ReviewComment, Side, current_head, list_comments,
     post_comment, post_line_comment, reply_to_comment,
+};
+pub use pull_merge::{
+    HostedMerge, MergeMethod, MergeReadiness, MergeRequest, RequiredCheck, is_merged, merge_pull,
+    prepare_merge,
 };
 pub use pull_read::{
     PullCommit, PullDetail, PullFile, PullFilter, PullState, PullSummary, list_pulls, load_pull,

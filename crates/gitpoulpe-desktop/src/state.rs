@@ -920,6 +920,22 @@ impl State {
             Event::AccountConnected { request, result } => {
                 self.apply_account_connected(request, result)
             }
+            Event::PullMergeReady {
+                request,
+                number,
+                result,
+            } => self.apply_pull_merge_ready(request, number, result),
+            Event::PullMerged {
+                request,
+                number,
+                unknown,
+                result,
+            } => self.apply_pull_merged(request, number, unknown, result),
+            Event::PullMergeChecked {
+                request,
+                number,
+                result,
+            } => self.apply_pull_merge_checked(request, number, result),
             Event::PullChecksLoaded {
                 request,
                 number,

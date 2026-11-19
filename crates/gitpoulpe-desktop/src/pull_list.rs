@@ -2,9 +2,10 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 use gitpoulpe_hosting::{
-    Checks, DraftLine, LineAnchor, PullComments, PullDetail, PullFilter, PullSummary, Review,
-    ReviewDecision, ReviewSubmission, Side, list_comments, list_pulls, list_reviews, load_checks,
-    load_pull, post_comment, post_line_comment, reply_to_comment, review_exists, submit_review,
+    Checks, DraftLine, HostedMerge, LineAnchor, MergeMethod, MergeReadiness, MergeRequest,
+    PullComments, PullDetail, PullFilter, PullSummary, Review, ReviewDecision, ReviewSubmission,
+    Side, is_merged, list_comments, list_pulls, list_reviews, load_checks, load_pull, merge_pull,
+    post_comment, post_line_comment, prepare_merge, reply_to_comment, review_exists, submit_review,
 };
 use rune::TextEdit;
 
@@ -52,6 +53,15 @@ fn patch_hash(detail: &PullDetail, path: &str) -> u64 {
 }
 
 pub struct PullListState {
+    pub merge: Option<MergeReadiness>,
+    pub merge_loading: bool,
+    pub merge_error: Option<String>,
+    pub merge_request: u64,
+    pub merge_confirm: Option<MergeMethod>,
+    pub merge_message: TextEdit,
+    pub merging: bool,
+    pub merge_notice: Option<String>,
+    pub merge_unverified: bool,
     pub checks: Option<Checks>,
     pub checks_error: Option<String>,
     pub checks_loading: bool,
@@ -99,6 +109,15 @@ pub struct PullListState {
 impl Default for PullListState {
     fn default() -> Self {
         Self {
+            merge: None,
+            merge_loading: false,
+            merge_error: None,
+            merge_request: 0,
+            merge_confirm: None,
+            merge_message: TextEdit::new(""),
+            merging: false,
+            merge_notice: None,
+            merge_unverified: false,
             checks: None,
             checks_error: None,
             checks_loading: false,
@@ -171,11 +190,13 @@ impl State {
         let comment_request = self.pulls.list.comment_request + 1;
         let review_request = self.pulls.list.review_request + 1;
         let checks_request = self.pulls.list.checks_request + 1;
+        let merge_request = self.pulls.list.merge_request + 1;
         let drafts = std::mem::take(&mut self.pulls.list.drafts);
         self.pulls.list = PullListState {
             drafts,
             review_request,
             checks_request,
+            merge_request,
             open: true,
             list_request,
             detail_request,
@@ -195,6 +216,7 @@ impl State {
         list.comment_request += 1;
         list.review_request += 1;
         list.checks_request += 1;
+        list.merge_request += 1;
         list.version += 1;
     }
 
@@ -263,6 +285,15 @@ impl State {
         self.pulls.list.selected = Some(number);
         if previous != Some(number) {
             let list = &mut self.pulls.list;
+            list.merge = None;
+            list.merge_error = None;
+            list.merge_confirm = None;
+            list.merge_notice = None;
+            list.merge_unverified = false;
+            list.merging = false;
+            list.merge_loading = false;
+            list.merge_request += 1;
+            list.merge_message = TextEdit::new("");
             list.checks = None;
             list.checks_error = None;
             list.checks_note = None;
@@ -382,12 +413,243 @@ impl State {
         list.version += 1;
         if list.detail.is_some() {
             self.load_pull_checks();
+            self.load_pull_merge_info();
         }
         true
     }
 }
 
 impl State {
+    pub fn load_pull_merge_info(&mut self) {
+        let Some((connection, owner, name)) = self.pull_list_target() else {
+            return;
+        };
+        let list = &mut self.pulls.list;
+        let Some(number) = list.selected else {
+            return;
+        };
+        list.merge_request += 1;
+        list.merge_loading = true;
+        list.merge_error = None;
+        list.version += 1;
+        let request = list.merge_request;
+        let secrets = self.hosting.secrets.clone();
+        let sender = self.event_tx();
+        let waker = self.waker_slot();
+        self.hosting.runtime.spawn(async move {
+            let result = prepare_merge(secrets.as_ref(), &connection, &owner, &name, number)
+                .await
+                .map_err(|e| e.to_string());
+            let _ = sender.send(Event::PullMergeReady {
+                request,
+                number,
+                result,
+            });
+            if let Some(wake) = waker.lock().unwrap().as_ref() {
+                wake();
+            }
+        });
+    }
+
+    pub fn apply_pull_merge_ready(
+        &mut self,
+        request: u64,
+        number: u64,
+        result: Result<MergeReadiness, String>,
+    ) -> bool {
+        let list = &mut self.pulls.list;
+        if !list.open || request != list.merge_request || list.selected != Some(number) {
+            return false;
+        }
+        list.merge_loading = false;
+        match result {
+            Ok(ready) => list.merge = Some(ready),
+            Err(message) => {
+                list.merge = None;
+                list.merge_error = Some(message);
+            }
+        }
+        list.version += 1;
+        true
+    }
+
+    pub fn pull_merge_choose(&mut self, method: MergeMethod) {
+        let list = &mut self.pulls.list;
+        if list
+            .merge
+            .as_ref()
+            .is_some_and(|m| m.can_attempt() && m.methods.contains(&method))
+        {
+            list.merge_confirm = Some(method);
+            list.merge_notice = None;
+            list.merge_error = None;
+            list.version += 1;
+        }
+    }
+
+    pub fn pull_merge_cancel(&mut self) {
+        self.pulls.list.merge_confirm = None;
+        self.pulls.list.version += 1;
+    }
+
+    pub fn pull_merge_confirmed(&mut self) {
+        let Some((connection, owner, name)) = self.pull_list_target() else {
+            return;
+        };
+        let list = &mut self.pulls.list;
+        let (Some(number), Some(method), Some(ready)) =
+            (list.selected, list.merge_confirm, list.merge.as_ref())
+        else {
+            return;
+        };
+        if list.merging || !ready.can_attempt() {
+            return;
+        }
+        let request_body = MergeRequest {
+            method,
+            expected_head: ready.head_sha.clone(),
+            message: list.merge_message.text.clone(),
+        };
+        list.merge_request += 1;
+        list.merging = true;
+        list.merge_confirm = None;
+        list.merge_error = None;
+        list.merge_notice = None;
+        list.merge_unverified = false;
+        list.version += 1;
+        let request = list.merge_request;
+        let secrets = self.hosting.secrets.clone();
+        let sender = self.event_tx();
+        let waker = self.waker_slot();
+        self.hosting.runtime.spawn(async move {
+            let result = merge_pull(
+                secrets.as_ref(),
+                &connection,
+                &owner,
+                &name,
+                number,
+                &request_body,
+            )
+            .await;
+            let unknown = matches!(
+                result,
+                Err(gitpoulpe_hosting::GithubError::Http(_)
+                    | gitpoulpe_hosting::GithubError::Server(_))
+            );
+            let _ = sender.send(Event::PullMerged {
+                request,
+                number,
+                unknown,
+                result: result.map_err(|e| e.to_string()),
+            });
+            if let Some(wake) = waker.lock().unwrap().as_ref() {
+                wake();
+            }
+        });
+    }
+
+    pub fn apply_pull_merged(
+        &mut self,
+        request: u64,
+        number: u64,
+        unknown: bool,
+        result: Result<HostedMerge, String>,
+    ) -> bool {
+        let list = &mut self.pulls.list;
+        if !list.open || request != list.merge_request || list.selected != Some(number) {
+            return false;
+        }
+        list.merging = false;
+        let merged = match result {
+            Ok(outcome) => {
+                list.merge_notice = Some(if outcome.verified_merged {
+                    format!("Pull request fusionnée (commit {}).", short(&outcome.sha))
+                } else {
+                    "GitHub a répondu que la fusion est faite, mais l'état distant ne la confirme pas encore : actualisez avant de conclure.".to_owned()
+                });
+                outcome.verified_merged
+            }
+            Err(message) => {
+                list.merge_error = Some(message);
+                list.merge_unverified = unknown;
+                false
+            }
+        };
+        list.version += 1;
+        if merged {
+            self.load_pull_detail();
+        }
+        true
+    }
+
+    pub fn pull_merge_verify(&mut self) {
+        let Some((connection, owner, name)) = self.pull_list_target() else {
+            return;
+        };
+        let list = &mut self.pulls.list;
+        let Some(number) = list.selected else {
+            return;
+        };
+        if !list.merge_unverified {
+            return;
+        }
+        list.merge_request += 1;
+        let request = list.merge_request;
+        list.merge_error = None;
+        list.version += 1;
+        let secrets = self.hosting.secrets.clone();
+        let sender = self.event_tx();
+        let waker = self.waker_slot();
+        self.hosting.runtime.spawn(async move {
+            let result = is_merged(secrets.as_ref(), &connection, &owner, &name, number)
+                .await
+                .map_err(|e| e.to_string());
+            let _ = sender.send(Event::PullMergeChecked {
+                request,
+                number,
+                result,
+            });
+            if let Some(wake) = waker.lock().unwrap().as_ref() {
+                wake();
+            }
+        });
+    }
+
+    pub fn apply_pull_merge_checked(
+        &mut self,
+        request: u64,
+        number: u64,
+        result: Result<bool, String>,
+    ) -> bool {
+        let list = &mut self.pulls.list;
+        if !list.open || request != list.merge_request || list.selected != Some(number) {
+            return false;
+        }
+        match result {
+            Ok(true) => {
+                list.merge_unverified = false;
+                list.merge_notice =
+                    Some("La pull request est fusionnée : ne relancez pas la fusion.".to_owned());
+            }
+            Ok(false) => {
+                list.merge_unverified = false;
+                list.merge_notice = Some(
+                    "La pull request n'a pas été fusionnée : vous pouvez réessayer.".to_owned(),
+                );
+            }
+            Err(message) => list.merge_error = Some(message),
+        }
+        list.version += 1;
+        let merged = list
+            .merge_notice
+            .as_deref()
+            .is_some_and(|n| n.contains("est fusionnée"));
+        if merged {
+            self.load_pull_detail();
+        }
+        true
+    }
+
     pub fn load_pull_checks(&mut self) {
         let Some((connection, owner, name)) = self.pull_list_target() else {
             return;

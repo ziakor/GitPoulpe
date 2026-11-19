@@ -274,6 +274,8 @@ Reviews are prepared as a draft: "Ajouter à la revue" collects line comments ac
 
 The pull request view also shows the CI checks of the revision it currently displays: checks and legacy commit statuses are listed with their state (pending, succeeded, failed, cancelled, skipped) and a link to the provider's details, with a count per state. A revision with no check says so instead of looking green, and an unavailable API is reported as an error, never as an empty or successful list. When a new revision appears, the results of the previous one are dropped at once, with a notice, and an answer that belongs to an older revision or another pull request is ignored.
 
+For an open pull request, the "Fusion" section reads the repository's real rules before offering anything: only the merge methods the repository allows are proposed (merge commit, squash, rebase), each with its effect on the history, and the blockers are listed explicitly (draft, conflicts, branch behind, required checks that are failing, pending or missing, missing approvals, requested changes). Merging takes two steps and names the exact revision you read; if the head moved since, nothing is sent. A refusal from GitHub is shown as a refusal. After a merge the remote state is read again before success is claimed, and if the outcome of the request is unknown, "Vérifier l'état distant" tells you whether it was merged before you retry. If the branch protection rules cannot be read with your account, the screen says so and GitHub enforces them at merge time.
+
 ## Build and run
 
 Requirements: Rust 1.100.0 (`rustup toolchain install 1.100.0`), Git on the `PATH` (tested with 2.53.0), a GPU and a Linux graphical session. The folder picker uses the XDG desktop portal.

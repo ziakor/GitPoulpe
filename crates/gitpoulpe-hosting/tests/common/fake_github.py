@@ -8,6 +8,7 @@ POLLS = [0]
 FORKS = {}
 SENT = []
 REVIEWS = []
+MERGED = set()
 USERS = {
     "good": {"login": "Octo", "name": "Octo Cat", "scopes": "repo, read:org"},
     "fine": {"login": "Octo", "name": "Octo Cat", "scopes": None},
@@ -92,6 +93,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"ahead_by": 2, "behind_by": 1, "files": [
                 {"filename": "src/a.rs", "status": "modified", "additions": 3, "deletions": 1},
                 {"filename": "README.md", "status": "added", "additions": 10, "deletions": 0}]})
+        if rest == "acme/proj/branches/main/protection":
+            return self.reply(200, {"required_status_checks": {"contexts": ["build", "lint", "missing"]},
+                                    "required_pull_request_reviews": {"required_approving_review_count": 2}})
         if rest.startswith("acme/proj/commits/"):
             return self.checks_route(rest, params)
         if rest.startswith("acme/proj/issues/") and rest.endswith("/comments"):
@@ -144,7 +148,9 @@ class Handler(BaseHTTPRequestHandler):
         return {"number": n, "title": f"PR {n}", "state": spec[0], "merged_at": spec[1], "draft": n == 4,
                 "html_url": f"https://example.test/acme/proj/pull/{n}", "updated_at": "2026-02-02T00:00:00Z",
                 "user": {"login": f"author{n}"}, "body": f"body {n}",
-                "head": {"ref": f"feature/{n}", "sha": spec[2]}, "base": {"ref": "main", "sha": "basesha"}}
+                "head": {"ref": f"feature/{n}", "sha": spec[2]}, "base": {"ref": "main", "sha": "basesha"},
+                "mergeable_state": {1: "clean", 4: "blocked"}.get(n, "unknown")} | (
+                {"state": "closed", "merged_at": "2026-03-03T00:00:00Z"} if n in MERGED else {})
 
     def pull_read(self, rest, params):
         import time
@@ -206,6 +212,8 @@ class Handler(BaseHTTPRequestHandler):
                    "octo/existing": "acme/existing", "acme/existing": None}
         if name in sources:
             extra = {"fork": True, "parent": {"full_name": sources[name]}} if sources[name] else {}
+            if name == "acme/proj":
+                extra = {"allow_merge_commit": True, "allow_squash_merge": True, "allow_rebase_merge": False}
             return self.reply(200, self.repo(*name.split("/"), **extra))
         if name in FORKS:
             FORKS[name] += 1
@@ -282,6 +290,32 @@ class Handler(BaseHTTPRequestHandler):
         if parts[3] == "never":
             FORKS["lag"] = 99
         self.reply(202, self.repo(*dest.split("/"), fork=True, parent={"full_name": source}))
+
+    def do_PUT(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        body = json.loads(self.rfile.read(length).decode() or "{}")
+        if self.path.startswith("/api/v3/"):
+            self.path = self.path[len("/api/v3"):]
+        with open(LOG, "a") as f:
+            f.write(json.dumps({"path": self.path, "put": True, "body": body}) + "\n")
+        parts = self.path.split("/")
+        if not (self.path.endswith("/merge") and parts[2] == "acme"):
+            return self.reply(404, {"message": "Not Found"})
+        n = int(parts[5])
+        if n == 1:
+            if body.get("sha") != "sha1":
+                return self.reply(409, {"message": "Head branch was modified. Review and try the merge again."})
+            if "GHOST" not in body.get("commit_message", ""):
+                MERGED.add(1)
+            if "FLAKY" in body.get("commit_message", ""):
+                self.send_response(502)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            return self.reply(200, {"merged": True, "sha": "mergesha", "message": "Pull Request successfully merged"})
+        if n == 4:
+            return self.reply(405, {"message": "Required status check \"lint\" is failing"})
+        return self.reply(405, {"message": "Pull Request is not mergeable"})
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", "0"))

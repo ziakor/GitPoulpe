@@ -53,6 +53,8 @@ pub enum GithubError {
     PullExists(u64, String),
     BranchNotPublished(String),
     AnchorStale { prepared: String, current: String },
+    MergeRefused(String),
+    MergeNotAllowed(String),
 }
 
 impl std::fmt::Display for GithubError {
@@ -98,6 +100,8 @@ impl std::fmt::Display for GithubError {
                 f,
                 "la pull request a été mise à jour ({prepared} → {current}) : l'ancrage du commentaire est périmé, relisez le diff avant de publier"
             ),
+            Self::MergeRefused(why) => write!(f, "fusion refusée par GitHub : {why}"),
+            Self::MergeNotAllowed(why) => write!(f, "fusion impossible : {why}"),
             Self::DeviceDenied => f.write_str("l'autorisation a été refusée dans le navigateur"),
             Self::DeviceExpired => {
                 f.write_str("le code a expiré avant l'autorisation : recommencez la connexion")
@@ -146,6 +150,11 @@ pub(crate) fn interpret_failure(response: &Response) -> GithubError {
             })
         }
         404 => GithubError::NotFound,
+        405 | 409 => GithubError::MergeRefused(if message.is_empty() {
+            format!("statut {}", response.status)
+        } else {
+            message
+        }),
         422 => GithubError::Validation(validation_message(response, &message)),
         status => GithubError::Server(status),
     }

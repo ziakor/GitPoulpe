@@ -1,6 +1,8 @@
 use std::borrow::Cow;
 
-use gitpoulpe_hosting::{CheckState, PullFilter, PullState, PullSummary, ReviewDecision};
+use gitpoulpe_hosting::{
+    CheckState, MergeMethod, PullFilter, PullState, PullSummary, ReviewDecision,
+};
 use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text};
 
 use crate::pull_list::{CommentKind, numbered_lines, review_state_label, short};
@@ -159,6 +161,7 @@ fn detail(s: &State) -> El {
     }
     panel = panel
         .child(checks_panel(s))
+        .child(merge_panel(s))
         .child(compose(s))
         .child(review_panel(s));
     panel = panel.child(
@@ -408,6 +411,171 @@ fn compose(s: &State) -> El {
                 action(s, "prc-verify", "Vérifier si le commentaire est parti", false)
                     .on_press(|s: &mut State| s.pull_verify_comment()),
             );
+    }
+    block
+}
+
+fn method_caption(method: MergeMethod) -> (&'static str, &'static str, &'static str) {
+    match method {
+        MergeMethod::Merge => (
+            "mrg-merge",
+            "Fusionner (commit de fusion)",
+            "Crée un commit de fusion ; tous les commits de la branche sont conservés dans l'historique.",
+        ),
+        MergeMethod::Squash => (
+            "mrg-squash",
+            "Fusionner en un seul commit",
+            "Regroupe tous les commits de la branche en un seul commit sur la branche cible.",
+        ),
+        MergeMethod::Rebase => (
+            "mrg-rebase",
+            "Rebaser et fusionner",
+            "Rejoue les commits sur la branche cible sans commit de fusion ; leurs identifiants changent.",
+        ),
+    }
+}
+
+fn merge_panel(s: &State) -> El {
+    let p = s.palette;
+    let list = &s.pulls.list;
+    let mut block = col().gap(4.0).child(
+        text("Fusion".to_owned())
+            .font(theme::BODY_STRONG)
+            .color(p.text),
+    );
+    if list.merge_loading {
+        block = block.child(
+            text("Lecture des règles de fusion…".to_owned())
+                .key("mrg-loading")
+                .font(theme::SMALL)
+                .color(p.muted),
+        );
+    }
+    if let Some(notice) = &list.merge_notice {
+        block = block.child(
+            text(notice.clone())
+                .key("mrg-notice")
+                .font(theme::SMALL)
+                .color(p.text)
+                .wrap(),
+        );
+    }
+    if let Some(error) = &list.merge_error {
+        block = block.child(
+            text(error.clone())
+                .key("mrg-error")
+                .font(theme::SMALL)
+                .color(p.red)
+                .wrap(),
+        );
+    }
+    if list.merge_unverified {
+        block = block
+            .child(
+                text("Le résultat de la fusion est inconnu : vérifiez l'état distant avant de réessayer.".to_owned())
+                    .key("mrg-unknown")
+                    .font(theme::SMALL)
+                    .color(p.red)
+                    .wrap(),
+            )
+            .child(
+                action(s, "mrg-verify", "Vérifier l'état distant", false)
+                    .on_press(|s: &mut State| s.pull_merge_verify()),
+            );
+    }
+    let Some(ready) = &list.merge else {
+        return block;
+    };
+    if ready.protection_unreadable {
+        block = block.child(
+            text("Les règles de protection de la branche ne sont pas lisibles avec ce compte : elles seront appliquées par GitHub à la fusion.".to_owned())
+                .key("mrg-protection")
+                .font(theme::SMALL)
+                .color(p.muted)
+                .wrap(),
+        );
+    }
+    if ready.blockers.is_empty() {
+        block = block.child(
+            text("Aucun point bloquant connu.".to_owned())
+                .key("mrg-clear")
+                .font(theme::SMALL)
+                .color(p.muted),
+        );
+    } else {
+        for (i, blocker) in ready.blockers.iter().enumerate() {
+            block = block.child(
+                text(format!("• {blocker}"))
+                    .key(format!("mrg-blocker{i}"))
+                    .font(theme::SMALL)
+                    .color(p.red)
+                    .wrap(),
+            );
+        }
+    }
+    if !ready.can_attempt() {
+        return block;
+    }
+    if let Some(method) = list.merge_confirm {
+        let (_, caption, effect) = method_caption(method);
+        block = block
+            .child(
+                text(format!(
+                    "Confirmer : {caption} sur la révision {} ? {effect}",
+                    short(&ready.head_sha)
+                ))
+                .key("mrg-confirm-text")
+                .font(theme::SMALL)
+                .color(p.text)
+                .wrap(),
+            )
+            .child(
+                field(
+                    s,
+                    "mrg-message",
+                    "Message du commit (facultatif)",
+                    &list.merge_message,
+                    "Message",
+                )
+                .on_edit(|s: &mut State| &mut s.pulls.list.merge_message),
+            )
+            .child(
+                row()
+                    .gap(8.0)
+                    .child(
+                        action(
+                            s,
+                            "mrg-confirm",
+                            if list.merging {
+                                "Fusion…"
+                            } else {
+                                "Confirmer la fusion"
+                            },
+                            true,
+                        )
+                        .on_press(|s: &mut State| s.pull_merge_confirmed()),
+                    )
+                    .child(
+                        action(s, "mrg-cancel", "Annuler", false)
+                            .on_press(|s: &mut State| s.pull_merge_cancel()),
+                    ),
+            );
+    } else {
+        for method in &ready.methods {
+            let (key, caption, effect) = method_caption(*method);
+            let method = *method;
+            block = block
+                .child(
+                    action(s, key, caption, false)
+                        .on_press(move |s: &mut State| s.pull_merge_choose(method)),
+                )
+                .child(
+                    text(effect.to_owned())
+                        .font(theme::SMALL)
+                        .color(p.muted)
+                        .wrap(),
+                );
+        }
     }
     block
 }
