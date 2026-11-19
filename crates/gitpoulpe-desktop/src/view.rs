@@ -24,7 +24,14 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
         Screen::Welcome => message_screen(
             &p,
             "Ouvrir un dépôt Git",
-            "Choisissez un dossier, ou lancez gitpoulpe avec le chemin du dépôt.",
+            &match &s.prefs_warning {
+                Some(warning) => format!(
+                    "Choisissez un dossier, ou lancez gitpoulpe avec le chemin du dépôt.\n\n{warning}"
+                ),
+                None => {
+                    "Choisissez un dossier, ou lancez gitpoulpe avec le chemin du dépôt.".to_owned()
+                }
+            },
             true,
             None,
         ),
@@ -136,7 +143,7 @@ fn footer(s: &State) -> El {
     if s.screen != Screen::Ready {
         return el().h(0.0);
     }
-    let message = s.notice.clone().unwrap_or_else(|| match &s.watch {
+    let message = s.notice.clone().or_else(|| s.prefs_warning.clone()).unwrap_or_else(|| match &s.watch {
         WatchStatus::Unavailable(reason) => format!(
             "Surveillance indisponible ({reason}) : utilisez Actualiser ou revenez sur la fenêtre."
         ),

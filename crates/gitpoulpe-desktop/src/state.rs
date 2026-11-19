@@ -216,6 +216,7 @@ pub struct State {
     pub issues: crate::issues::IssuesState,
     pub patches: crate::patch_import::PatchState,
     pub links: crate::deep_link::LinkState,
+    pub prefs_warning: Option<String>,
     initial_link: Option<String>,
     pub publishing: crate::publishing::PublishSlot,
     pub pulling: crate::pulling::PullSlot,
@@ -271,7 +272,9 @@ fn initial_path() -> Option<PathBuf> {
 
 impl Default for State {
     fn default() -> Self {
-        let mut state = Self::new(initial_path(), Prefs::open("gitpoulpe"));
+        let (prefs, warning) = crate::prefs_migration::open_prefs("gitpoulpe");
+        let mut state = Self::new(initial_path(), prefs);
+        state.prefs_warning = warning;
         state.initial_link = crate::deep_link::link_from_args(std::env::args_os());
         state
     }
@@ -370,6 +373,7 @@ impl State {
             commands: crate::palette::PaletteState::default(),
             patches: crate::patch_import::PatchState::default(),
             links: crate::deep_link::LinkState::default(),
+            prefs_warning: None,
             initial_link: None,
             issues: crate::issues::IssuesState::default(),
             notices: crate::notices::NoticesState {

@@ -41,6 +41,7 @@ mod palette_view;
 mod patch_import;
 mod patch_import_view;
 mod perf;
+mod prefs_migration;
 mod profiles;
 mod profiles_view;
 mod publishing;

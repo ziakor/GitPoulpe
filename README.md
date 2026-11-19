@@ -346,6 +346,10 @@ The list shows opened, closed (including merged) or all merge requests with thei
 
 "Ouvrir un lien…" (command palette) accepts `gitpoulpe://open/<host>/<owner>/<repo>[/commit/<sha> | /pull/<n>]` or the https address of a repository, commit or pull/merge request on GitHub or GitLab (nested GitLab groups and `/-/` paths included). The same `gitpoulpe://` link can be passed as a command-line argument. The link is checked strictly (no query string, fragment, credentials, encoding or extra path), then matched by host and path against the remotes of the open repository, workspace repositories and local favorites. Nothing happens until you click "Ouvrir ici": opening a link only navigates, never runs a Git operation, and uses only the connected account that matches the repository's remote. Registering `gitpoulpe://` with the operating system is part of the packaging work and is not done yet, so links from a browser do not launch the app.
 
+## Preferences format
+
+Settings live in one `prefs.json` that carries a `format` number (files written before versioning count as format 0). At startup an older file is upgraded step by step after a copy is kept next to it (`prefs.json.v<N>.bak`); the upgrade is written atomically and simply runs again if it was interrupted. A file that is not valid JSON is copied to `prefs.json.unreadable` (numbered if one exists) and the settings start empty, with a warning on screen. A file written by a newer GitPoulpe, or one whose upgrade failed, is never modified: its values are read into memory, changes are not saved, and a warning says so. No format change exists yet, so the only upgrade today stamps the version.
+
 ## Build and run
 
 Requirements: Rust 1.100.0 (`rustup toolchain install 1.100.0`), Git on the `PATH` (tested with 2.53.0), a GPU and a Linux graphical session. The folder picker uses the XDG desktop portal.

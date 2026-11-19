@@ -33,6 +33,7 @@ mod noticing;
 mod overviewing;
 mod palette_commands;
 mod patching;
+mod prefs_migrating;
 mod profiles;
 mod publishing;
 mod pulling;
