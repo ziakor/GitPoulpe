@@ -41,7 +41,9 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
             message_screen(&p, "Impossible d'ouvrir ce dépôt", &detail, true, here)
         }
     };
-    let body = if s.tools.open {
+    let body = if s.shortcuts.open {
+        crate::shortcuts_view::shortcuts_screen(s)
+    } else if s.tools.open {
         crate::external_tools_view::tools_screen(s)
     } else if s.clone.open {
         crate::cloning_view::clone_screen(s)
@@ -124,7 +126,7 @@ fn footer(s: &State) -> El {
         WatchStatus::Unavailable(reason) => format!(
             "Surveillance indisponible ({reason}) : utilisez Actualiser ou revenez sur la fenêtre."
         ),
-        _ => HINTS.to_owned(),
+        _ => hints(s),
     });
     row()
         .w_full()
@@ -136,7 +138,24 @@ fn footer(s: &State) -> El {
         .child(text(message).font(theme::SMALL).color(p.muted).truncate())
 }
 
-const HINTS: &str = "/ filtrer · j et k : fichier suivant ou précédent · 1 et 2 : changer de vue · m : unifié ou séparé · ↑ ↓ ← → PgUp PgDn : lire · r : actualiser · s : indexer · u : désindexer · x : sélectionner · Maj+S : appliquer à la sélection · clic sur un numéro de ligne : sélectionner (Maj pour étendre) · Ctrl+O : ouvrir un dépôt · Ctrl+K : palette de commandes";
+fn hints(s: &State) -> String {
+    format!(
+        "{} filtrer · {} et {} : fichier suivant ou précédent · {} et {} : changer de vue · {} : unifié ou séparé · ↑ ↓ ← → PgUp PgDn : lire · {} : actualiser · {} : indexer · {} : désindexer · {} : sélectionner · {} : appliquer à la sélection · clic sur un numéro de ligne : sélectionner (Maj pour étendre) · {} : ouvrir un dépôt · {} : palette de commandes",
+        s.shortcut_for("filter"),
+        s.shortcut_for("next-file"),
+        s.shortcut_for("prev-file"),
+        s.shortcut_for("view-unstaged"),
+        s.shortcut_for("view-staged"),
+        s.shortcut_for("toggle-mode"),
+        s.shortcut_for("refresh-reading"),
+        s.shortcut_for("stage"),
+        s.shortcut_for("unstage"),
+        s.shortcut_for("mark"),
+        s.shortcut_for("apply-stage"),
+        s.shortcut_for("open-repository"),
+        s.shortcut_for("palette"),
+    )
+}
 
 fn open_button(p: &Palette, primary: bool) -> El {
     let (fill, ink) = if primary {

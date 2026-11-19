@@ -97,6 +97,7 @@ impl State {
         self.close_file_edit();
         self.close_tools();
         self.close_terminal();
+        self.close_shortcuts();
         self.profiles_open = false;
         let request = self.pulls.request + 1;
         let list = std::mem::take(&mut self.pulls.list);

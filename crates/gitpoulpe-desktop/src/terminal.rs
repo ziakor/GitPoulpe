@@ -124,6 +124,7 @@ impl State {
         self.close_file_history();
         self.close_file_edit();
         self.close_tools();
+        self.close_shortcuts();
         self.profiles_open = false;
         self.terminal = TerminalState::default();
         let config = self.tools.book.shell.clone();

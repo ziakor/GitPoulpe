@@ -6,7 +6,7 @@ use crate::view::row_key;
 const LINES_PER_KEY: usize = 3;
 const SIDEWAYS_STEP: f32 = 96.0;
 
-const TEXT_INPUTS: [&str; 38] = [
+const TEXT_INPUTS: [&str; 39] = [
     "ac-server",
     "ac-token",
     "br-filter",
@@ -45,6 +45,7 @@ const TEXT_INPUTS: [&str; 38] = [
     "pf-email",
     "pf-key",
     "pal-input",
+    "sc-search",
 ];
 
 pub fn open_dialog(tx: &mut Tx) {
@@ -141,14 +142,63 @@ fn copy_selection(s: &mut State, tx: &Tx) -> bool {
     s.start_copy(first, last, left)
 }
 
+fn run_action(s: &mut State, tx: &mut Tx, id: &str) -> bool {
+    match id {
+        "filter" => tx.focus("filter", true),
+        "toggle-mode" => s.toggle_mode(tx),
+        "refresh-reading" | "refresh" => s.refresh(),
+        "stage" => {
+            if s.line_pick.is_some() {
+                s.write_picked_lines();
+            } else {
+                s.stage_current();
+            }
+        }
+        "unstage" => {
+            if s.line_pick.is_some() {
+                s.write_picked_lines();
+            } else {
+                s.unstage_current();
+            }
+        }
+        "apply-stage" | "apply-unstage" => s.write_marked(),
+        "mark" => {
+            if let Some(position) = s.current {
+                s.toggle_mark(position);
+            }
+        }
+        "next-file" => reveal_file(s, tx, 1),
+        "prev-file" => reveal_file(s, tx, -1),
+        "view-unstaged" => s.set_view(ViewKind::Unstaged),
+        "view-staged" => s.set_view(ViewKind::Staged),
+        "open-repository" => open_dialog(tx),
+        "palette" => {
+            if s.commands.open {
+                s.close_palette(tx, true);
+            } else {
+                s.open_palette(tx);
+            }
+        }
+        _ => return false,
+    }
+    true
+}
+
 pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
     if s.terminal.open && s.terminal.session.is_some() {
         return s.terminal_key(event);
+    }
+    if s.shortcuts.capturing.is_some() {
+        return s.shortcut_capture(event);
     }
     if event.mods.cmd && event.is_command('c') {
         return copy_selection(s, tx);
     }
     s.notice = None;
+    if s.shortcuts.open && event.key == Key::Escape {
+        s.close_shortcuts();
+        return true;
+    }
     if s.commands.open && s.palette_key(&event.key, tx) {
         return true;
     }
@@ -280,23 +330,14 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         s.leave_commit();
         return true;
     }
+    if let Some(chord) = crate::shortcuts::chord_of(event)
+        && let Some(id) = s
+            .shortcuts
+            .action_for(&chord, crate::shortcuts::Scope::Global)
+    {
+        return run_action(s, tx, id);
+    }
     if event.mods.cmd {
-        if event.is_command('k') {
-            if s.commands.open {
-                s.close_palette(tx, true);
-            } else {
-                s.open_palette(tx);
-            }
-            return true;
-        }
-        if event.is_command('o') {
-            open_dialog(tx);
-            return true;
-        }
-        if event.is_command('r') {
-            s.refresh();
-            return true;
-        }
         return false;
     }
     if event.mods.alt || event.mods.ctrl {
@@ -319,6 +360,7 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         || s.file_edit.open
         || s.terminal.open
         || s.commands.open
+        || s.shortcuts.open
         || s.undo_screen.open
         || s.worktrees.open
         || s.hooks.open
@@ -328,36 +370,15 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         || s.pulls.open
         || s.accounts.open;
     match &event.key {
-        Key::Text(text) if reading && !typing => match text.as_str() {
-            "/" => tx.focus("filter", true),
-            "m" => s.toggle_mode(tx),
-            "r" => s.refresh(),
-            "s" => {
-                if s.line_pick.is_some() {
-                    s.write_picked_lines();
-                } else {
-                    s.stage_current();
-                }
+        Key::Text(text) if reading && !typing => {
+            match s
+                .shortcuts
+                .action_for(text, crate::shortcuts::Scope::Reading)
+            {
+                Some(id) => return run_action(s, tx, id),
+                None => return false,
             }
-            "u" => {
-                if s.line_pick.is_some() {
-                    s.write_picked_lines();
-                } else {
-                    s.unstage_current();
-                }
-            }
-            "S" | "U" => s.write_marked(),
-            "x" => {
-                if let Some(position) = s.current {
-                    s.toggle_mark(position);
-                }
-            }
-            "j" => reveal_file(s, tx, 1),
-            "k" => reveal_file(s, tx, -1),
-            "1" => s.set_view(ViewKind::Unstaged),
-            "2" => s.set_view(ViewKind::Staged),
-            _ => return false,
-        },
+        }
         Key::Left | Key::Right if reading && free && s.mode == DiffMode::Unified => {
             let [offset, max] = s.scroll_x.get();
             let step = if event.key == Key::Right {

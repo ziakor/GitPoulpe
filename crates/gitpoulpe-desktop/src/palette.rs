@@ -94,6 +94,13 @@ pub const COMMANDS: &[PaletteCommand] = &[
         run: |s, _| s.open_tools_config(),
     },
     PaletteCommand {
+        id: "shortcuts",
+        label: "Raccourcis clavier…",
+        keywords: "touches clavier personnaliser combinaison",
+        available: always,
+        run: |s, _| s.open_shortcuts(),
+    },
+    PaletteCommand {
         id: "theme",
         label: "Changer de thème",
         keywords: "clair sombre dark light",

@@ -88,6 +88,7 @@ impl State {
         self.close_file_edit();
         self.close_tools();
         self.close_terminal();
+        self.close_shortcuts();
         self.profiles_open = false;
         self.branches.open = true;
         self.reload_branches();

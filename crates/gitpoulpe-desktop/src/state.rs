@@ -207,6 +207,7 @@ pub struct State {
     pub tools: crate::external_tools::ToolsState,
     pub terminal: crate::terminal::TerminalState,
     pub commands: crate::palette::PaletteState,
+    pub shortcuts: crate::shortcuts::ShortcutState,
     pub publishing: crate::publishing::PublishSlot,
     pub pulling: crate::pulling::PullSlot,
     pub operation_kind: Option<gitpoulpe_core::OperationKind>,
@@ -356,6 +357,14 @@ impl State {
             file_edit: crate::file_edit::FileEditState::default(),
             terminal: crate::terminal::TerminalState::default(),
             commands: crate::palette::PaletteState::default(),
+            shortcuts: crate::shortcuts::ShortcutState {
+                custom: prefs
+                    .get::<std::collections::BTreeMap<String, String>>(
+                        crate::shortcuts::SHORTCUTS_KEY,
+                    )
+                    .unwrap_or_default(),
+                ..crate::shortcuts::ShortcutState::default()
+            },
             tools: crate::external_tools::ToolsState {
                 book: prefs
                     .get::<gitpoulpe_core::ToolBook>(crate::external_tools::TOOLS_KEY)
@@ -2082,6 +2091,7 @@ impl State {
         self.close_file_edit();
         self.close_tools();
         self.close_terminal();
+        self.close_shortcuts();
         let selected = self
             .active_profile()
             .or_else(|| self.book.profiles.first())
@@ -2450,6 +2460,7 @@ impl State {
         self.close_file_edit();
         self.close_tools();
         self.close_terminal();
+        self.close_shortcuts();
         self.start_history();
     }
 
@@ -2593,6 +2604,7 @@ impl State {
         self.close_file_edit();
         self.close_tools();
         self.close_terminal();
+        self.close_shortcuts();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::CommitInspect {

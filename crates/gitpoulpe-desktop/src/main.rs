@@ -47,6 +47,8 @@ mod repo_browser_view;
 mod resetting;
 mod sequencing;
 mod shell;
+mod shortcuts;
+mod shortcuts_view;
 mod stashes;
 mod stashes_view;
 mod state;

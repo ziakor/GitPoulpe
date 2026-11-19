@@ -188,6 +188,7 @@ impl State {
         self.close_file_edit();
         self.close_tools();
         self.close_terminal();
+        self.close_shortcuts();
         self.profiles_open = false;
         self.undo_screen.open = true;
         self.undo_screen.message = None;

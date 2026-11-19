@@ -52,6 +52,7 @@ impl State {
         self.close_file_history();
         self.close_tools();
         self.close_terminal();
+        self.close_shortcuts();
         self.profiles_open = false;
         let request = self.file_edit.request + 1;
         self.file_edit = FileEditState {
