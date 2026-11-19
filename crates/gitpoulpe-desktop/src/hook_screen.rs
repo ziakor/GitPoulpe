@@ -47,6 +47,7 @@ impl State {
         self.close_overview();
         self.close_notices();
         self.close_issues();
+        self.close_patch_import();
         self.profiles_open = false;
         self.hooks.open = true;
         self.reload_hooks();

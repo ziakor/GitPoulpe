@@ -36,6 +36,8 @@ mod overview;
 mod overview_view;
 mod palette;
 mod palette_view;
+mod patch_import;
+mod patch_import_view;
 mod perf;
 mod profiles;
 mod profiles_view;

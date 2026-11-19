@@ -380,6 +380,21 @@ pub enum Command {
         request: u64,
         path: String,
     },
+    PatchPreview {
+        request: u64,
+        patch: std::sync::Arc<Vec<u8>>,
+    },
+    PatchCheck {
+        request: u64,
+        patch: std::sync::Arc<Vec<u8>>,
+        mode: gitpoulpe_git::ApplyMode,
+    },
+    PatchApply {
+        request: u64,
+        patch: std::sync::Arc<Vec<u8>>,
+        mode: gitpoulpe_git::ApplyMode,
+        three_way: bool,
+    },
     OverviewRefresh {
         jobs: Vec<(String, u64)>,
         timeout_ms: u64,
@@ -783,6 +798,18 @@ pub enum Event {
         result: Result<gitpoulpe_git::Blame, String>,
     },
     TerminalOutput,
+    PatchPreviewed {
+        request: u64,
+        result: Result<gitpoulpe_git::PatchPreview, String>,
+    },
+    PatchChecked {
+        request: u64,
+        result: Result<(), String>,
+    },
+    PatchApplied {
+        request: u64,
+        result: Result<gitpoulpe_git::PatchOutcome, String>,
+    },
     IssuesListed {
         request: u64,
         result: Result<(Vec<gitpoulpe_hosting::IssueSummary>, bool), String>,
@@ -1803,6 +1830,57 @@ async fn run(
                                 run_merge_tool(&shared.git, &current.info, &program, &args, &path)
                                     .await;
                             shared.emit(Event::ToolFinished { request, result });
+                        });
+                    }
+                    Command::PatchPreview { request, patch } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .preview_patch(&current.info, &patch)
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::PatchPreviewed { request, result });
+                        });
+                    }
+                    Command::PatchCheck {
+                        request,
+                        patch,
+                        mode,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .check_patch(&current.info, &patch, mode)
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::PatchChecked { request, result });
+                        });
+                    }
+                    Command::PatchApply {
+                        request,
+                        patch,
+                        mode,
+                        three_way,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .apply_patch(&current.info, &patch, mode, three_way)
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::PatchApplied { request, result });
                         });
                     }
                     Command::OverviewCancel { paths } => {

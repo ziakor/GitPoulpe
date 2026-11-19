@@ -101,6 +101,13 @@ pub const COMMANDS: &[PaletteCommand] = &[
         run: |s, _| s.open_shortcuts(),
     },
     PaletteCommand {
+        id: "patch-import",
+        label: "Importer un patch…",
+        keywords: "appliquer diff format-patch fichier patch",
+        available: in_repo,
+        run: |s, _| s.open_patch_import(),
+    },
+    PaletteCommand {
         id: "issues",
         label: "Issues du dépôt courant…",
         keywords: "tickets suivi github gitlab recherche",

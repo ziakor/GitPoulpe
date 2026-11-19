@@ -25,6 +25,7 @@ mod net;
 mod open;
 mod overview;
 mod parse;
+mod patch;
 mod process;
 mod pull;
 mod pull_range;
@@ -76,6 +77,9 @@ pub use overview::{
     parse_overview, remote_urls,
 };
 pub use parse::{ParseError, StatusParser};
+pub use patch::{
+    ApplyMode, PATCH_LIMIT, PatchError, PatchFile, PatchOutcome, PatchPreview, check_patch_paths,
+};
 pub use pull::{PullError, PullRequest};
 pub use pull_range::{PullRange, PullRangeError, ReviewRefs};
 pub use push::{PushError, PushRejection, PushRequest};

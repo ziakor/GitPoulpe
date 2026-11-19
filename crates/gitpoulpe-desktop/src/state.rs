@@ -214,6 +214,7 @@ pub struct State {
     pub overview: crate::overview::OverviewState,
     pub notices: crate::notices::NoticesState,
     pub issues: crate::issues::IssuesState,
+    pub patches: crate::patch_import::PatchState,
     pub publishing: crate::publishing::PublishSlot,
     pub pulling: crate::pulling::PullSlot,
     pub operation_kind: Option<gitpoulpe_core::OperationKind>,
@@ -363,6 +364,7 @@ impl State {
             file_edit: crate::file_edit::FileEditState::default(),
             terminal: crate::terminal::TerminalState::default(),
             commands: crate::palette::PaletteState::default(),
+            patches: crate::patch_import::PatchState::default(),
             issues: crate::issues::IssuesState::default(),
             notices: crate::notices::NoticesState {
                 book: prefs
@@ -931,6 +933,11 @@ impl State {
             Event::FileBlameLoaded { request, result } => self.apply_file_blame(request, result),
             Event::ToolFinished { request, result } => self.apply_tool_finished(request, result),
             Event::TerminalOutput => self.apply_terminal_output(),
+            Event::PatchPreviewed { request, result } => {
+                self.apply_patch_previewed(request, result)
+            }
+            Event::PatchChecked { request, result } => self.apply_patch_checked(request, result),
+            Event::PatchApplied { request, result } => self.apply_patch_applied(request, result),
             Event::IssuesListed { request, result } => self.apply_issues_listed(request, result),
             Event::IssueLoaded {
                 request,
@@ -2144,6 +2151,7 @@ impl State {
         self.close_overview();
         self.close_notices();
         self.close_issues();
+        self.close_patch_import();
         let selected = self
             .active_profile()
             .or_else(|| self.book.profiles.first())
@@ -2518,6 +2526,7 @@ impl State {
         self.close_overview();
         self.close_notices();
         self.close_issues();
+        self.close_patch_import();
         self.start_history();
     }
 
@@ -2667,6 +2676,7 @@ impl State {
         self.close_overview();
         self.close_notices();
         self.close_issues();
+        self.close_patch_import();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::CommitInspect {

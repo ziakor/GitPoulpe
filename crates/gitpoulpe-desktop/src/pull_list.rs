@@ -468,6 +468,7 @@ impl State {
         self.close_overview();
         self.close_notices();
         self.close_issues();
+        self.close_patch_import();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::PullInspect {

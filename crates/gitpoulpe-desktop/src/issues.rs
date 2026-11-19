@@ -102,6 +102,7 @@ impl State {
         self.close_favorites();
         self.close_overview();
         self.close_notices();
+        self.close_patch_import();
         self.accounts.open = false;
         self.profiles_open = false;
         let list_request = self.issues.list_request + 1;

@@ -199,6 +199,10 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         return copy_selection(s, tx);
     }
     s.notice = None;
+    if s.patches.open && event.key == Key::Escape {
+        s.close_patch_import();
+        return true;
+    }
     if s.issues.open && event.key == Key::Escape {
         s.close_issues();
         return true;
@@ -390,6 +394,7 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         || s.overview.open
         || s.notices.open
         || s.issues.open
+        || s.patches.open
         || s.undo_screen.open
         || s.worktrees.open
         || s.hooks.open

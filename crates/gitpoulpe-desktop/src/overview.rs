@@ -127,6 +127,7 @@ impl State {
         self.close_favorites();
         self.close_notices();
         self.close_issues();
+        self.close_patch_import();
         self.accounts.open = false;
         self.profiles_open = false;
         let candidates: BTreeSet<String> = self

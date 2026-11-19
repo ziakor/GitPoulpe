@@ -84,6 +84,7 @@ impl State {
         self.close_overview();
         self.close_notices();
         self.close_issues();
+        self.close_patch_import();
         self.profiles_open = false;
         self.stashes.open = true;
         self.reload_stashes();

@@ -112,6 +112,7 @@ impl State {
         self.close_favorites();
         self.close_overview();
         self.close_issues();
+        self.close_patch_import();
         self.accounts.open = false;
         self.profiles_open = false;
         self.notices.open = true;

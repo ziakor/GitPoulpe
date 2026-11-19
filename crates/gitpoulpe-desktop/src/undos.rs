@@ -194,6 +194,7 @@ impl State {
         self.close_overview();
         self.close_notices();
         self.close_issues();
+        self.close_patch_import();
         self.profiles_open = false;
         self.undo_screen.open = true;
         self.undo_screen.message = None;
