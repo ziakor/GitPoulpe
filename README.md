@@ -250,6 +250,12 @@ Signing in from the browser uses the GitHub device flow: the app shows a short c
 
 ### Browsing organizations and repositories
 
+From the accounts screen, "Parcourir les dépôts" lists the repositories of the selected account or of one of its organizations, with a filter on name and description. Each row shows whether the repository is private, a fork, archived or read-only, and "Cloner ce dépôt" opens the clone screen with its URL filled in. The header always names the account and server in use, and switching account discards any answer still in flight for the previous one. Two accounts or servers with same-named repositories never mix, and a next-page link to another server is refused. SSO, rate-limit, expired-token and permission failures stay distinct, and a failure never falls back to another server. The list is capped; when it is truncated the screen says so. Cloning a private repository still relies on your Git credentials.
+
+Signing in from the browser uses the GitHub device flow: the app shows a short code and an address, you authorize it in your browser, and the token is stored in the system keyring. It needs no client secret. It is available for github.com only; GitHub Enterprise Server and machines without a browser use a personal access token.
+
+### Browsing organizations and repositories
+
 For a connected GitHub account the hosting crate lists the organizations the token can see and the repositories of the account or of one organization. Pages are followed up to a fixed cap and the result says when it was truncated. Each repository carries the id of the connection it came from, so two accounts or servers with same-named repositories never mix. A next-page link to another server is refused. SSO, rate-limit, expired-token and permission failures stay distinct. There is no screen for this yet.
 
 ## Build and run

@@ -38,6 +38,7 @@ pub struct AccountsState {
     pub oauth_client_id: String,
     pub oauth_host: GithubHost,
     pub second_ms: u64,
+    pub browser: crate::repo_browser::BrowserState,
 }
 
 impl AccountsState {
@@ -60,6 +61,7 @@ impl AccountsState {
             oauth_client_id: GITHUB_CLIENT_ID.to_owned(),
             oauth_host: GithubHost::dotcom(),
             second_ms: 1000,
+            browser: crate::repo_browser::BrowserState::default(),
         }
     }
 }
@@ -96,6 +98,7 @@ impl State {
 
     pub fn close_accounts(&mut self) {
         self.cancel_device();
+        self.close_browser();
         self.accounts.open = false;
         self.accounts.token = TextEdit::new("");
     }

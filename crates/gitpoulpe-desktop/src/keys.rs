@@ -6,9 +6,10 @@ use crate::view::row_key;
 const LINES_PER_KEY: usize = 3;
 const SIDEWAYS_STEP: f32 = 96.0;
 
-const TEXT_INPUTS: [&str; 30] = [
+const TEXT_INPUTS: [&str; 31] = [
     "ac-server",
     "ac-token",
+    "br-filter",
     "gf-name",
     "gf-main",
     "gf-develop",
@@ -148,6 +149,10 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
     }
     if s.profiles_open && event.key == Key::Escape {
         s.close_profiles();
+        return true;
+    }
+    if s.accounts.browser.open && event.key == Key::Escape {
+        s.close_browser();
         return true;
     }
     if s.accounts.open && event.key == Key::Escape {

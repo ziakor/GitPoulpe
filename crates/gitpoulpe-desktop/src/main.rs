@@ -30,6 +30,8 @@ mod reflogs;
 mod reflogs_view;
 mod remotes;
 mod remotes_view;
+mod repo_browser;
+mod repo_browser_view;
 mod resetting;
 mod sequencing;
 mod shell;

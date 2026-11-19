@@ -135,6 +135,12 @@ fn panel(s: &State) -> El {
                             .on_press(move |s: &mut State| s.check_account(&id)),
                     )
                     .child(
+                        action(s, "ac-browse", "Parcourir les dépôts", true).on_press({
+                            let id = connection.id.clone();
+                            move |s: &mut State| s.open_browser(&id)
+                        }),
+                    )
+                    .child(
                         action(s, "ac-disconnect", "Déconnecter", false)
                             .on_press(|s: &mut State| s.disconnect_account()),
                     ),
@@ -248,6 +254,9 @@ fn panel(s: &State) -> El {
 }
 
 pub fn accounts_screen(s: &State) -> El {
+    if s.accounts.browser.open {
+        return crate::repo_browser_view::browser_screen(s);
+    }
     let p = s.palette;
     let count = s.accounts.book.connections.len();
     let header = row()

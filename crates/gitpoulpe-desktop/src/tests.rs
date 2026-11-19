@@ -11,6 +11,7 @@ mod acceptance;
 mod accounting;
 mod amending;
 mod branching;
+mod browsing;
 mod cloning;
 mod committing;
 mod conflicting;

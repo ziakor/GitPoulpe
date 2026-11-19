@@ -9,6 +9,8 @@ USERS = {
     "good": {"login": "Octo", "name": "Octo Cat", "scopes": "repo, read:org"},
     "fine": {"login": "Octo", "name": "Octo Cat", "scopes": None},
     "other": {"login": "Someone", "name": None, "scopes": "repo"},
+    "good2": {"login": "Octo2", "name": None, "scopes": "repo"},
+    "slow": {"login": "Slow", "name": None, "scopes": "repo"},
 }
 
 
@@ -29,13 +31,18 @@ class Handler(BaseHTTPRequestHandler):
     def repo(self, owner, name, **extra):
         base = {"name": name, "owner": {"login": owner}, "description": None, "private": False,
                 "fork": False, "archived": False, "default_branch": "main",
-                "clone_url": f"https://example.test/{owner}/{name}.git",
+                "clone_url": f"https://{self.host}/{owner}/{name}.git",
                 "permissions": {"push": True}}
         base.update(extra)
         return base
 
     def listing(self, token):
         port = self.server.server_address[1]
+        self.host = "two.test" if token == "good2" else "example.test"
+        if token == "slow":
+            import time
+            time.sleep(6)
+            return self.reply(200, [self.repo("slow", "late")])
         path, _, query = self.path.partition("?")
         params = dict(p.split("=", 1) for p in query.split("&") if "=" in p)
         page = int(params.get("page", "1"))
