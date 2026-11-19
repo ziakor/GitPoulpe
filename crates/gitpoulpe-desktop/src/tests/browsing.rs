@@ -191,6 +191,7 @@ fn two_servers_with_the_same_repository_names_stay_apart_and_a_late_answer_never
         .collect();
     let slow = ids.iter().find(|i| i.ends_with("/slow")).unwrap().clone();
     let other = ids.iter().find(|i| i.ends_with("/octo2")).unwrap().clone();
+    let identity = serde_json::to_string(&rt.state.book).unwrap();
     rt.state.select_account(slow.clone());
     step(&mut rt);
     click(&mut rt, "ac-browse");
@@ -212,6 +213,7 @@ fn two_servers_with_the_same_repository_names_stay_apart_and_a_late_answer_never
         Some(other.as_str())
     );
     assert!(!shows(&rt, "slow/late"));
+    assert_eq!(serde_json::to_string(&rt.state.book).unwrap(), identity);
     assert!(
         rt.state
             .accounts

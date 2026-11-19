@@ -248,6 +248,8 @@ The **Comptes fournisseurs** button on the profiles screen connects GitHub.com o
 
 Signing in from the browser uses the GitHub device flow: the app shows a short code and an address, you authorize it in your browser, and the token is stored in the system keyring. It needs no client secret. It is available for github.com only; GitHub Enterprise Server and machines without a browser use a personal access token.
 
+A GitHub Enterprise Server is reached only at the address you typed. An untrusted certificate is reported as such and refused before any request is sent, an unreachable server is reported as unreachable, and neither case falls back to github.com or stores the token.
+
 ### Browsing organizations and repositories
 
 From the accounts screen, "Parcourir les dépôts" lists the repositories of the selected account or of one of its organizations, with a filter on name and description. Each row shows whether the repository is private, a fork, archived or read-only, and "Cloner ce dépôt" opens the clone screen with its URL filled in. The header always names the account and server in use, and switching account discards any answer still in flight for the previous one. Two accounts or servers with same-named repositories never mix, and a next-page link to another server is refused. SSO, rate-limit, expired-token and permission failures stay distinct, and a failure never falls back to another server. The list is capped; when it is truncated the screen says so. Cloning a private repository still relies on your Git credentials.

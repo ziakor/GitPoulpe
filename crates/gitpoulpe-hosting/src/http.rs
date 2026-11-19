@@ -135,6 +135,9 @@ pub fn validate_base(base: &str) -> Result<String, HttpError> {
 fn map_error(error: ureq::Error) -> HttpError {
     match error {
         ureq::Error::Timeout(_) => HttpError::Timeout,
+        ureq::Error::Io(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+            HttpError::Tls("certificat ou protocole invalide".to_owned())
+        }
         ureq::Error::Io(e) => HttpError::Offline(e.kind().to_string()),
         ureq::Error::HostNotFound => HttpError::Offline("hôte introuvable".to_owned()),
         ureq::Error::ConnectionFailed => HttpError::Offline("connexion refusée".to_owned()),
