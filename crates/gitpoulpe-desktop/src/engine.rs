@@ -380,6 +380,26 @@ pub enum Command {
         request: u64,
         path: String,
     },
+    ToolEditor {
+        request: u64,
+        program: String,
+        args: String,
+        path: String,
+    },
+    ToolDiff {
+        request: u64,
+        program: String,
+        args: String,
+        oid: Option<String>,
+        path: String,
+        old_path: Option<String>,
+    },
+    ToolMerge {
+        request: u64,
+        program: String,
+        args: String,
+        path: String,
+    },
     FileEditSave {
         request: u64,
         original: Box<gitpoulpe_git::WorktreeFile>,
@@ -754,6 +774,10 @@ pub enum Event {
     FileBlameLoaded {
         request: u64,
         result: Result<gitpoulpe_git::Blame, String>,
+    },
+    ToolFinished {
+        request: u64,
+        result: Result<(), String>,
     },
     FileEditLoaded {
         request: u64,
@@ -1687,6 +1711,64 @@ async fn run(
                                 .await
                                 .map_err(|e| e.to_string());
                             shared.emit(Event::FileHistoryLoaded { request, result });
+                        });
+                    }
+                    Command::ToolEditor {
+                        request,
+                        program,
+                        args,
+                        path,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = run_editor_tool(&current.info, &program, &args, &path).await;
+                            shared.emit(Event::ToolFinished { request, result });
+                        });
+                    }
+                    Command::ToolDiff {
+                        request,
+                        program,
+                        args,
+                        oid,
+                        path,
+                        old_path,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = run_diff_tool(
+                                &shared.git,
+                                &current.info,
+                                &program,
+                                &args,
+                                oid.as_deref(),
+                                &path,
+                                old_path.as_deref(),
+                            )
+                            .await;
+                            shared.emit(Event::ToolFinished { request, result });
+                        });
+                    }
+                    Command::ToolMerge {
+                        request,
+                        program,
+                        args,
+                        path,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result =
+                                run_merge_tool(&shared.git, &current.info, &program, &args, &path)
+                                    .await;
+                            shared.emit(Event::ToolFinished { request, result });
                         });
                     }
                     Command::FileEditRead { request, path } => {
@@ -3497,4 +3579,120 @@ async fn copy(shared: Arc<Shared>, session: Arc<Session>, request: CopyRequest) 
         lines: lines_copied,
         truncated,
     });
+}
+
+fn tool_root(info: &gitpoulpe_core::SessionInfo) -> Result<std::path::PathBuf, String> {
+    info.worktree
+        .clone()
+        .ok_or_else(|| "ce dépôt n'a pas de dossier de travail".to_owned())
+}
+
+fn tool_path(root: &std::path::Path, relative: &str) -> Result<String, String> {
+    let rel = std::path::Path::new(relative);
+    let safe = !relative.is_empty()
+        && !rel.is_absolute()
+        && rel
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)));
+    if !safe {
+        return Err("chemin refusé : il doit désigner un fichier du dépôt".to_owned());
+    }
+    Ok(root.join(rel).to_string_lossy().into_owned())
+}
+
+async fn run_editor_tool(
+    info: &gitpoulpe_core::SessionInfo,
+    program: &str,
+    args: &str,
+    path: &str,
+) -> Result<(), String> {
+    let root = tool_root(info)?;
+    let file = tool_path(&root, path)?;
+    let repo = root.to_string_lossy().into_owned();
+    let vars = [("file", file.as_str()), ("repo", repo.as_str())];
+    let expanded = gitpoulpe_git::expand_args(args, &vars).map_err(|e| e.to_string())?;
+    gitpoulpe_git::run_tool(program, &expanded, &root)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+async fn run_diff_tool(
+    git: &gitpoulpe_git::Git,
+    info: &gitpoulpe_core::SessionInfo,
+    program: &str,
+    args: &str,
+    oid: Option<&str>,
+    path: &str,
+    old_path: Option<&str>,
+) -> Result<(), String> {
+    let root = tool_root(info)?;
+    let working = tool_path(&root, path)?;
+    let files = gitpoulpe_git::ToolFiles::new().map_err(|e| e.to_string())?;
+    let (left, right) = match oid {
+        Some(oid) => {
+            let before = old_path.unwrap_or(path);
+            let left = git
+                .export_version(info, &format!("{oid}^:{before}"), &files, "left", before)
+                .await
+                .map_err(|e| e.to_string())?;
+            let right = git
+                .export_version(info, &format!("{oid}:{path}"), &files, "right", path)
+                .await
+                .map_err(|e| e.to_string())?;
+            (
+                left.to_string_lossy().into_owned(),
+                right.to_string_lossy().into_owned(),
+            )
+        }
+        None => {
+            let left = git
+                .export_version(info, &format!("HEAD:{path}"), &files, "left", path)
+                .await
+                .map_err(|e| e.to_string())?;
+            (left.to_string_lossy().into_owned(), working.clone())
+        }
+    };
+    let repo = root.to_string_lossy().into_owned();
+    let vars = [
+        ("left", left.as_str()),
+        ("right", right.as_str()),
+        ("file", working.as_str()),
+        ("repo", repo.as_str()),
+    ];
+    let expanded = gitpoulpe_git::expand_args(args, &vars).map_err(|e| e.to_string())?;
+    gitpoulpe_git::run_tool(program, &expanded, &root)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+async fn run_merge_tool(
+    git: &gitpoulpe_git::Git,
+    info: &gitpoulpe_core::SessionInfo,
+    program: &str,
+    args: &str,
+    path: &str,
+) -> Result<(), String> {
+    let root = tool_root(info)?;
+    let merged = tool_path(&root, path)?;
+    let files = gitpoulpe_git::ToolFiles::new().map_err(|e| e.to_string())?;
+    let mut paths = Vec::new();
+    for (stage, label) in [(1, "base"), (2, "ours"), (3, "theirs")] {
+        let exported = git
+            .export_version(info, &format!(":{stage}:{path}"), &files, label, path)
+            .await
+            .map_err(|e| e.to_string())?;
+        paths.push(exported.to_string_lossy().into_owned());
+    }
+    let repo = root.to_string_lossy().into_owned();
+    let vars = [
+        ("base", paths[0].as_str()),
+        ("ours", paths[1].as_str()),
+        ("theirs", paths[2].as_str()),
+        ("merged", merged.as_str()),
+        ("repo", repo.as_str()),
+    ];
+    let expanded = gitpoulpe_git::expand_args(args, &vars).map_err(|e| e.to_string())?;
+    gitpoulpe_git::run_tool(program, &expanded, &root)
+        .await
+        .map_err(|e| e.to_string())
 }

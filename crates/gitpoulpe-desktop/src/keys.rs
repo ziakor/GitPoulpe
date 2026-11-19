@@ -145,6 +145,10 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         return copy_selection(s, tx);
     }
     s.notice = None;
+    if s.tools.open && event.key == Key::Escape {
+        s.close_tools();
+        return true;
+    }
     if s.clone.open && event.key == Key::Escape {
         s.close_clone();
         return true;

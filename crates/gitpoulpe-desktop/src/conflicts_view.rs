@@ -470,6 +470,18 @@ pub fn conflicts_screen(s: &State) -> El {
                 .truncate(),
         )
         .child(
+            action(s, "cf-external-merge", "Outil de fusion externe", false).on_press(
+                |s: &mut State| {
+                    if let Some(path) = s.conflicts.selected.clone() {
+                        s.tool_open_merge(path.to_string_lossy().into_owned());
+                    }
+                },
+            ),
+        )
+        .child(
+            action(s, "cf-tools", "Outils…", false).on_press(|s: &mut State| s.open_tools_config()),
+        )
+        .child(
             action(s, "conflicts-close", "Fermer", false)
                 .on_press(|s: &mut State| s.close_conflicts()),
         );
@@ -510,6 +522,12 @@ pub fn conflicts_screen(s: &State) -> El {
         .grow(1.0)
         .min_h(0.0)
         .child(header)
+        .child(
+            col()
+                .w_full()
+                .px(20.0)
+                .children(crate::external_tools_view::tool_status(s)),
+        )
         .child(
             row()
                 .w_full()

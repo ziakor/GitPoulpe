@@ -25,6 +25,7 @@ mod stash;
 mod status;
 mod submodule;
 mod tag;
+mod tools;
 mod undo;
 mod worktree;
 mod write;
@@ -68,6 +69,7 @@ pub use stash::{Stash, StashApplied, StashDetail, StashFile, StashScope};
 pub use status::{BranchInfo, ChangeEntry, EntryKind, StatusCode, StatusSnapshot, display_label};
 pub use submodule::{Submodule, SubmoduleState, SubmoduleUpdated};
 pub use tag::Tag;
+pub use tools::{ToolBook, ToolConfig, ToolKind};
 pub use undo::{UNDO_LIMIT, UndoDirection, UndoKind, UndoRecord, UndoState, push_undo};
 pub use worktree::{Worktree, WorktreeRemoval, WorktreeRemoved};
 pub use write::{

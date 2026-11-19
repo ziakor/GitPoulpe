@@ -54,12 +54,33 @@ pub fn file_edit_screen(s: &State) -> El {
             .on_press(|s: &mut State| s.file_edit_save(false)),
         )
         .child(
+            action(s, "fe-external", "Éditeur externe", false).on_press(|s: &mut State| {
+                if s.file_edit.dirty() {
+                    s.tools.status_error = Some(
+                        "Enregistrez d'abord vos modifications : l'éditeur externe ouvre le fichier sur le disque."
+                            .to_owned(),
+                    );
+                    s.tools.status_notice = None;
+                    s.tools.version += 1;
+                } else {
+                    let path = s.file_edit.path.clone();
+                    s.tool_open_editor(path);
+                }
+            }),
+        )
+        .child(
+            action(s, "fe-tools", "Outils…", false).on_press(|s: &mut State| s.open_tools_config()),
+        )
+        .child(
             action(s, "fe-close", "Fermer", false)
                 .on_press(|s: &mut State| s.file_edit_close_request()),
         );
     let mut notes = col().w_full().px(20.0).gap(6.0);
     if let Some(message) = &screen.notice {
         notes = notes.child(notice(s, "fe-notice", message.clone(), false));
+    }
+    if let Some(status) = crate::external_tools_view::tool_status(s) {
+        notes = notes.child(status);
     }
     if screen.loading {
         notes = notes.child(notice(

@@ -50,6 +50,7 @@ impl State {
         self.close_gitflow();
         self.close_pulls();
         self.close_file_history();
+        self.close_tools();
         self.profiles_open = false;
         let request = self.file_edit.request + 1;
         self.file_edit = FileEditState {

@@ -204,6 +204,7 @@ pub struct State {
     pub reflog: crate::reflogs::ReflogState,
     pub file_history: crate::file_history::FileHistoryState,
     pub file_edit: crate::file_edit::FileEditState,
+    pub tools: crate::external_tools::ToolsState,
     pub publishing: crate::publishing::PublishSlot,
     pub pulling: crate::pulling::PullSlot,
     pub operation_kind: Option<gitpoulpe_core::OperationKind>,
@@ -351,6 +352,12 @@ impl State {
             reflog: crate::reflogs::ReflogState::default(),
             file_history: crate::file_history::FileHistoryState::default(),
             file_edit: crate::file_edit::FileEditState::default(),
+            tools: crate::external_tools::ToolsState {
+                book: prefs
+                    .get::<gitpoulpe_core::ToolBook>(crate::external_tools::TOOLS_KEY)
+                    .unwrap_or_default(),
+                ..crate::external_tools::ToolsState::default()
+            },
             publishing: crate::publishing::PublishSlot::default(),
             pulling: crate::pulling::PullSlot::default(),
             operation_kind: None,
@@ -875,6 +882,7 @@ impl State {
                 self.apply_file_revision(request, result)
             }
             Event::FileBlameLoaded { request, result } => self.apply_file_blame(request, result),
+            Event::ToolFinished { request, result } => self.apply_tool_finished(request, result),
             Event::FileEditLoaded { request, result } => {
                 self.apply_file_edit_loaded(request, result)
             }
@@ -2066,6 +2074,7 @@ impl State {
         self.close_pulls();
         self.close_file_history();
         self.close_file_edit();
+        self.close_tools();
         let selected = self
             .active_profile()
             .or_else(|| self.book.profiles.first())
@@ -2432,6 +2441,7 @@ impl State {
         self.close_pulls();
         self.close_file_history();
         self.close_file_edit();
+        self.close_tools();
         self.start_history();
     }
 
@@ -2573,6 +2583,7 @@ impl State {
         self.close_pulls();
         self.close_file_history();
         self.close_file_edit();
+        self.close_tools();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::CommitInspect {

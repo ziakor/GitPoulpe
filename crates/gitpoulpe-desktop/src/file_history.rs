@@ -57,6 +57,7 @@ impl State {
         self.close_gitflow();
         self.close_pulls();
         self.close_file_edit();
+        self.close_tools();
         self.profiles_open = false;
         let request = self.file_history.request + 1;
         let revision_request = self.file_history.revision_request + 1;
@@ -266,5 +267,30 @@ impl State {
         }
         self.file_history.mode = PanelMode::Diff;
         self.select_file_revision(oid);
+    }
+
+    pub fn file_history_external_diff(&mut self) {
+        let screen = &self.file_history;
+        let revision = screen
+            .selected
+            .as_ref()
+            .and_then(|oid| {
+                screen
+                    .history
+                    .as_ref()?
+                    .revisions
+                    .iter()
+                    .find(|r| &r.oid == oid)
+            })
+            .cloned();
+        match revision {
+            Some(revision) => {
+                self.tool_open_diff(Some(revision.oid), revision.path, revision.old_path)
+            }
+            None => {
+                let path = screen.path.clone();
+                self.tool_open_diff(None, path, None);
+            }
+        }
     }
 }

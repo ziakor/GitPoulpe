@@ -401,6 +401,13 @@ pub fn file_history_screen(s: &State) -> El {
                 .truncate(),
         )
         .child(
+            action(s, "fh-external-diff", "Comparer (outil externe)", false)
+                .on_press(|s: &mut State| s.file_history_external_diff()),
+        )
+        .child(
+            action(s, "fh-tools", "Outils…", false).on_press(|s: &mut State| s.open_tools_config()),
+        )
+        .child(
             action(s, "fh-blame-local", "Blame du fichier local", false)
                 .on_press(|s: &mut State| s.file_blame_of_working_copy()),
         )
@@ -412,6 +419,9 @@ pub fn file_history_screen(s: &State) -> El {
             action(s, "fh-close", "Fermer", false).on_press(|s: &mut State| s.close_file_history()),
         );
     let mut notes = col().w_full().px(20.0).gap(4.0);
+    if let Some(status) = crate::external_tools_view::tool_status(s) {
+        notes = notes.child(status);
+    }
     if let Some(notice) = &screen.notice {
         notes = notes.child(
             text(notice.clone())

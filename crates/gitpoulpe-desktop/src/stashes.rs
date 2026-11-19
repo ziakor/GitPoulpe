@@ -76,6 +76,7 @@ impl State {
         self.close_pulls();
         self.close_file_history();
         self.close_file_edit();
+        self.close_tools();
         self.profiles_open = false;
         self.stashes.open = true;
         self.reload_stashes();

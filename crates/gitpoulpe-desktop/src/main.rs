@@ -7,6 +7,8 @@ mod cloning_view;
 mod conflicts;
 mod conflicts_view;
 mod engine;
+mod external_tools;
+mod external_tools_view;
 mod file_edit;
 mod file_edit_view;
 mod file_history;

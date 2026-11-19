@@ -451,6 +451,7 @@ impl State {
         self.close_pulls();
         self.close_file_history();
         self.close_file_edit();
+        self.close_tools();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::PullInspect {

@@ -41,7 +41,9 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
             message_screen(&p, "Impossible d'ouvrir ce dépôt", &detail, true, here)
         }
     };
-    let body = if s.clone.open {
+    let body = if s.tools.open {
+        crate::external_tools_view::tools_screen(s)
+    } else if s.clone.open {
         crate::cloning_view::clone_screen(s)
     } else if s.init.open {
         crate::initialize_view::init_screen(s)
