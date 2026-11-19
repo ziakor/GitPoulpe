@@ -1,3 +1,4 @@
+mod checks;
 mod device;
 mod forks;
 mod github;
@@ -10,6 +11,7 @@ mod remote_url;
 mod repos;
 mod secrets;
 
+pub use checks::{Check, CheckState, Checks, load_checks};
 pub use device::{
     DeviceCode, DevicePoll, GITHUB_CLIENT_ID, await_device_token, poll_device_flow,
     start_device_flow,

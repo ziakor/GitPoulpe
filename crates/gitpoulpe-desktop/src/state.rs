@@ -920,6 +920,12 @@ impl State {
             Event::AccountConnected { request, result } => {
                 self.apply_account_connected(request, result)
             }
+            Event::PullChecksLoaded {
+                request,
+                number,
+                sha,
+                result,
+            } => self.apply_pull_checks(request, number, sha, result),
             Event::PullReviewSent {
                 request,
                 number,

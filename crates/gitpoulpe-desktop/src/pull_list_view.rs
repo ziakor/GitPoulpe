@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use gitpoulpe_hosting::{PullFilter, PullState, PullSummary, ReviewDecision};
+use gitpoulpe_hosting::{CheckState, PullFilter, PullState, PullSummary, ReviewDecision};
 use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text};
 
 use crate::pull_list::{CommentKind, numbered_lines, review_state_label, short};
@@ -157,7 +157,10 @@ fn detail(s: &State) -> El {
                 .wrap(),
         );
     }
-    panel = panel.child(compose(s)).child(review_panel(s));
+    panel = panel
+        .child(checks_panel(s))
+        .child(compose(s))
+        .child(review_panel(s));
     panel = panel.child(
         text(format!("{} commit(s)", detail.commits.len()))
             .font(theme::BODY_STRONG)
@@ -405,6 +408,113 @@ fn compose(s: &State) -> El {
                 action(s, "prc-verify", "Vérifier si le commentaire est parti", false)
                     .on_press(|s: &mut State| s.pull_verify_comment()),
             );
+    }
+    block
+}
+
+fn check_label(state: CheckState) -> &'static str {
+    match state {
+        CheckState::Pending => "en attente",
+        CheckState::Success => "réussie",
+        CheckState::Failure => "échouée",
+        CheckState::Cancelled => "annulée",
+        CheckState::Skipped => "ignorée",
+    }
+}
+
+fn checks_panel(s: &State) -> El {
+    let p = s.palette;
+    let list = &s.pulls.list;
+    let mut block = col().gap(4.0).child(
+        text("Vérifications".to_owned())
+            .font(theme::BODY_STRONG)
+            .color(p.text),
+    );
+    if let Some(note) = &list.checks_note {
+        block = block.child(
+            text(note.clone())
+                .key("chk-note")
+                .font(theme::SMALL)
+                .color(p.red)
+                .wrap(),
+        );
+    }
+    if list.checks_loading {
+        block = block.child(
+            text("Chargement des vérifications…".to_owned())
+                .key("chk-loading")
+                .font(theme::SMALL)
+                .color(p.muted),
+        );
+    }
+    if let Some(error) = &list.checks_error {
+        block = block.child(
+            text(format!("Vérifications indisponibles : {error}"))
+                .key("chk-error")
+                .font(theme::SMALL)
+                .color(p.red)
+                .wrap(),
+        );
+    }
+    if let Some(checks) = &list.checks {
+        if checks.items.is_empty() {
+            block = block.child(
+                text(format!(
+                    "Aucune vérification pour la révision {}.",
+                    short(&checks.sha)
+                ))
+                .key("chk-none")
+                .font(theme::SMALL)
+                .color(p.muted)
+                .wrap(),
+            );
+        } else {
+            block = block.child(
+                text(format!(
+                    "Révision {} : {} en attente, {} réussie(s), {} échouée(s), {} annulée(s), {} ignorée(s)",
+                    short(&checks.sha),
+                    checks.count(CheckState::Pending),
+                    checks.count(CheckState::Success),
+                    checks.count(CheckState::Failure),
+                    checks.count(CheckState::Cancelled),
+                    checks.count(CheckState::Skipped)
+                ))
+                .key("chk-summary")
+                .font(theme::SMALL)
+                .color(p.text)
+                .wrap(),
+            );
+            for (i, check) in checks.items.iter().enumerate() {
+                block = block.child(
+                    text(format!(
+                        "{} : {}{}{}",
+                        check.name,
+                        check_label(check.state),
+                        if check.legacy { " (statut)" } else { "" },
+                        if check.url.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" — {}", check.url)
+                        }
+                    ))
+                    .key(format!("chk-item{i}"))
+                    .font(theme::PATH_SMALL)
+                    .color(if check.state == CheckState::Failure {
+                        p.red
+                    } else {
+                        p.muted
+                    })
+                    .truncate(),
+                );
+            }
+            if checks.truncated {
+                block = block.child(
+                    text("Liste tronquée.".to_owned())
+                        .font(theme::SMALL)
+                        .color(p.muted),
+                );
+            }
+        }
     }
     block
 }

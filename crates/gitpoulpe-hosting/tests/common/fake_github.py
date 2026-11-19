@@ -92,6 +92,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"ahead_by": 2, "behind_by": 1, "files": [
                 {"filename": "src/a.rs", "status": "modified", "additions": 3, "deletions": 1},
                 {"filename": "README.md", "status": "added", "additions": 10, "deletions": 0}]})
+        if rest.startswith("acme/proj/commits/"):
+            return self.checks_route(rest, params)
         if rest.startswith("acme/proj/issues/") and rest.endswith("/comments"):
             return self.reply(200, [{"id": 1, "user": {"login": "octo"}, "body": "hello", "created_at": "t1"}]
                               + [c for c in SENT if c["kind"] == "issue"])
@@ -106,8 +108,38 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, [])
         return None
 
+    def checks_route(self, rest, params):
+        parts = rest.split("/")
+        sha, kind = parts[3], parts[4]
+        port = self.server.server_address[1]
+        if sha == "sha5":
+            return self.reply(500, {"message": "Server Error"})
+        if kind == "check-runs":
+            runs = []
+            if sha == "sha1":
+                runs = [
+                    {"name": "build", "status": "completed", "conclusion": "success", "html_url": "https://ci.test/1"},
+                    {"name": "lint", "status": "completed", "conclusion": "failure", "html_url": "https://ci.test/2"},
+                    {"name": "deploy", "status": "in_progress", "conclusion": None, "html_url": "https://ci.test/3"},
+                    {"name": "e2e", "status": "completed", "conclusion": "cancelled", "html_url": "https://ci.test/4"},
+                    {"name": "docs", "status": "completed", "conclusion": "skipped", "html_url": "https://ci.test/5"}]
+            page = int(params.get("page", "1"))
+            chunk = runs[(page - 1) * 3: page * 3]
+            headers = {}
+            if page * 3 < len(runs):
+                headers["Link"] = f'<http://127.0.0.1:{port}/repos/acme/proj/commits/{sha}/check-runs?page={page + 1}>; rel="next"'
+            return self.reply(200, {"total_count": len(runs), "check_runs": chunk}, headers)
+        if kind == "status":
+            statuses = []
+            if sha == "sha2":
+                statuses = [{"context": "legacy/ci", "state": "pending", "target_url": "https://ci.test/old"}]
+            if sha == "sha1":
+                statuses = [{"context": "legacy/ok", "state": "success", "target_url": None}]
+            return self.reply(200, {"state": "pending", "statuses": statuses})
+        return self.reply(404, {"message": "Not Found"})
+
     def pr(self, n):
-        spec = {1: ("open", None, "sha1"), 2: ("closed", None, "sha2"), 3: ("closed", "2026-01-01T00:00:00Z", "sha3"),
+        spec = {1: ("open", None, "sha1"), 2: ("closed", None, "sha2"), 3: ("closed", "2026-01-01T00:00:00Z", "sha5"),
                 4: ("open", None, "newsha"), 5: ("open", None, "sha5"), 6: ("open", None, "sha6")}[n]
         return {"number": n, "title": f"PR {n}", "state": spec[0], "merged_at": spec[1], "draft": n == 4,
                 "html_url": f"https://example.test/acme/proj/pull/{n}", "updated_at": "2026-02-02T00:00:00Z",

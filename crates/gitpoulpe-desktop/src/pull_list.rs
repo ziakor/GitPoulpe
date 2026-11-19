@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 use gitpoulpe_hosting::{
-    DraftLine, LineAnchor, PullComments, PullDetail, PullFilter, PullSummary, Review,
-    ReviewDecision, ReviewSubmission, Side, list_comments, list_pulls, list_reviews, load_pull,
-    post_comment, post_line_comment, reply_to_comment, review_exists, submit_review,
+    Checks, DraftLine, LineAnchor, PullComments, PullDetail, PullFilter, PullSummary, Review,
+    ReviewDecision, ReviewSubmission, Side, list_comments, list_pulls, list_reviews, load_checks,
+    load_pull, post_comment, post_line_comment, reply_to_comment, review_exists, submit_review,
 };
 use rune::TextEdit;
 
@@ -52,6 +52,11 @@ fn patch_hash(detail: &PullDetail, path: &str) -> u64 {
 }
 
 pub struct PullListState {
+    pub checks: Option<Checks>,
+    pub checks_error: Option<String>,
+    pub checks_loading: bool,
+    pub checks_request: u64,
+    pub checks_note: Option<String>,
     pub drafts: HashMap<String, ReviewDraft>,
     pub review_body: TextEdit,
     pub decision: ReviewDecision,
@@ -94,6 +99,11 @@ pub struct PullListState {
 impl Default for PullListState {
     fn default() -> Self {
         Self {
+            checks: None,
+            checks_error: None,
+            checks_loading: false,
+            checks_request: 0,
+            checks_note: None,
             drafts: HashMap::new(),
             review_body: TextEdit::new(""),
             decision: ReviewDecision::Comment,
@@ -160,10 +170,12 @@ impl State {
         let comments_request = self.pulls.list.comments_request + 1;
         let comment_request = self.pulls.list.comment_request + 1;
         let review_request = self.pulls.list.review_request + 1;
+        let checks_request = self.pulls.list.checks_request + 1;
         let drafts = std::mem::take(&mut self.pulls.list.drafts);
         self.pulls.list = PullListState {
             drafts,
             review_request,
+            checks_request,
             open: true,
             list_request,
             detail_request,
@@ -182,6 +194,7 @@ impl State {
         list.comments_request += 1;
         list.comment_request += 1;
         list.review_request += 1;
+        list.checks_request += 1;
         list.version += 1;
     }
 
@@ -250,6 +263,11 @@ impl State {
         self.pulls.list.selected = Some(number);
         if previous != Some(number) {
             let list = &mut self.pulls.list;
+            list.checks = None;
+            list.checks_error = None;
+            list.checks_note = None;
+            list.checks_loading = false;
+            list.checks_request += 1;
             list.review_request += 1;
             list.review_sending = false;
             list.review_error = None;
@@ -362,11 +380,86 @@ impl State {
             }
         }
         list.version += 1;
+        if list.detail.is_some() {
+            self.load_pull_checks();
+        }
         true
     }
 }
 
 impl State {
+    pub fn load_pull_checks(&mut self) {
+        let Some((connection, owner, name)) = self.pull_list_target() else {
+            return;
+        };
+        let list = &mut self.pulls.list;
+        let (Some(number), Some(detail)) = (list.selected, list.detail.as_ref()) else {
+            return;
+        };
+        let sha = detail.summary.head_sha.clone();
+        if let Some(old) = list.checks.as_ref().filter(|c| c.sha != sha) {
+            list.checks_note = Some(format!(
+                "Les vérifications de la révision précédente ({}) ne s'appliquent plus à la révision actuelle ({}).",
+                short(&old.sha),
+                short(&sha)
+            ));
+            list.checks = None;
+        }
+        list.checks_request += 1;
+        list.checks_loading = true;
+        list.checks_error = None;
+        list.version += 1;
+        let request = list.checks_request;
+        let secrets = self.hosting.secrets.clone();
+        let sender = self.event_tx();
+        let waker = self.waker_slot();
+        self.hosting.runtime.spawn(async move {
+            let result = load_checks(secrets.as_ref(), &connection, &owner, &name, &sha)
+                .await
+                .map_err(|e| e.to_string());
+            let _ = sender.send(Event::PullChecksLoaded {
+                request,
+                number,
+                sha,
+                result,
+            });
+            if let Some(wake) = waker.lock().unwrap().as_ref() {
+                wake();
+            }
+        });
+    }
+
+    pub fn apply_pull_checks(
+        &mut self,
+        request: u64,
+        number: u64,
+        sha: String,
+        result: Result<Checks, String>,
+    ) -> bool {
+        let list = &mut self.pulls.list;
+        let current = list.detail.as_ref().map(|d| d.summary.head_sha.as_str());
+        if !list.open
+            || request != list.checks_request
+            || list.selected != Some(number)
+            || current != Some(sha.as_str())
+        {
+            return false;
+        }
+        list.checks_loading = false;
+        match result {
+            Ok(checks) => {
+                list.checks = Some(checks);
+                list.checks_error = None;
+            }
+            Err(message) => {
+                list.checks = None;
+                list.checks_error = Some(message);
+            }
+        }
+        list.version += 1;
+        true
+    }
+
     pub fn reload_pull_comments(&mut self) {
         let Some(number) = self.pulls.list.selected else {
             return;

@@ -733,3 +733,127 @@ fn a_review_answer_arriving_after_another_pull_request_was_selected_is_dropped()
     assert!(list.review_notice.is_none() && !list.review_sending);
     assert!(list.reviews.iter().all(|r| r.body != "late review"));
 }
+
+fn checks_ready(rt: &mut Runtime<State>, number: u64) {
+    loaded(rt, number);
+    settle(rt, |s| !s.pulls.list.checks_loading);
+}
+
+#[test]
+fn checks_are_shown_per_state_for_the_current_revision_and_absence_is_not_success() {
+    let fake = Fake::start();
+    let (_dir, mut rt) = list_screen(&fake);
+    rt.state.select_pull(1);
+    checks_ready(&mut rt, 1);
+    assert!(shows(
+        &rt,
+        "Révision sha1 : 1 en attente, 2 réussie(s), 1 échouée(s), 1 annulée(s), 1 ignorée(s)"
+    ));
+    assert!(shows(&rt, "lint : échouée — https://ci.test/2"));
+    assert!(shows(&rt, "deploy : en attente"));
+    assert!(shows(&rt, "legacy/ok : réussie (statut)"));
+    rt.state.select_pull(4);
+    checks_ready(&mut rt, 4);
+    assert!(shows(&rt, "Aucune vérification pour la révision newsha."));
+    assert!(!shows(&rt, "réussie(s)"));
+    rt.state.select_pull(2);
+    checks_ready(&mut rt, 2);
+    assert!(shows(&rt, "legacy/ci : en attente (statut)"));
+}
+
+#[test]
+fn an_unavailable_api_and_a_new_revision_never_leave_old_results_looking_current() {
+    let fake = Fake::start();
+    let (_dir, mut rt) = list_screen(&fake);
+    rt.state.select_pull(3);
+    checks_ready(&mut rt, 3);
+    assert!(shows(
+        &rt,
+        "Vérifications indisponibles : le serveur a répondu 500"
+    ));
+    assert!(rt.state.pulls.list.checks.is_none());
+    assert!(!shows(&rt, "Aucune vérification"));
+    rt.state.select_pull(1);
+    checks_ready(&mut rt, 1);
+    rt.state.pulls.list.checks.as_mut().unwrap().sha = "oldsha0".to_owned();
+    rt.state.load_pull_detail();
+    settle(&mut rt, |s| {
+        !s.pulls.list.detail_loading
+            && !s.pulls.list.checks_loading
+            && s.pulls.list.checks_note.is_some()
+    });
+    assert!(shows(
+        &rt,
+        "Les vérifications de la révision précédente (oldsha0) ne s'appliquent plus à la révision actuelle (sha1)."
+    ));
+    assert_eq!(rt.state.pulls.list.checks.as_ref().unwrap().sha, "sha1");
+    rt.state.select_pull(2);
+    checks_ready(&mut rt, 2);
+    assert!(rt.state.pulls.list.checks_note.is_none());
+    let late = gitpoulpe_hosting::Checks {
+        sha: "sha1".to_owned(),
+        items: Vec::new(),
+        truncated: false,
+    };
+    let request = rt.state.pulls.list.checks_request;
+    assert!(
+        !rt.state
+            .apply_pull_checks(request, 2, "sha1".to_owned(), Ok(late.clone()))
+    );
+    assert!(
+        !rt.state
+            .apply_pull_checks(request - 1, 2, "sha2".to_owned(), Ok(late.clone()))
+    );
+    assert!(
+        !rt.state
+            .apply_pull_checks(request, 1, "sha2".to_owned(), Ok(late))
+    );
+    assert_eq!(rt.state.pulls.list.checks.as_ref().unwrap().sha, "sha2");
+}
+
+#[test]
+fn old_check_results_are_dropped_at_once_on_a_new_revision_and_on_a_failed_refresh() {
+    let fake = Fake::start();
+    let (_dir, mut rt) = list_screen(&fake);
+    rt.state.select_pull(1);
+    checks_ready(&mut rt, 1);
+    assert!(rt.state.pulls.list.checks.is_some());
+    rt.state
+        .pulls
+        .list
+        .detail
+        .as_mut()
+        .unwrap()
+        .summary
+        .head_sha = "sha2".to_owned();
+    rt.state.load_pull_checks();
+    assert!(rt.state.pulls.list.checks.is_none());
+    assert!(rt.state.pulls.list.checks_note.is_some());
+    for _ in 0..20 {
+        step(&mut rt);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    rt.state
+        .pulls
+        .list
+        .detail
+        .as_mut()
+        .unwrap()
+        .summary
+        .head_sha = "sha5".to_owned();
+    rt.state.pulls.list.checks = Some(gitpoulpe_hosting::Checks {
+        sha: "sha5".to_owned(),
+        items: vec![gitpoulpe_hosting::Check {
+            name: "stale-green".to_owned(),
+            state: gitpoulpe_hosting::CheckState::Success,
+            url: String::new(),
+            legacy: false,
+        }],
+        truncated: false,
+    });
+    rt.state.load_pull_checks();
+    settle(&mut rt, |s| !s.pulls.list.checks_loading);
+    assert!(rt.state.pulls.list.checks.is_none());
+    assert!(!shows(&rt, "stale-green"));
+    assert!(shows(&rt, "Vérifications indisponibles"));
+}

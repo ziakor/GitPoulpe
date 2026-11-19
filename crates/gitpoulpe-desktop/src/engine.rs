@@ -25,7 +25,7 @@ use gitpoulpe_git::{
     Signal, SigningCheck, StashError, SubmoduleError, WorktreeError, check_signing, coalesce,
 };
 use gitpoulpe_hosting::{
-    DeviceCode, ForkOutcome, HostedPull, Listing, Organization, PullComments, PullDetail,
+    Checks, DeviceCode, ForkOutcome, HostedPull, Listing, Organization, PullComments, PullDetail,
     PullSummary, PullTarget, RepoSummary, Review, Session as AccountSession,
 };
 use rune::Waker;
@@ -792,6 +792,12 @@ pub enum Event {
     AccountConnected {
         request: u64,
         result: Result<(Connection, AccountSession), String>,
+    },
+    PullChecksLoaded {
+        request: u64,
+        number: u64,
+        sha: String,
+        result: Result<Checks, String>,
     },
     PullReviewSent {
         request: u64,
