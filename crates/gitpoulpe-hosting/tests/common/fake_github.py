@@ -374,6 +374,23 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
+        if self.path.startswith("/notifications"):
+            if token == "bad":
+                return self.reply(401, {"message": "Bad credentials"})
+            return self.reply(200, [
+                {"id": "n1", "unread": True, "reason": "review_requested", "updated_at": "2026-11-18T10:00:00Z",
+                 "subject": {"title": "PR 1", "type": "PullRequest",
+                             "url": "https://api.github.com/repos/acme/proj/pulls/1"},
+                 "repository": {"full_name": "acme/proj"}},
+                {"id": "n2", "unread": True, "reason": "ci_activity", "updated_at": "2026-11-18T11:00:00Z",
+                 "subject": {"title": "CI failed", "type": "CheckSuite", "url": "https://api.github.com/repos/acme/proj/check-suites/9"},
+                 "repository": {"full_name": "acme/proj"}},
+                {"id": "n3", "unread": False, "reason": "mention", "updated_at": "2026-11-18T12:00:00Z",
+                 "subject": {"title": "Old", "type": "Issue", "url": "https://api.github.com/repos/acme/proj/issues/3"},
+                 "repository": {"full_name": "acme/proj"}},
+                {"id": "n4", "unread": True, "reason": "mention", "updated_at": "2026-11-18T13:00:00Z",
+                 "subject": {"title": "Question", "type": "Issue", "url": "https://api.github.com/repos/acme/proj/issues/12"},
+                 "repository": {"full_name": "acme/proj"}}])
         if self.path.startswith("/repos/"):
             return self.repo_get(token)
         if self.path.startswith(("/user/orgs", "/user/repos", "/orgs/")):

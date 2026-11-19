@@ -783,6 +783,11 @@ pub enum Event {
         result: Result<gitpoulpe_git::Blame, String>,
     },
     TerminalOutput,
+    NoticesFetched {
+        request: u64,
+        connection: String,
+        result: Result<Vec<gitpoulpe_hosting::RawNotice>, String>,
+    },
     OverviewRepo {
         path: String,
         job: u64,

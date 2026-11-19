@@ -259,3 +259,33 @@ async fn cancelling_stops_a_waiting_or_running_read_and_frees_its_slot() {
     assert_eq!(first.await.unwrap(), Err(BoundedError::Cancelled));
     assert!(bounded.run(&Cancel::new(), |_| async { 2 }).await.is_ok());
 }
+
+#[test]
+fn the_remote_addresses_of_a_repository_are_listed_without_any_network_access() {
+    let repo = init_repo();
+    let p = repo.path();
+    assert!(gitpoulpe_git::remote_urls(p).is_empty());
+    run_git(
+        p,
+        &["remote", "add", "origin", "git@github.com:Acme/Tool.git"],
+    );
+    run_git(
+        p,
+        &[
+            "remote",
+            "add",
+            "mirror",
+            "https://gitlab.example.org/acme/platform/tool.git",
+        ],
+    );
+    let mut urls = gitpoulpe_git::remote_urls(p);
+    urls.sort();
+    assert_eq!(
+        urls,
+        [
+            "git@github.com:Acme/Tool.git",
+            "https://gitlab.example.org/acme/platform/tool.git"
+        ]
+    );
+    assert!(gitpoulpe_git::remote_urls(&p.join("nope")).is_empty());
+}

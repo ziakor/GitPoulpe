@@ -125,6 +125,7 @@ impl State {
         self.close_shortcuts();
         self.close_workspaces();
         self.close_favorites();
+        self.close_notices();
         self.accounts.open = false;
         self.profiles_open = false;
         let candidates: BTreeSet<String> = self

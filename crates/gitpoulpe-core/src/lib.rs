@@ -11,6 +11,7 @@ mod identity;
 mod ignore;
 mod lfs;
 mod merge;
+mod notification;
 mod operation;
 mod profile;
 mod pull;
@@ -55,6 +56,7 @@ pub use ignore::{
 };
 pub use lfs::{LfsFile, LfsFileState, LfsPointer, LfsStatus, LfsTransfer};
 pub use merge::{MergeKind, MergeMode, MergeOutcome, MergePreview};
+pub use notification::{Notice, NoticeBook, NoticeKind, NoticePrefs, Pushed};
 pub use operation::{
     ConflictFile, ConflictKind, ConflictVersions, Operation, OperationKind, Resolution, Version,
 };

@@ -289,6 +289,15 @@ impl State {
             }
         }
         list.version += 1;
+        if let Some(number) = self.notices.pull_number.take() {
+            if self.pulls.list.items.iter().any(|p| p.number == number) {
+                self.select_pull(number);
+            } else if self.pulls.list.error.is_none() {
+                self.pulls.list.notice = Some(format!(
+                    "La demande #{number} de la notification n'existe plus ou n'est plus accessible avec ce compte."
+                ));
+            }
+        }
         true
     }
 
@@ -457,6 +466,7 @@ impl State {
         self.close_workspaces();
         self.close_favorites();
         self.close_overview();
+        self.close_notices();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::PullInspect {

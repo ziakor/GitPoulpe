@@ -137,6 +137,7 @@ impl State {
         self.close_workspaces();
         self.close_favorites();
         self.close_overview();
+        self.close_notices();
         self.profiles_open = false;
         self.remotes.open = true;
         self.reload_remotes();

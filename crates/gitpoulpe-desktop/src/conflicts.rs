@@ -103,7 +103,24 @@ impl State {
             return false;
         }
         let changed = self.operation_kind != kind;
+        let announce = changed && kind.is_some_and(|_| self.operation_kind.is_none());
         self.operation_kind = kind;
+        if announce
+            && let Some(kind) = kind
+            && let Some((path, name)) = self
+                .repo
+                .as_ref()
+                .map(|r| (r.path.to_string_lossy().into_owned(), r.name.clone()))
+        {
+            self.push_local_notice(
+                gitpoulpe_core::NoticeKind::Conflicts,
+                format!(
+                    "{} en cours dans {name} : des conflits sont à résoudre",
+                    kind.caption()
+                ),
+                Some(path),
+            );
+        }
         if kind.is_none() && self.conflicts.open {
             self.close_conflicts();
         }
@@ -139,6 +156,7 @@ impl State {
         self.close_workspaces();
         self.close_favorites();
         self.close_overview();
+        self.close_notices();
         self.profiles_open = false;
         self.conflicts.open = true;
         self.reload_conflicts();

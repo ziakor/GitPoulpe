@@ -71,7 +71,9 @@ pub use inspect::InspectError;
 pub use lfs::{LfsError, not_installed_help, parse_pointer};
 pub use merge::MergeError;
 pub use net::{NetError, NetProgress, SshTools, parse_progress, remote_host};
-pub use overview::{Bounded, BoundedError, OverviewError, RepoOverview, parse_overview};
+pub use overview::{
+    Bounded, BoundedError, OverviewError, RepoOverview, parse_overview, remote_urls,
+};
 pub use parse::{ParseError, StatusParser};
 pub use pull::{PullError, PullRequest};
 pub use pull_range::{PullRange, PullRangeError, ReviewRefs};

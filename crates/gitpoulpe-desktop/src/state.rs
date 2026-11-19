@@ -212,6 +212,7 @@ pub struct State {
     pub workspaces: crate::workspaces::WorkspacesState,
     pub favorites: crate::favorites::FavoritesState,
     pub overview: crate::overview::OverviewState,
+    pub notices: crate::notices::NoticesState,
     pub publishing: crate::publishing::PublishSlot,
     pub pulling: crate::pulling::PullSlot,
     pub operation_kind: Option<gitpoulpe_core::OperationKind>,
@@ -361,6 +362,12 @@ impl State {
             file_edit: crate::file_edit::FileEditState::default(),
             terminal: crate::terminal::TerminalState::default(),
             commands: crate::palette::PaletteState::default(),
+            notices: crate::notices::NoticesState {
+                book: prefs
+                    .get::<gitpoulpe_core::NoticeBook>(crate::notices::NOTICES_KEY)
+                    .unwrap_or_default(),
+                ..crate::notices::NoticesState::default()
+            },
             overview: crate::overview::OverviewState::default(),
             favorites: crate::favorites::FavoritesState {
                 book: prefs
@@ -712,6 +719,7 @@ impl State {
                 self.request_identity();
                 self.probe_operation();
                 self.apply_workspace_restore();
+                self.apply_notice_target();
                 true
             }
             Event::Refreshed {
@@ -921,6 +929,11 @@ impl State {
             Event::FileBlameLoaded { request, result } => self.apply_file_blame(request, result),
             Event::ToolFinished { request, result } => self.apply_tool_finished(request, result),
             Event::TerminalOutput => self.apply_terminal_output(),
+            Event::NoticesFetched {
+                request,
+                connection,
+                result,
+            } => self.apply_notices_fetched(request, connection, result),
             Event::OverviewRepo { path, job, result } => {
                 self.apply_overview_repo(path, job, result)
             }
@@ -2121,6 +2134,7 @@ impl State {
         self.close_workspaces();
         self.close_favorites();
         self.close_overview();
+        self.close_notices();
         let selected = self
             .active_profile()
             .or_else(|| self.book.profiles.first())
@@ -2493,6 +2507,7 @@ impl State {
         self.close_workspaces();
         self.close_favorites();
         self.close_overview();
+        self.close_notices();
         self.start_history();
     }
 
@@ -2640,6 +2655,7 @@ impl State {
         self.close_workspaces();
         self.close_favorites();
         self.close_overview();
+        self.close_notices();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::CommitInspect {

@@ -101,6 +101,7 @@ impl State {
         self.close_workspaces();
         self.close_favorites();
         self.close_overview();
+        self.close_notices();
         self.profiles_open = false;
         let request = self.pulls.request + 1;
         let list = std::mem::take(&mut self.pulls.list);
@@ -177,6 +178,9 @@ impl State {
         }
         self.pulls.candidates = candidates;
         self.load_pull_preview();
+        if self.notices.pull_number.is_some() {
+            self.open_pull_list();
+        }
     }
 
     pub fn load_pull_preview(&mut self) {

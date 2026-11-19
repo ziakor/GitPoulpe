@@ -41,7 +41,9 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
             message_screen(&p, "Impossible d'ouvrir ce dépôt", &detail, true, here)
         }
     };
-    let body = if s.overview.open {
+    let body = if s.notices.open {
+        crate::notices_view::notices_screen(s)
+    } else if s.overview.open {
         crate::overview_view::overview_screen(s)
     } else if s.favorites.open {
         crate::favorites_view::favorites_screen(s)
@@ -132,7 +134,13 @@ fn footer(s: &State) -> El {
         WatchStatus::Unavailable(reason) => format!(
             "Surveillance indisponible ({reason}) : utilisez Actualiser ou revenez sur la fenêtre."
         ),
-        _ => hints(s),
+        _ => match s.notices_unread() {
+            0 => hints(s),
+            unread => format!(
+                "{unread} notification(s) non lue(s) (Ctrl+K puis Notifications) · {}",
+                hints(s)
+            ),
+        },
     });
     row()
         .w_full()

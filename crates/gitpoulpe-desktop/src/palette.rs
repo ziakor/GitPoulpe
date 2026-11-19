@@ -101,6 +101,13 @@ pub const COMMANDS: &[PaletteCommand] = &[
         run: |s, _| s.open_shortcuts(),
     },
     PaletteCommand {
+        id: "notices",
+        label: "Notifications…",
+        keywords: "alertes evenements revue mention ci conflits boite de reception",
+        available: always,
+        run: |s, _| s.open_notices(),
+    },
+    PaletteCommand {
         id: "overview",
         label: "Vue multi-dépôts…",
         keywords: "etat plusieurs depots agregee statut espaces favoris",

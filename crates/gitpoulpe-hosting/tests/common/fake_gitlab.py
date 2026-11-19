@@ -202,6 +202,16 @@ class Handler(BaseHTTPRequestHandler):
         if token == "glslow":
             time.sleep(5)
             return self.reply(200, [self.project("slow/late")])
+        if route == "/todos":
+            return self.reply(200, [
+                {"id": 11, "action_name": "review_requested", "created_at": "2026-11-18T10:00:00Z",
+                 "target": {"iid": 5, "title": "Work in progress"}, "project": {"path_with_namespace": "acme/platform/api"}},
+                {"id": 12, "action_name": "build_failed", "created_at": "2026-11-18T11:00:00Z",
+                 "target": {"iid": 5, "title": "Work in progress"}, "project": {"path_with_namespace": "acme/platform/api"}},
+                {"id": 13, "action_name": "mentioned", "created_at": "2026-11-18T12:00:00Z",
+                 "target": {"iid": 9, "title": "Race"}, "project": {"path_with_namespace": "acme/platform/api"}},
+                {"id": 14, "action_name": "assigned", "created_at": "2026-11-18T13:00:00Z",
+                 "target": {"iid": 3, "title": "Merged work"}, "project": {"path_with_namespace": "octo/notes"}}])
         if route == "/groups":
             return self.reply(200, [
                 {"id": 3, "full_path": "acme/platform/infra", "description": "Infra"},

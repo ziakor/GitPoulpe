@@ -8,6 +8,7 @@ mod gitlab_pulls;
 mod gitlab_repos;
 mod gitlab_review;
 mod http;
+mod notifications;
 mod pull_comments;
 mod pull_merge;
 mod pull_read;
@@ -26,6 +27,7 @@ pub use forks::{ForkOutcome, create_fork};
 pub use github::{GithubError, GithubHost, Session, check_connection, connect_github, disconnect};
 pub use gitlab::{GitlabHost, check_gitlab, connect_gitlab};
 pub use http::{ApiClient, HttpError, Response, Token, next_link, validate_base};
+pub use notifications::{RawNotice, fetch_notifications};
 pub use pull_comments::{
     IssueComment, LineAnchor, PullComments, ReviewComment, Side, current_head, list_comments,
     post_comment, post_line_comment, reply_to_comment,

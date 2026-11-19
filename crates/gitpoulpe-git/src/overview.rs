@@ -225,3 +225,24 @@ impl Bounded {
         outcome
     }
 }
+
+pub fn remote_urls(dir: &Path) -> Vec<String> {
+    let Ok(output) = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["config", "--get-regexp", r"^remote\..*\.url$"])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("LC_ALL", "C")
+        .stdin(std::process::Stdio::null())
+        .output()
+    else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| line.split_once(' ').map(|(_, url)| url.trim().to_owned()))
+        .collect()
+}

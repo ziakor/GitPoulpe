@@ -28,6 +28,8 @@ mod initialize_view;
 mod keys;
 mod lfs_screen;
 mod lfs_screen_view;
+mod notices;
+mod notices_view;
 mod overview;
 mod overview_view;
 mod palette;

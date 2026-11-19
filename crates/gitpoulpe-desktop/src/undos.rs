@@ -192,6 +192,7 @@ impl State {
         self.close_workspaces();
         self.close_favorites();
         self.close_overview();
+        self.close_notices();
         self.profiles_open = false;
         self.undo_screen.open = true;
         self.undo_screen.message = None;

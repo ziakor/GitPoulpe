@@ -43,6 +43,7 @@ impl State {
         self.close_workspaces();
         self.close_favorites();
         self.close_overview();
+        self.close_notices();
         self.profiles_open = false;
         self.lfs.open = true;
         self.reload_lfs();
