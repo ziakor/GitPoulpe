@@ -9,7 +9,7 @@ use gitpoulpe_hosting::{
 };
 use rune::TextEdit;
 
-use crate::engine::Event;
+use crate::engine::{Command, Event};
 use crate::state::State;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -420,6 +420,32 @@ impl State {
 }
 
 impl State {
+    pub fn open_pull_from_git(&mut self) {
+        let Some(candidate) = self.pulls.candidates.get(self.pulls.choice).cloned() else {
+            return;
+        };
+        let Some(detail) = self.pulls.list.detail.as_ref() else {
+            return;
+        };
+        let summary = detail.summary.clone();
+        if self.repo.is_none() {
+            return;
+        }
+        self.close_pull_list();
+        self.close_pulls();
+        self.inspect_request += 1;
+        if let Some(engine) = &self.engine {
+            engine.send(Command::PullInspect {
+                request: self.inspect_request,
+                remote: candidate.remote,
+                number: summary.number,
+                base_ref: summary.base_ref,
+                base_sha: summary.base_sha,
+                head_sha: summary.head_sha,
+            });
+        }
+    }
+
     pub fn load_pull_merge_info(&mut self) {
         let Some((connection, owner, name)) = self.pull_list_target() else {
             return;

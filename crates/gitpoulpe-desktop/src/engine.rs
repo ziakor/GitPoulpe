@@ -228,6 +228,14 @@ pub enum Command {
         oid: String,
         parent_index: usize,
     },
+    PullInspect {
+        request: u64,
+        remote: String,
+        number: u64,
+        base_ref: String,
+        base_sha: String,
+        head_sha: String,
+    },
     CommitLeave,
     Amend {
         request: u64,
@@ -532,6 +540,10 @@ pub enum Event {
         detail: Box<CommitDetail>,
         base_index: usize,
         entries: Vec<ChangeEntry>,
+    },
+    PullInspectFailed {
+        request: u64,
+        message: String,
     },
     CommitInspectFailed {
         request: u64,
@@ -1175,6 +1187,30 @@ async fn run(
                             request,
                             oid,
                             parent_index,
+                        ));
+                    }
+                    Command::PullInspect {
+                        request,
+                        remote,
+                        number,
+                        base_ref,
+                        base_sha,
+                        head_sha,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        tokio::spawn(inspect_pull(
+                            shared.clone(),
+                            current,
+                            PullInspectArgs {
+                                request,
+                                remote,
+                                number,
+                                base_ref,
+                                base_sha,
+                                head_sha,
+                            },
                         ));
                     }
                     Command::CommitLeave => {
@@ -2923,6 +2959,65 @@ async fn history_page(shared: Arc<Shared>, request: u64, handle: HistoryHandle) 
             });
         }
         Err(error) => emit_history_error(&shared, request, error),
+    }
+}
+
+struct PullInspectArgs {
+    request: u64,
+    remote: String,
+    number: u64,
+    base_ref: String,
+    base_sha: String,
+    head_sha: String,
+}
+
+async fn inspect_pull(shared: Arc<Shared>, session: Arc<Session>, args: PullInspectArgs) {
+    let request = args.request;
+    let outcome = async {
+        let range = shared
+            .git
+            .prepare_pull_range(
+                &session.info,
+                &args.remote,
+                args.number,
+                &args.base_ref,
+                &args.base_sha,
+                &args.head_sha,
+                &Cancel::new(),
+                |_| {},
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        let detail = shared
+            .git
+            .commit_detail(&session.info, &range.head)
+            .await
+            .map_err(|e| e.to_string())?;
+        let entries = shared
+            .git
+            .commit_files(&session.info, &range.head, &range.merge_base)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok::<_, String>((detail, range, entries))
+    }
+    .await;
+    match outcome {
+        Ok((detail, range, entries)) => {
+            *session.commit.lock().unwrap() = Some(CommitRange {
+                oid: range.head,
+                base: range.merge_base,
+            });
+            let generation = session.bump();
+            shared.reader.retire_before(session.info.id, generation);
+            shared.emit(Event::CommitInspected {
+                request,
+                generation,
+                detail: Box::new(detail),
+                base_index: 0,
+                entries,
+            });
+        }
+        Err(message) => shared.emit(Event::PullInspectFailed { request, message }),
     }
 }
 

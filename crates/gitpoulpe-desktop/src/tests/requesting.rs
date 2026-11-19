@@ -1006,3 +1006,114 @@ fn review_notice_has(rt: &Runtime<State>, needle: &str) -> bool {
         .as_deref()
         .is_some_and(|e| e.contains(needle))
 }
+
+fn git_out(dir: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .current_dir(dir)
+        .args(args)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@example.com")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@example.com")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{args:?}");
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+struct BigPull {
+    _source: tempfile::TempDir,
+    local: tempfile::TempDir,
+    base: String,
+    head: String,
+}
+
+fn big_pull(fake: &Fake, files: usize) -> BigPull {
+    let source = tempfile::tempdir().unwrap();
+    let s = source.path();
+    git(s, &["init", "-q", "-b", "main"]);
+    std::fs::write(s.join("readme.txt"), "base\n").unwrap();
+    git(s, &["add", "-A"]);
+    git(s, &["commit", "-q", "-m", "root"]);
+    let local = repo(&format!("{}/acme/proj.git", fake.base()), "main");
+    git(
+        local.path(),
+        &[
+            "config",
+            &format!("url.file://{}.insteadOf", s.display()),
+            &format!("{}/acme/proj.git", fake.base()),
+        ],
+    );
+    git(s, &["checkout", "-q", "-b", "pr"]);
+    for i in 0..files {
+        let dir = s.join(format!("d{}", i % 30));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(format!("f{i}.txt")), format!("{i}\n")).unwrap();
+    }
+    git(s, &["add", "-A"]);
+    git(s, &["commit", "-q", "-m", "Huge change"]);
+    let head = git_out(s, &["rev-parse", "HEAD"]);
+    git(s, &["update-ref", "refs/pull/1/head", &head]);
+    git(s, &["checkout", "-q", "main"]);
+    std::fs::write(s.join("later.txt"), "later\n").unwrap();
+    git(s, &["add", "-A"]);
+    git(s, &["commit", "-q", "-m", "main moved"]);
+    let base = git_out(s, &["rev-parse", "HEAD"]);
+    BigPull {
+        _source: source,
+        local,
+        base,
+        head,
+    }
+}
+
+#[test]
+fn a_pull_request_beyond_the_api_cap_is_read_entirely_from_git_revisions() {
+    let fake = Fake::start();
+    let big = big_pull(&fake, 3100);
+    let mut rt = screen(big.local.path(), &fake, &["Octo"]);
+    click(&mut rt, "pr-list");
+    settle(&mut rt, |s| s.pulls.list.open && !s.pulls.list.loading);
+    rt.state.select_pull(1);
+    loaded(&mut rt, 1);
+    {
+        let summary = &mut rt.state.pulls.list.detail.as_mut().unwrap().summary;
+        summary.head_sha = big.head.clone();
+        summary.base_sha = big.base.clone();
+        summary.base_ref = "main".to_owned();
+    }
+    step(&mut rt);
+    click(&mut rt, "prl-git");
+    settle(&mut rt, |s| s.inspected.is_some());
+    let inspected = rt.state.inspected.as_ref().unwrap();
+    assert_eq!(inspected.detail.commit.oid, big.head);
+    assert_eq!(inspected.entries.len(), 3100);
+    assert!(!rt.state.pulls.open && !rt.state.pulls.list.open);
+}
+
+#[test]
+fn an_inaccessible_revision_reports_a_limit_and_loads_nothing() {
+    let fake = Fake::start();
+    let big = big_pull(&fake, 3);
+    let mut rt = screen(big.local.path(), &fake, &["Octo"]);
+    click(&mut rt, "pr-list");
+    settle(&mut rt, |s| s.pulls.list.open && !s.pulls.list.loading);
+    rt.state.select_pull(1);
+    loaded(&mut rt, 1);
+    {
+        let summary = &mut rt.state.pulls.list.detail.as_mut().unwrap().summary;
+        summary.head_sha = "d".repeat(40);
+        summary.base_sha = big.base.clone();
+        summary.base_ref = "main".to_owned();
+    }
+    step(&mut rt);
+    click(&mut rt, "prl-git");
+    settle(&mut rt, |s| s.notice.is_some());
+    assert!(rt.state.inspected.is_none());
+    assert!(rt.state.notice.as_deref().is_some_and(|n| {
+        n.contains("Impossible de lire la pull request depuis Git")
+            && n.contains("n'a pas été chargée en entier")
+    }));
+}

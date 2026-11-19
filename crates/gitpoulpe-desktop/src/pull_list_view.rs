@@ -150,6 +150,19 @@ fn detail(s: &State) -> El {
             .color(p.text)
             .wrap(),
         );
+    panel = panel.child(
+        action(s, "prl-git", "Lire toute la PR depuis Git", false)
+            .on_press(|s: &mut State| s.open_pull_from_git()),
+    );
+    if detail.files_truncated || detail.files.len() >= 3000 {
+        panel = panel.child(
+            text("L'API GitHub plafonne la liste à 3000 fichiers : utilisez « Lire toute la PR depuis Git » pour tous les fichiers.".to_owned())
+                .key("prl-cap")
+                .font(theme::SMALL)
+                .color(p.red)
+                .wrap(),
+        );
+    }
     if !detail.body.trim().is_empty() {
         panel = panel.child(
             text(detail.body.clone())

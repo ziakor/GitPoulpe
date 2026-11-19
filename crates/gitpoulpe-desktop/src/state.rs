@@ -164,7 +164,7 @@ pub struct State {
     pub line_pick: Option<LinePick>,
     pub history_open: bool,
     pub inspected: Option<InspectedCommit>,
-    inspect_request: u64,
+    pub(crate) inspect_request: u64,
     pub return_to_history: bool,
     pub history: HistoryState,
     history_request: u64,
@@ -715,6 +715,15 @@ impl State {
                 self.stick_end = false;
                 self.notice = None;
                 self.refilter();
+                true
+            }
+            Event::PullInspectFailed { request, message } => {
+                if request != self.inspect_request {
+                    return false;
+                }
+                self.notice = Some(format!(
+                    "Impossible de lire la pull request depuis Git : {message}"
+                ));
                 true
             }
             Event::CommitInspectFailed { request, message } => {
