@@ -40,6 +40,7 @@ impl State {
         self.close_lfs();
         self.close_gitflow();
         self.close_pulls();
+        self.close_file_history();
         self.profiles_open = false;
         self.submodules.open = true;
         self.reload_submodules();

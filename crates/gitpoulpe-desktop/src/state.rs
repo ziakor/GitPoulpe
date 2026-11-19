@@ -202,6 +202,7 @@ pub struct State {
     pub rebasing: crate::rebasing::RebaseSlot,
     pub sequencing: crate::sequencing::SequenceSlot,
     pub reflog: crate::reflogs::ReflogState,
+    pub file_history: crate::file_history::FileHistoryState,
     pub publishing: crate::publishing::PublishSlot,
     pub pulling: crate::pulling::PullSlot,
     pub operation_kind: Option<gitpoulpe_core::OperationKind>,
@@ -347,6 +348,7 @@ impl State {
             rebasing: crate::rebasing::RebaseSlot::default(),
             sequencing: crate::sequencing::SequenceSlot::default(),
             reflog: crate::reflogs::ReflogState::default(),
+            file_history: crate::file_history::FileHistoryState::default(),
             publishing: crate::publishing::PublishSlot::default(),
             pulling: crate::pulling::PullSlot::default(),
             operation_kind: None,
@@ -649,6 +651,7 @@ impl State {
                 self.rebasing = crate::rebasing::RebaseSlot::default();
                 self.sequencing = crate::sequencing::SequenceSlot::default();
                 self.reflog = crate::reflogs::ReflogState::default();
+                self.file_history = crate::file_history::FileHistoryState::default();
                 self.publishing = crate::publishing::PublishSlot::default();
                 self.pulling = crate::pulling::PullSlot::default();
                 self.operation_kind = None;
@@ -862,6 +865,12 @@ impl State {
             } => self.apply_push_progress(request, phase, percent),
             Event::PushFinished { request, result } => self.apply_push_finished(request, result),
             Event::ReflogListed { request, result } => self.apply_reflog_listed(request, result),
+            Event::FileHistoryLoaded { request, result } => {
+                self.apply_file_history(request, result)
+            }
+            Event::FileRevisionLoaded { request, result } => {
+                self.apply_file_revision(request, result)
+            }
             Event::ReflogInspected { request, result } => {
                 self.apply_reflog_inspected(request, result)
             }
@@ -2047,6 +2056,7 @@ impl State {
         self.close_submodules();
         self.close_gitflow();
         self.close_pulls();
+        self.close_file_history();
         let selected = self
             .active_profile()
             .or_else(|| self.book.profiles.first())
@@ -2411,6 +2421,7 @@ impl State {
         self.close_submodules();
         self.close_gitflow();
         self.close_pulls();
+        self.close_file_history();
         self.start_history();
     }
 
@@ -2550,6 +2561,7 @@ impl State {
         self.close_submodules();
         self.close_gitflow();
         self.close_pulls();
+        self.close_file_history();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::CommitInspect {

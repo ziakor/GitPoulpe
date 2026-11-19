@@ -360,6 +360,17 @@ pub enum Command {
         request: u64,
         reference: String,
     },
+    FileHistoryLoad {
+        request: u64,
+        path: String,
+        limit: usize,
+    },
+    FileRevisionLoad {
+        request: u64,
+        oid: String,
+        path: String,
+        old_path: Option<String>,
+    },
     ReflogInspect {
         request: u64,
         oid: String,
@@ -716,6 +727,14 @@ pub enum Event {
     ReflogListed {
         request: u64,
         result: Result<Vec<ReflogEntry>, String>,
+    },
+    FileHistoryLoaded {
+        request: u64,
+        result: Result<gitpoulpe_git::FileHistory, String>,
+    },
+    FileRevisionLoaded {
+        request: u64,
+        result: Result<gitpoulpe_git::FileRevisionView, String>,
     },
     ReflogInspected {
         request: u64,
@@ -1623,6 +1642,43 @@ async fn run(
                                 .await
                                 .map_err(|e| e.to_string());
                             shared.emit(Event::PushFinished { request, result });
+                        });
+                    }
+                    Command::FileHistoryLoad {
+                        request,
+                        path,
+                        limit,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .file_history(&current.info, &path, limit)
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::FileHistoryLoaded { request, result });
+                        });
+                    }
+                    Command::FileRevisionLoad {
+                        request,
+                        oid,
+                        path,
+                        old_path,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = shared
+                                .git
+                                .file_revision(&current.info, &oid, &path, old_path.as_deref())
+                                .await
+                                .map_err(|e| e.to_string());
+                            shared.emit(Event::FileRevisionLoaded { request, result });
                         });
                     }
                     Command::ReflogList { request, reference } => {

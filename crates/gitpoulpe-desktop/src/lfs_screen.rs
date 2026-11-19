@@ -35,6 +35,7 @@ impl State {
         self.close_submodules();
         self.close_gitflow();
         self.close_pulls();
+        self.close_file_history();
         self.profiles_open = false;
         self.lfs.open = true;
         self.reload_lfs();

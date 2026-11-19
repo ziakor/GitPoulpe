@@ -105,7 +105,7 @@ fn parse_name_status(output: &[u8]) -> Result<Vec<ChangeEntry>, InspectError> {
 }
 
 impl Git {
-    async fn collect_in(
+    pub(crate) async fn collect_in(
         &self,
         info: &SessionInfo,
         args: &[&str],

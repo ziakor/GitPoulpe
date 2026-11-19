@@ -94,6 +94,7 @@ impl State {
         self.close_lfs();
         self.close_submodules();
         self.close_pulls();
+        self.close_file_history();
         self.profiles_open = false;
         self.gitflow = GitflowState {
             open: true,

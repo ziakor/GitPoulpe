@@ -65,6 +65,8 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
         crate::stashes_view::stashes_screen(s)
     } else if s.reflog.open {
         crate::reflogs_view::reflog_screen(s)
+    } else if s.file_history.open {
+        crate::file_history_view::file_history_screen(s)
     } else if s.undo_screen.open {
         crate::undos_view::undo_screen(s)
     } else if s.worktrees.open {
@@ -1321,6 +1323,7 @@ fn header_row(s: &State, index: usize, entry: &ChangeEntry) -> El {
                                 .min_w(0.0)
                                 .truncate(),
                         )
+                        .child(history_action(s, index, entry, &path))
                         .child(header_action(s, index, entry, &path)),
                 )
                 .child({
@@ -1337,6 +1340,20 @@ fn header_row(s: &State, index: usize, entry: &ChangeEntry) -> El {
                     line
                 }),
         )
+}
+
+fn history_action(s: &State, index: usize, entry: &ChangeEntry, label: &str) -> El {
+    let Some(target) = entry.path.to_str().map(str::to_owned) else {
+        return el().w(0.0);
+    };
+    stage_button(
+        s,
+        format!("fh{index}"),
+        format!("Historique de {label}"),
+        "Historique".to_owned(),
+        false,
+    )
+    .on_press(move |s: &mut State| s.open_file_history(target.clone()))
 }
 
 fn header_action(s: &State, index: usize, entry: &ChangeEntry, label: &str) -> El {

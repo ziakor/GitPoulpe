@@ -93,6 +93,7 @@ impl State {
         self.close_lfs();
         self.close_submodules();
         self.close_gitflow();
+        self.close_file_history();
         self.profiles_open = false;
         let request = self.pulls.request + 1;
         let list = std::mem::take(&mut self.pulls.list);

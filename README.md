@@ -215,6 +215,10 @@ The **Comptes fournisseurs** button on the profiles screen connects GitHub.com o
 - Servers must use HTTPS (plain HTTP is accepted for loopback only), redirects are never followed, and requests to another host are refused, so the token cannot leave the configured server.
 - Disconnecting removes only that connection's token. Local Git profiles are not touched.
 
+## File history
+
+Each file header in the diff view has an "Historique" button that opens the history of that path. The list follows renames (`git log --follow`), so a file that was renamed several times shows each step with its path at that revision, and the row says "renommé depuis ..." where the path changed. A file that was deleted and recreated shows the deletion as its own step. Selecting a revision opens the exact diff of that commit for the file (with both paths, so a rename is read as a rename) and, with "Contenu", the file as it was at that commit. A deleted file, binary content and files over 1 MiB each get an explicit message instead of an empty pane, and a very large diff says it was cut. The list is limited to the 500 most recent revisions and says so. In a shallow clone, when the oldest revision shown is the shallow boundary, the screen states that the history is incomplete and how to complete it, instead of presenting the boundary as the file's origin. Refreshing keeps the selected revision; if it is no longer in the history, the screen says so and clears it.
+
 ## Committing
 
 - Write a message in the box at the bottom of the file list, then "Créer le commit" or Ctrl+Enter. The commit contains exactly the staged content shown, with the effective identity of the repository's profile (or your Git configuration when it has none). The box also shows who will be the author and whether the profile's signing key is usable.
