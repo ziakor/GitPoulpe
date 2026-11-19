@@ -382,7 +382,7 @@ cargo +1.100.0 clippy --workspace --all-targets -- -D warnings
 
 ## Layout
 
-Three crates: `gitpoulpe-core` (types and contracts), `gitpoulpe-git` (reading status and diffs, cache, watching) and `gitpoulpe-desktop` (the UI).
+Five crates: `gitpoulpe-core` (types and contracts), `gitpoulpe-git` (everything that runs Git), `gitpoulpe-hosting` (GitHub and GitLab clients), `gitpoulpe-terminal` (embedded terminal) and `gitpoulpe-desktop` (the UI). See [CONTRIBUTING.md](CONTRIBUTING.md) to build, check and propose a change.
 
 ## License
 

@@ -178,7 +178,7 @@ class Handler(BaseHTTPRequestHandler):
                 {"sha": last, "commit": {"message": "second", "author": {"name": "B"}}, "author": None}])
         if parts[4] == "reviews":
             return self.reply(200, [{"id": 1, "user": {"login": "reviewer"}, "state": "APPROVED", "body": "ok",
-                                     "commit_id": "sha1", "submitted_at": "t0"}] + REVIEWS)
+                                     "commit_id": "sha1", "submitted_at": "t0"}] + [r for r in REVIEWS if r["pull"] == n])
         if parts[4] == "comments":
             base = [
                 {"id": 10, "user": {"login": "reviewer"}, "body": "root", "path": "f1.rs", "line": 1, "side": "RIGHT",
@@ -313,7 +313,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(422, {"message": "Unprocessable Entity",
                                     "errors": ["Can not approve your own pull request"]})
         state = {"APPROVE": "APPROVED", "REQUEST_CHANGES": "CHANGES_REQUESTED", "COMMENT": "COMMENTED"}[body["event"]]
-        review = {"id": 50 + len(REVIEWS), "user": {"login": "Octo"}, "state": state, "body": text,
+        review = {"pull": int(parts[-2]), "id": 50 + len(REVIEWS), "user": {"login": "Octo"}, "state": state, "body": text,
                   "commit_id": body["commit_id"], "submitted_at": "t9", "n_comments": len(body.get("comments", []))}
         REVIEWS.append(review)
         if "FLAKY" in text:
