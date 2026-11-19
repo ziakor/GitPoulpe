@@ -199,9 +199,90 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, chunk, headers)
         return self.reply(404, {"message": "Not Found"})
 
+    def issue_item(self, number, title, state="open", labels=(), comments=0, pull=False, repo="acme/proj", author="reporter"):
+        item = {"number": number, "title": title, "state": state, "user": {"login": author},
+                "labels": [{"name": n} for n in labels], "comments": comments,
+                "updated_at": f"2026-11-{10 + number % 10}T10:00:00Z",
+                "html_url": f"https://github.test/{repo}/issues/{number}", "body": "It crashes.\nsecond line"}
+        if pull:
+            item["pull_request"] = {"url": "x"}
+        return item
+
+    def issue_routes(self, rest, query, token):
+        parts = rest.split("/")
+        if len(parts) < 3 or parts[2] != "issues":
+            return None
+        sub = parts[3:]
+        if sub and sub[0].isdigit() and int(sub[0]) < 100:
+            return None
+        if token == "bad":
+            return self.reply(401, {"message": "Bad credentials"})
+        repo = "/".join(parts[:2])
+        if repo == "acme/noissues":
+            return self.reply(410, {"message": "Issues are disabled for this repo"})
+        if repo == "acme/secret" and token == "limited":
+            return self.reply(404, {"message": "Not Found"})
+        if repo not in ("acme/proj", "acme/secret"):
+            return self.reply(404, {"message": "Not Found"})
+        params = dict(p.split("=", 1) for p in query.split("&") if "=" in p)
+        port = self.server.server_address[1]
+        if repo == "acme/secret":
+            everything = [self.issue_item(201, "Private roadmap", repo=repo)]
+            pages = [everything]
+        else:
+            everything = [self.issue_item(105, "Crash on start", labels=("bug",), comments=2),
+                          self.issue_item(104, "A pull request", pull=True),
+                          self.issue_item(103, "Docs typo", state="closed"),
+                          self.issue_item(102, "Add dark mode", labels=("enhancement", "ui")),
+                          self.issue_item(101, "Pagination bug")]
+            pages = [everything[:3], everything[3:]]
+        if not sub:
+            state = params.get("state", "open")
+            page = int(params.get("page", "1"))
+            chunk = [i for i in pages[page - 1] if state == "all" or i["state"] == state]
+            headers = {}
+            if page < len(pages):
+                headers["Link"] = f'<http://127.0.0.1:{port}/repos/{repo}/issues?state={state}&page={page + 1}>; rel="next"'
+            return self.reply(200, chunk, headers)
+        number = int(sub[0])
+        found = next((i for i in everything if i["number"] == number), None)
+        if found is None:
+            return self.reply(404, {"message": "Not Found"})
+        if len(sub) == 1:
+            return self.reply(200, found)
+        if sub[1] == "comments":
+            return self.reply(200, [{"user": {"login": "dev"}, "body": "Can reproduce.", "created_at": "t1"},
+                                    {"user": {"login": "lead"}, "body": "Fix coming.", "created_at": "t2"}])
+        if sub[1] == "timeline":
+            if token == "limited":
+                return self.reply(403, {"message": "Resource not accessible"})
+            return self.reply(200, [
+                {"event": "labeled"},
+                {"event": "cross-referenced", "source": {"issue": {"number": 12, "title": "Fix crash", "state": "open", "pull_request": {"url": "x"}}}},
+                {"event": "cross-referenced", "source": {"issue": {"number": 12, "title": "Fix crash", "state": "open", "pull_request": {"url": "x"}}}},
+                {"event": "cross-referenced", "source": {"issue": {"number": 40, "title": "Other issue", "state": "open"}}},
+                {"event": "referenced", "commit_id": "abc1234def5678"},
+                {"event": "closed", "commit_id": "abc1234def5678"},
+                {"event": "closed", "commit_id": None}])
+        return self.reply(404, {"message": "Not Found"})
+
+    def search_issues(self, token, query):
+        if token == "bad":
+            return self.reply(401, {"message": "Bad credentials"})
+        params = dict(p.split("=", 1) for p in query.split("&") if "=" in p)
+        from urllib.parse import unquote_plus
+        q = unquote_plus(params.get("q", ""))
+        if "repo:acme/proj" not in q or "is:issue" not in q:
+            return self.reply(422, {"message": "Validation Failed"})
+        hits = [self.issue_item(102, "Add dark mode", labels=("enhancement", "ui"))] if "dark" in q else []
+        return self.reply(200, {"total_count": len(hits), "items": hits})
+
     def repo_get(self, token):
         rest, _, query = self.path[len("/repos/"):].partition("?")
         rest = rest.lower() if "/git/ref/" not in rest and "/compare/" not in rest else rest
+        issue = self.issue_routes(rest, query, token)
+        if issue is not None:
+            return issue
         if rest.count("/") > 1:
             handled = self.pull_routes(rest, query)
             if handled is not None:
@@ -374,6 +455,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
+        if self.path.startswith("/search/issues"):
+            return self.search_issues(token, self.path.partition("?")[2])
         if self.path.startswith("/notifications"):
             if token == "bad":
                 return self.reply(401, {"message": "Bad credentials"})

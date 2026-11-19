@@ -783,6 +783,15 @@ pub enum Event {
         result: Result<gitpoulpe_git::Blame, String>,
     },
     TerminalOutput,
+    IssuesListed {
+        request: u64,
+        result: Result<(Vec<gitpoulpe_hosting::IssueSummary>, bool), String>,
+    },
+    IssueLoaded {
+        request: u64,
+        number: u64,
+        result: Result<Box<gitpoulpe_hosting::IssueDetail>, String>,
+    },
     NoticesFetched {
         request: u64,
         connection: String,

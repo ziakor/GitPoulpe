@@ -212,6 +212,10 @@ class Handler(BaseHTTPRequestHandler):
                  "target": {"iid": 9, "title": "Race"}, "project": {"path_with_namespace": "acme/platform/api"}},
                 {"id": 14, "action_name": "assigned", "created_at": "2026-11-18T13:00:00Z",
                  "target": {"iid": 3, "title": "Merged work"}, "project": {"path_with_namespace": "octo/notes"}}])
+        if route == "/version":
+            if token == "glother":
+                return self.reply(404, {"message": "404 Not Found"})
+            return self.reply(200, {"version": "16.11.2", "revision": "abc"})
         if route == "/groups":
             return self.reply(200, [
                 {"id": 3, "full_path": "acme/platform/infra", "description": "Infra"},
@@ -229,7 +233,7 @@ class Handler(BaseHTTPRequestHandler):
                 headers["Link"] = f'<http://127.0.0.1:{port}/api/v4/projects?page={page + 1}>; rel="next"'
             return self.reply(200, chunk, headers)
         if route.startswith("/projects/"):
-            return self.project_routes(route, params)
+            return self.project_routes(route, params, token)
         if route.startswith("/groups/") and route.endswith("/projects"):
             group = unquote(route[len("/groups/"):-len("/projects")])
             if group == "acme/platform":
@@ -239,7 +243,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, [])
         return self.reply(404, {"message": "404 Not Found"})
 
-    def project_routes(self, route, params):
+    def project_routes(self, route, params, token):
         from urllib.parse import unquote
         rest = route[len("/projects/"):]
         enc, _, tail = rest.partition("/")
@@ -265,6 +269,8 @@ class Handler(BaseHTTPRequestHandler):
                 extra.update(merge_method="rebase_merge", squash_option="never",
                              only_allow_merge_if_pipeline_succeeds=False)
             return self.reply(200, self.project(full, **extra))
+        if tail == "issues" or tail.startswith("issues/"):
+            return self.issue_routes(full, tail, params, token)
         if tail.startswith("protected_branches/"):
             if full == "octo/notes":
                 return self.reply(403, {"message": "403 Forbidden"})
@@ -288,6 +294,53 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, sorted(items, key=lambda m: m["updated_at"], reverse=True))
         if tail.startswith("merge_requests/"):
             return self.mr_detail(tail[len("merge_requests/"):], params)
+        return self.reply(404, {"message": "404 Not Found"})
+
+    def issue_routes(self, full, tail, params, token):
+        if full == "octo/notes" and token == "glother":
+            return self.reply(404, {"message": "404 Project Not Found"})
+        port = self.server.server_address[1]
+        if token == "glother":
+            data = [{"iid": 21, "title": "Homonym issue", "state": "opened", "labels": ["other"],
+                     "author": {"username": "someone"}, "user_notes_count": 0,
+                     "updated_at": "2026-11-12T10:00:00Z", "web_url": "https://gl.test/21", "description": "From another instance"}]
+        else:
+            def issue(iid, title, state="opened", labels=(), notes=0):
+                return {"iid": iid, "title": title, "state": state, "labels": list(labels),
+                        "author": {"username": "reporter"}, "user_notes_count": notes,
+                        "updated_at": f"2026-11-{10 + iid % 10}T10:00:00Z", "web_url": f"https://gl.test/{iid}",
+                        "description": "Login fails.\nsecond line"}
+            data = [issue(11, "Login fails", labels=("bug",), notes=2), issue(10, "Slow search"),
+                    issue(9, "Old report", state="closed"), issue(8, "Planning"), issue(7, "Slow startup")]
+        if tail == "issues":
+            state = params.get("state")
+            search = params.get("search", "").lower()
+            items = [i for i in data if (state is None or i["state"] == state) and search in i["title"].lower()]
+            page = int(params.get("page", "1"))
+            chunk = items[(page - 1) * 3: page * 3]
+            headers = {}
+            if page * 3 < len(items):
+                extra = "".join(f"&{k}={v}" for k, v in params.items() if k in ("state", "search"))
+                headers["Link"] = f'<http://127.0.0.1:{port}/api/v4/projects/acme%2Fplatform%2Fapi/issues?page={page + 1}{extra}>; rel="next"'
+            return self.reply(200, chunk, headers)
+        rest = tail[len("issues/"):].split("/")
+        found = next((i for i in data if str(i["iid"]) == rest[0]), None)
+        if found is None:
+            return self.reply(404, {"message": "404 Not found"})
+        if len(rest) == 1:
+            return self.reply(200, found)
+        if rest[1] == "notes":
+            return self.reply(200, [
+                {"id": 1, "system": False, "body": "I can reproduce.", "author": {"username": "dev"}, "created_at": "t1"},
+                {"id": 2, "system": True, "body": "mentioned in commit 1a2b3c4d5e6f7a8b", "author": {"username": "bot"}, "created_at": "t2"},
+                {"id": 3, "system": True, "body": "assigned to @dev", "author": {"username": "bot"}, "created_at": "t3"}])
+        if rest[1] == "closed_by":
+            return self.reply(200, [{"iid": 5, "title": "Work in progress", "state": "merged"}] if token != "glother" else [])
+        if rest[1] == "related_merge_requests":
+            if token == "glother":
+                return self.reply(404, {"message": "404 Not Found"})
+            return self.reply(200, [{"iid": 5, "title": "Work in progress", "state": "merged"},
+                                    {"iid": 7, "title": "Docs", "state": "opened"}])
         return self.reply(404, {"message": "404 Not Found"})
 
     def compare(self, full, params):

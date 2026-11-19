@@ -93,6 +93,7 @@ impl State {
         self.close_favorites();
         self.close_overview();
         self.close_notices();
+        self.close_issues();
         self.profiles_open = false;
         self.branches.open = true;
         self.reload_branches();

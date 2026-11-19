@@ -57,6 +57,7 @@ impl State {
         self.close_favorites();
         self.close_overview();
         self.close_notices();
+        self.close_issues();
         self.profiles_open = false;
         let request = self.file_edit.request + 1;
         self.file_edit = FileEditState {

@@ -41,7 +41,9 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
             message_screen(&p, "Impossible d'ouvrir ce dépôt", &detail, true, here)
         }
     };
-    let body = if s.notices.open {
+    let body = if s.issues.open {
+        crate::issues_view::issues_screen(s)
+    } else if s.notices.open {
         crate::notices_view::notices_screen(s)
     } else if s.overview.open {
         crate::overview_view::overview_screen(s)

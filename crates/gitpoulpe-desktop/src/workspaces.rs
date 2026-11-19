@@ -99,6 +99,7 @@ impl State {
         self.close_favorites();
         self.close_overview();
         self.close_notices();
+        self.close_issues();
         self.profiles_open = false;
         self.workspace_remember();
         let book = &self.workspaces.book;

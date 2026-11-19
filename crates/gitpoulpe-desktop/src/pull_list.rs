@@ -467,6 +467,7 @@ impl State {
         self.close_favorites();
         self.close_overview();
         self.close_notices();
+        self.close_issues();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::PullInspect {

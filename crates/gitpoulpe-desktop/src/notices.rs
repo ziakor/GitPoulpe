@@ -111,6 +111,7 @@ impl State {
         self.close_workspaces();
         self.close_favorites();
         self.close_overview();
+        self.close_issues();
         self.accounts.open = false;
         self.profiles_open = false;
         self.notices.open = true;

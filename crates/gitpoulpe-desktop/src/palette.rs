@@ -101,6 +101,13 @@ pub const COMMANDS: &[PaletteCommand] = &[
         run: |s, _| s.open_shortcuts(),
     },
     PaletteCommand {
+        id: "issues",
+        label: "Issues du dépôt courant…",
+        keywords: "tickets suivi github gitlab recherche",
+        available: in_repo,
+        run: |s, _| s.open_issues(),
+    },
+    PaletteCommand {
         id: "notices",
         label: "Notifications…",
         keywords: "alertes evenements revue mention ci conflits boite de reception",

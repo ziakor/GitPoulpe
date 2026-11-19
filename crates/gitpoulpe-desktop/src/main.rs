@@ -25,6 +25,8 @@ mod ignored;
 mod ignored_view;
 mod initialize;
 mod initialize_view;
+mod issues;
+mod issues_view;
 mod keys;
 mod lfs_screen;
 mod lfs_screen_view;

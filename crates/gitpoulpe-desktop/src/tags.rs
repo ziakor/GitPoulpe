@@ -75,6 +75,7 @@ impl State {
         self.close_favorites();
         self.close_overview();
         self.close_notices();
+        self.close_issues();
         self.profiles_open = false;
         self.tags.open = true;
         self.tags.target = target;

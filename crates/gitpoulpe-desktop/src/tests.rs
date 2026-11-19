@@ -25,6 +25,7 @@ mod hooking;
 mod ignoring;
 mod initializing;
 mod inspecting;
+mod issuing;
 mod lfsing;
 mod merging;
 mod noticing;

@@ -289,3 +289,24 @@ fn the_remote_addresses_of_a_repository_are_listed_without_any_network_access() 
     );
     assert!(gitpoulpe_git::remote_urls(&p.join("nope")).is_empty());
 }
+
+#[test]
+fn local_branches_and_commit_existence_are_read_without_the_network() {
+    let repo = init_repo();
+    let p = repo.path();
+    write(p, "a.txt", "x\n");
+    commit_all(p, "init");
+    run_git(p, &["branch", "feature/12-login"]);
+    run_git(p, &["branch", "other"]);
+    let mut names = gitpoulpe_git::local_branches(p);
+    names.sort();
+    assert_eq!(names, ["feature/12-login", "main", "other"]);
+    let head = String::from_utf8(run_git(p, &["rev-parse", "HEAD"])).unwrap();
+    let head = head.trim();
+    assert!(gitpoulpe_git::commit_exists(p, head));
+    assert!(gitpoulpe_git::commit_exists(p, &head[..8]));
+    assert!(!gitpoulpe_git::commit_exists(p, &"d".repeat(40)));
+    assert!(!gitpoulpe_git::commit_exists(p, "--upload-pack=x"));
+    assert!(!gitpoulpe_git::commit_exists(p, "abc"));
+    assert!(gitpoulpe_git::local_branches(&p.join("nope")).is_empty());
+}

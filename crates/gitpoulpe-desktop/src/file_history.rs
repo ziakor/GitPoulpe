@@ -64,6 +64,7 @@ impl State {
         self.close_favorites();
         self.close_overview();
         self.close_notices();
+        self.close_issues();
         self.profiles_open = false;
         let request = self.file_history.request + 1;
         let revision_request = self.file_history.revision_request + 1;

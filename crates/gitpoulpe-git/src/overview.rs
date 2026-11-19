@@ -246,3 +246,40 @@ pub fn remote_urls(dir: &Path) -> Vec<String> {
         .filter_map(|line| line.split_once(' ').map(|(_, url)| url.trim().to_owned()))
         .collect()
 }
+
+fn quiet_git(dir: &Path) -> std::process::Command {
+    let mut command = std::process::Command::new("git");
+    command
+        .arg("-C")
+        .arg(dir)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("LC_ALL", "C")
+        .stdin(std::process::Stdio::null());
+    command
+}
+
+pub fn local_branches(dir: &Path) -> Vec<String> {
+    let Ok(output) = quiet_git(dir)
+        .args(["for-each-ref", "--format=%(refname:short)", "refs/heads"])
+        .output()
+    else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+pub fn commit_exists(dir: &Path, sha: &str) -> bool {
+    if !(4..=64).contains(&sha.len()) || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
+        return false;
+    }
+    quiet_git(dir)
+        .args(["cat-file", "-e", &format!("{sha}^{{commit}}")])
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
