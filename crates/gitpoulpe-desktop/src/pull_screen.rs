@@ -33,6 +33,7 @@ pub struct PullsState {
     pub draft: bool,
     pub request: u64,
     pub version: u32,
+    pub list: crate::pull_list::PullListState,
 }
 
 impl Default for PullsState {
@@ -56,6 +57,7 @@ impl Default for PullsState {
             draft: false,
             request: 0,
             version: 0,
+            list: crate::pull_list::PullListState::default(),
         }
     }
 }
@@ -93,7 +95,14 @@ impl State {
         self.close_gitflow();
         self.profiles_open = false;
         let request = self.pulls.request + 1;
+        let list = std::mem::take(&mut self.pulls.list);
         self.pulls = PullsState {
+            list: crate::pull_list::PullListState {
+                open: false,
+                list_request: list.list_request + 1,
+                detail_request: list.detail_request + 1,
+                ..crate::pull_list::PullListState::default()
+            },
             open: true,
             awaiting_remotes: true,
             loading: true,
@@ -109,6 +118,7 @@ impl State {
     }
 
     pub fn close_pulls(&mut self) {
+        self.close_pull_list();
         self.pulls.open = false;
         self.pulls.request += 1;
         self.pulls.awaiting_remotes = false;

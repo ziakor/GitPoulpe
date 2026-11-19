@@ -2,6 +2,7 @@ mod device;
 mod forks;
 mod github;
 mod http;
+mod pull_read;
 mod pulls;
 mod remote_url;
 mod repos;
@@ -14,6 +15,9 @@ pub use device::{
 pub use forks::{ForkOutcome, create_fork};
 pub use github::{GithubError, GithubHost, Session, check_connection, connect_github, disconnect};
 pub use http::{ApiClient, HttpError, Response, Token, next_link, validate_base};
+pub use pull_read::{
+    PullCommit, PullDetail, PullFile, PullFilter, PullState, PullSummary, list_pulls, load_pull,
+};
 pub use pulls::{
     ChangedFile, Comparison, HostedPull, PullDraft, PullTarget, create_pull_request, prepare_pull,
 };

@@ -162,6 +162,10 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         s.close_accounts();
         return true;
     }
+    if s.pulls.list.open && event.key == Key::Escape {
+        s.close_pull_list();
+        return true;
+    }
     if s.pulls.open && event.key == Key::Escape {
         s.close_pulls();
         return true;

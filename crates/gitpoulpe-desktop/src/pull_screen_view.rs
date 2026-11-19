@@ -5,6 +5,9 @@ use crate::theme;
 use crate::widgets::{action, field, toggle};
 
 pub fn pulls_screen(s: &State) -> El {
+    if s.pulls.list.open {
+        return crate::pull_list_view::pull_list_screen(s);
+    }
     let p = s.palette;
     let pulls = &s.pulls;
     let branch = pulls.branch.clone().unwrap_or_else(|| "?".to_owned());
@@ -21,6 +24,10 @@ pub fn pulls_screen(s: &State) -> El {
                 .color(p.text)
                 .grow(1.0)
                 .truncate(),
+        )
+        .child(
+            action(s, "pr-list", "Voir les pull requests", false)
+                .on_press(|s: &mut State| s.open_pull_list()),
         )
         .child(
             action(s, "pr-refresh", "Actualiser", false)

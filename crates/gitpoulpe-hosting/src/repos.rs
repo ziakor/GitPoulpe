@@ -52,7 +52,10 @@ pub(crate) fn client(
     Ok(ApiClient::new(&connection.api, Some(&token))?)
 }
 
-async fn pages(client: &ApiClient, first: String) -> Result<Listing<Value>, GithubError> {
+pub(crate) async fn pages(
+    client: &ApiClient,
+    first: String,
+) -> Result<Listing<Value>, GithubError> {
     let mut items = Vec::new();
     let mut next = Some(first);
     let mut fetched = 0;

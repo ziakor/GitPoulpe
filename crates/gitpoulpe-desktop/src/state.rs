@@ -920,6 +920,12 @@ impl State {
             Event::AccountConnected { request, result } => {
                 self.apply_account_connected(request, result)
             }
+            Event::PullListed { request, result } => self.apply_pull_listed(request, result),
+            Event::PullLoaded {
+                request,
+                number,
+                result,
+            } => self.apply_pull_loaded(request, number, result),
             Event::PullPrepared { request, result } => self.apply_pull_prepared(request, result),
             Event::PullCreated { request, result } => self.apply_pull_created(request, result),
             Event::BrowserFork { request, result } => self.apply_browser_fork(request, result),

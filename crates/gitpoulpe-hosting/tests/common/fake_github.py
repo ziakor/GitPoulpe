@@ -90,6 +90,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"ahead_by": 2, "behind_by": 1, "files": [
                 {"filename": "src/a.rs", "status": "modified", "additions": 3, "deletions": 1},
                 {"filename": "README.md", "status": "added", "additions": 10, "deletions": 0}]})
+        if rest.startswith("acme/proj/pulls") and "head" not in params:
+            return self.pull_read(rest, params)
         if rest.endswith("/pulls"):
             head = unquote(params.get("head", ""))
             if head.endswith(":feature/dup"):
@@ -98,6 +100,49 @@ class Handler(BaseHTTPRequestHandler):
                                          "head": {"ref": "feature/dup"}, "base": {"ref": "main"}}])
             return self.reply(200, [])
         return None
+
+    def pr(self, n):
+        spec = {1: ("open", None, "sha1"), 2: ("closed", None, "sha2"), 3: ("closed", "2026-01-01T00:00:00Z", "sha3"),
+                4: ("open", None, "newsha"), 5: ("open", None, "sha5"), 6: ("open", None, "sha6")}[n]
+        return {"number": n, "title": f"PR {n}", "state": spec[0], "merged_at": spec[1], "draft": n == 4,
+                "html_url": f"https://example.test/acme/proj/pull/{n}", "updated_at": "2026-02-02T00:00:00Z",
+                "user": {"login": f"author{n}"}, "body": f"body {n}",
+                "head": {"ref": f"feature/{n}", "sha": spec[2]}, "base": {"ref": "main", "sha": "basesha"}}
+
+    def pull_read(self, rest, params):
+        import time
+        parts = rest.split("/")
+        port = self.server.server_address[1]
+        if len(parts) == 3:
+            state = params.get("state", "open")
+            items = [self.pr(n) for n in range(1, 7)]
+            if state == "open":
+                items = [i for i in items if i["state"] == "open"]
+            elif state == "closed":
+                items = [i for i in items if i["state"] == "closed"]
+            return self.reply(200, items)
+        n = int(parts[3])
+        if n == 6:
+            return self.reply(404, {"message": "Not Found"})
+        if n == 5 and len(parts) == 4:
+            time.sleep(4)
+        if len(parts) == 4:
+            return self.reply(200, self.pr(n))
+        if parts[4] == "commits":
+            last = "oldsha" if n == 4 else self.pr(n)["head"]["sha"]
+            return self.reply(200, [
+                {"sha": "c0", "commit": {"message": "first\n\nbody", "author": {"name": "A"}}, "author": {"login": "authorx"}},
+                {"sha": last, "commit": {"message": "second", "author": {"name": "B"}}, "author": None}])
+        if parts[4] == "files":
+            page = int(params.get("page", "1"))
+            files = [{"filename": f"f{i}.rs", "status": "modified", "additions": i, "deletions": 1,
+                      "patch": f"@@ -1 +1 @@\n-old{i}\n+new{i}"} for i in range(1, 4)]
+            chunk = files[(page - 1) * 2: page * 2]
+            headers = {}
+            if page * 2 < len(files):
+                headers["Link"] = f'<http://127.0.0.1:{port}/repos/acme/proj/pulls/{n}/files?page={page + 1}>; rel="next"'
+            return self.reply(200, chunk, headers)
+        return self.reply(404, {"message": "Not Found"})
 
     def repo_get(self, token):
         rest, _, query = self.path[len("/repos/"):].partition("?")

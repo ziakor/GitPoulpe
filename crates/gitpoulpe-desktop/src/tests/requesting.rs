@@ -259,3 +259,102 @@ fn an_answer_arriving_after_the_screen_was_left_creates_no_notice() {
     }
     assert!(rt.state.pulls.created.is_none() && rt.state.pulls.notice.is_none());
 }
+
+fn list_screen(fake: &Fake) -> (tempfile::TempDir, Runtime<State>) {
+    let dir = repo(&format!("{}/acme/proj.git", fake.base()), "feature/x");
+    let mut rt = screen(dir.path(), fake, &["Octo"]);
+    click(&mut rt, "pr-list");
+    settle(&mut rt, |s| s.pulls.list.open && !s.pulls.list.loading);
+    (dir, rt)
+}
+
+fn loaded(rt: &mut Runtime<State>, number: u64) {
+    settle(rt, move |s| {
+        !s.pulls.list.detail_loading
+            && s.pulls
+                .list
+                .detail
+                .as_ref()
+                .is_some_and(|d| d.summary.number == number)
+    });
+}
+
+#[test]
+fn pull_requests_are_listed_by_state_and_one_shows_its_revisions_commits_and_diffs() {
+    let fake = Fake::start();
+    let (_dir, mut rt) = list_screen(&fake);
+    assert!(shows(&rt, "#1 PR 1") && shows(&rt, "#4 PR 4"));
+    assert!(!shows(&rt, "#2 PR 2"));
+    click(&mut rt, "prlk0");
+    loaded(&mut rt, 1);
+    assert!(shows(&rt, "feature/1 (sha1) → main (basesha)"));
+    assert!(shows(&rt, "par author1"));
+    assert!(shows(&rt, "2 commit(s)") && shows(&rt, "3 fichier(s)"));
+    assert!(shows(&rt, "+new3") && shows(&rt, "-old1"));
+    assert!(shows(&rt, "first — authorx"));
+    click(&mut rt, "prl-all");
+    settle(&mut rt, |s| {
+        s.pulls.list.filter == gitpoulpe_hosting::PullFilter::All
+            && !s.pulls.list.loading
+            && s.pulls.list.items.len() == 6
+    });
+    assert!(shows(&rt, "fusionnée · author3"));
+    assert!(shows(&rt, "fermée · author2"));
+    assert!(shows(&rt, "brouillon · author4"));
+}
+
+#[test]
+fn switching_pull_requests_never_shows_a_late_answer_for_the_previous_one() {
+    let fake = Fake::start();
+    let (_dir, mut rt) = list_screen(&fake);
+    rt.state.select_pull(5);
+    rt.state.select_pull(1);
+    loaded(&mut rt, 1);
+    std::thread::sleep(Duration::from_secs(5));
+    for _ in 0..30 {
+        step(&mut rt);
+    }
+    let detail = rt.state.pulls.list.detail.as_ref().unwrap();
+    assert_eq!(detail.summary.number, 1);
+    assert!(shows(&rt, "#1 PR 1") && !shows(&rt, "#5 PR 5 "));
+}
+
+#[test]
+fn an_update_during_reading_and_a_removed_access_are_reported_without_mixing_results() {
+    let fake = Fake::start();
+    let (_dir, mut rt) = list_screen(&fake);
+    rt.state.select_pull(4);
+    loaded(&mut rt, 4);
+    assert!(shows(&rt, "a changé pendant le chargement"));
+    rt.state.select_pull(1);
+    loaded(&mut rt, 1);
+    assert!(rt.state.pulls.list.notice.is_none());
+    rt.state.select_pull(4);
+    assert!(rt.state.pulls.list.detail.is_none() && rt.state.pulls.list.notice.is_none());
+    loaded(&mut rt, 4);
+    rt.state.select_pull(1);
+    loaded(&mut rt, 1);
+    rt.state
+        .pulls
+        .list
+        .detail
+        .as_mut()
+        .unwrap()
+        .summary
+        .head_sha = "old1234567".to_owned();
+    rt.state.load_pull_detail();
+    settle(&mut rt, |s| {
+        !s.pulls.list.detail_loading && s.pulls.list.notice.is_some()
+    });
+    assert!(shows(
+        &rt,
+        "mise à jour depuis votre lecture (old1234 → sha1)"
+    ));
+    rt.state.select_pull(6);
+    settle(&mut rt, |s| {
+        !s.pulls.list.detail_loading && s.pulls.list.detail_error.is_some()
+    });
+    assert!(shows(&rt, "introuvable ou non autorisée"));
+    assert!(rt.state.pulls.list.detail.is_none());
+    assert!(!shows(&rt, "#1 PR 1 "));
+}
