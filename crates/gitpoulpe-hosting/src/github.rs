@@ -30,6 +30,7 @@ pub struct Session {
     pub name: Option<String>,
     pub scopes: Vec<String>,
     pub fine_grained: bool,
+    pub expires_at: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -70,7 +71,7 @@ impl std::fmt::Display for GithubError {
             ),
             Self::RateLimited(Some(reset)) => write!(
                 f,
-                "limite de requêtes atteinte ; réessayez après {reset} (UTC, secondes Unix)"
+                "limite de requêtes atteinte ; réessayez plus tard (indication du serveur : {reset})"
             ),
             Self::RateLimited(None) => f.write_str("limite de requêtes atteinte ; réessayez plus tard"),
             Self::Forbidden(why) => write!(f, "accès refusé : {why}"),
@@ -140,7 +141,11 @@ pub(crate) fn interpret_failure(response: &Response) -> GithubError {
             }
             if response.header("x-ratelimit-remaining") == Some("0") || response.status == 429 {
                 return GithubError::RateLimited(
-                    response.header("x-ratelimit-reset").map(str::to_owned),
+                    response
+                        .header("x-ratelimit-reset")
+                        .or_else(|| response.header("ratelimit-reset"))
+                        .or_else(|| response.header("retry-after"))
+                        .map(str::to_owned),
                 );
             }
             GithubError::Forbidden(if message.is_empty() {
@@ -200,6 +205,9 @@ fn parse_session(response: &Response) -> Result<Session, GithubError> {
             .filter(|s| !s.is_empty())
             .collect(),
         fine_grained: scopes_header.is_none(),
+        expires_at: response
+            .header("github-authentication-token-expiration")
+            .map(str::to_owned),
     })
 }
 
@@ -246,6 +254,9 @@ pub async fn check_connection(
     store: &dyn SecretStore,
     connection: &Connection,
 ) -> Result<Session, GithubError> {
+    if connection.provider == Provider::Gitlab {
+        return crate::gitlab::check_gitlab(store, connection).await;
+    }
     let token = store
         .get(&connection.secret_key())?
         .map(|t| Token::new(&t))

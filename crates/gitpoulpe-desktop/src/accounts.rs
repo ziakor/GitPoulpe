@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use gitpoulpe_core::{Connection, ConnectionBook};
+use gitpoulpe_core::{Connection, ConnectionBook, Provider};
 use gitpoulpe_hosting::{
-    DeviceCode, GITHUB_CLIENT_ID, GithubHost, SecretStore, Session, await_device_token,
-    check_connection, connect_github, disconnect, start_device_flow,
+    DeviceCode, GITHUB_CLIENT_ID, GithubHost, GitlabHost, SecretStore, Session, await_device_token,
+    check_connection, connect_github, connect_gitlab, disconnect, start_device_flow,
 };
 use rune::TextEdit;
 
@@ -21,6 +21,7 @@ pub enum Status {
 }
 
 pub struct AccountsState {
+    pub provider: Provider,
     pub open: bool,
     pub book: ConnectionBook,
     pub request: u64,
@@ -44,6 +45,7 @@ pub struct AccountsState {
 impl AccountsState {
     pub fn new(book: ConnectionBook) -> Self {
         Self {
+            provider: Provider::Github,
             open: false,
             book,
             request: 0,
@@ -108,6 +110,16 @@ impl State {
         self.accounts.version += 1;
     }
 
+    pub fn set_provider(&mut self, provider: Provider) {
+        if self.accounts.provider != provider {
+            self.cancel_device();
+            self.accounts.provider = provider;
+            self.accounts.error = None;
+            self.accounts.done = None;
+            self.accounts.version += 1;
+        }
+    }
+
     pub fn set_enterprise(&mut self, on: bool) {
         self.accounts.enterprise = on;
         self.accounts.version += 1;
@@ -143,17 +155,35 @@ impl State {
             return;
         }
         let token = self.accounts.token.text.clone();
-        let host = if self.accounts.enterprise {
-            match GithubHost::enterprise(self.accounts.server.text.trim()) {
-                Ok(host) => host,
-                Err(e) => {
-                    self.accounts.error = Some(e.to_string());
-                    self.accounts.version += 1;
-                    return;
-                }
+        let provider = self.accounts.provider;
+        let server = self
+            .accounts
+            .enterprise
+            .then(|| self.accounts.server.text.trim().to_owned());
+        let hosts = match (provider, server) {
+            (Provider::Github, None) => Ok(GithubHost::dotcom()),
+            (Provider::Github, Some(server)) => GithubHost::enterprise(&server),
+            (Provider::Gitlab, None) => {
+                let host = GitlabHost::dotcom();
+                Ok(GithubHost {
+                    api: host.api,
+                    web: host.web,
+                })
             }
-        } else {
-            GithubHost::dotcom()
+            (Provider::Gitlab, Some(server)) => {
+                GitlabHost::self_managed(&server).map(|host| GithubHost {
+                    api: host.api,
+                    web: host.web,
+                })
+            }
+        };
+        let host = match hosts {
+            Ok(host) => host,
+            Err(e) => {
+                self.accounts.error = Some(e.to_string());
+                self.accounts.version += 1;
+                return;
+            }
         };
         self.accounts.request += 1;
         self.accounts.busy = true;
@@ -165,9 +195,17 @@ impl State {
         let sender = self.event_tx();
         let waker = self.waker_slot();
         self.hosting.runtime.spawn(async move {
-            let result = connect_github(secrets.as_ref(), &host, &token)
-                .await
-                .map_err(|e| e.to_string());
+            let result = match provider {
+                Provider::Github => connect_github(secrets.as_ref(), &host, &token).await,
+                Provider::Gitlab => {
+                    let host = GitlabHost {
+                        api: host.api,
+                        web: host.web,
+                    };
+                    connect_gitlab(secrets.as_ref(), &host, &token).await
+                }
+            }
+            .map_err(|e| e.to_string());
             let _ = sender.send(Event::AccountConnected { request, result });
             if let Some(wake) = waker.lock().unwrap().as_ref() {
                 wake();
@@ -176,7 +214,10 @@ impl State {
     }
 
     pub fn connect_device(&mut self) {
-        if self.accounts.busy || self.accounts.enterprise {
+        if self.accounts.busy
+            || self.accounts.enterprise
+            || self.accounts.provider != Provider::Github
+        {
             return;
         }
         self.accounts.request += 1;

@@ -2,6 +2,7 @@ mod checks;
 mod device;
 mod forks;
 mod github;
+mod gitlab;
 mod http;
 mod pull_comments;
 mod pull_merge;
@@ -19,6 +20,7 @@ pub use device::{
 };
 pub use forks::{ForkOutcome, create_fork};
 pub use github::{GithubError, GithubHost, Session, check_connection, connect_github, disconnect};
+pub use gitlab::{GitlabHost, check_gitlab, connect_gitlab};
 pub use http::{ApiClient, HttpError, Response, Token, next_link, validate_base};
 pub use pull_comments::{
     IssueComment, LineAnchor, PullComments, ReviewComment, Side, current_head, list_comments,

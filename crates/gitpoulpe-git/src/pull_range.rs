@@ -56,6 +56,19 @@ fn valid_branch(branch: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/'))
 }
 
+fn fetch_args<'a>(remote: &'a str, spec: &'a str) -> Vec<&'a str> {
+    vec![
+        "fetch",
+        "--progress",
+        "--no-tags",
+        "--no-auto-maintenance",
+        "--recurse-submodules=no",
+        "--",
+        remote,
+        spec,
+    ]
+}
+
 impl Git {
     async fn git_out(
         &self,
@@ -129,15 +142,7 @@ impl Git {
             let spec = format!("+refs/pull/{number}/head:refs/gitpoulpe/pull/{number}/head");
             self.network_ok(
                 &dir,
-                &[
-                    "fetch",
-                    "--progress",
-                    "--no-tags",
-                    "--no-auto-maintenance",
-                    "--",
-                    remote,
-                    &spec,
-                ],
+                &fetch_args(remote, &spec),
                 url.as_deref(),
                 cancel,
                 &mut on_progress,
@@ -156,15 +161,7 @@ impl Git {
             let spec = format!("+refs/heads/{base_ref}:refs/gitpoulpe/pull/{number}/base");
             self.network_ok(
                 &dir,
-                &[
-                    "fetch",
-                    "--progress",
-                    "--no-tags",
-                    "--no-auto-maintenance",
-                    "--",
-                    remote,
-                    &spec,
-                ],
+                &fetch_args(remote, &spec),
                 url.as_deref(),
                 cancel,
                 &mut on_progress,
@@ -193,5 +190,24 @@ impl Git {
             merge_base: out,
             fetched,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fetch_args;
+
+    #[test]
+    fn fetches_never_recurse_into_submodules_and_keep_the_remote_after_the_separator() {
+        let args = fetch_args("origin", "+refs/pull/1/head:refs/gitpoulpe/pull/1/head");
+        assert!(args.contains(&"--recurse-submodules=no"));
+        let separator = args.iter().position(|a| *a == "--").unwrap();
+        assert_eq!(args[separator + 1], "origin");
+        assert!(
+            args.iter()
+                .position(|a| *a == "--recurse-submodules=no")
+                .unwrap()
+                < separator
+        );
     }
 }

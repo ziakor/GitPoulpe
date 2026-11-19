@@ -3,12 +3,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Provider {
     Github,
+    Gitlab,
 }
 
 impl Provider {
     pub fn caption(self) -> &'static str {
         match self {
             Self::Github => "GitHub",
+            Self::Gitlab => "GitLab",
         }
     }
 }

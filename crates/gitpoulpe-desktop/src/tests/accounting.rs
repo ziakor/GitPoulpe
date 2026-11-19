@@ -20,9 +20,14 @@ struct Fake {
 
 impl Fake {
     fn start() -> Self {
+        Self::start_script("fake_github.py")
+    }
+
+    fn start_script(name: &str) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let script = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../gitpoulpe-hosting/tests/common/fake_github.py");
+            .join("../gitpoulpe-hosting/tests/common")
+            .join(name);
         let mut child = Command::new("python3")
             .arg("-I")
             .arg(script)
@@ -284,4 +289,84 @@ fn a_wrong_client_id_is_explained_and_the_enterprise_form_offers_no_browser_sign
     assert!(rect_of(&rt, "ac-device").is_none());
     rt.state.connect_device();
     assert!(!rt.state.accounts.busy && rt.state.accounts.device_task.is_none());
+}
+
+fn connect_gitlab_account(rt: &mut Runtime<State>, fake: &Fake, token: &str) {
+    click(rt, "ac-prov-gitlab");
+    settle(rt, |s| {
+        s.accounts.provider == gitpoulpe_core::Provider::Gitlab
+    });
+    if !rt.state.accounts.enterprise {
+        click(rt, "ac-enterprise");
+        settle(rt, |s| s.accounts.enterprise);
+    }
+    rt.state.accounts.server = TextEdit::new(fake.base());
+    rt.state.accounts.token = TextEdit::new(token);
+    step(rt);
+    click(rt, "ac-connect");
+}
+
+#[test]
+fn a_gitlab_account_connects_next_to_a_github_one_with_its_scopes_and_expiry_and_disconnects_alone()
+{
+    let github = Fake::start();
+    let gitlab = Fake::start_script("fake_gitlab.py");
+    let store = Arc::new(MemoryStore::default());
+    let mut rt = screen(store.clone());
+    connect(&mut rt, &github, "good");
+    settle(&mut rt, |s| !s.accounts.busy && s.accounts.done.is_some());
+    connect_gitlab_account(&mut rt, &gitlab, "glgood");
+    settle(&mut rt, |s| {
+        !s.accounts.busy && s.accounts.book.connections.len() == 2
+    });
+    assert!(shows(&rt, "Connecté en tant que Octo sur 127.0.0.1"));
+    assert!(shows(&rt, "Connecter un compte GitLab"));
+    assert!(rect_of(&rt, "ac-device").is_none());
+    settle(&mut rt, |s| {
+        s.accounts
+            .statuses
+            .values()
+            .filter(|st| matches!(st, crate::accounts::Status::Ok(_)))
+            .count()
+            == 2
+    });
+    assert!(shows(
+        &rt,
+        "portées : read_api, read_repository, write_repository · expire le 2027-01-31"
+    ));
+    assert!(shows(&rt, "GitLab · Octo@"));
+    assert!(shows(&rt, "GitHub · Octo@"));
+    let mut keys = store.keys();
+    keys.sort();
+    assert!(
+        keys[0].starts_with("github:") && keys[1].starts_with("gitlab:"),
+        "{keys:?}"
+    );
+    let gitlab_id = rt
+        .state
+        .accounts
+        .book
+        .connections
+        .iter()
+        .find(|c| c.provider == gitpoulpe_core::Provider::Gitlab)
+        .unwrap()
+        .id
+        .clone();
+    rt.state.select_account(gitlab_id);
+    step(&mut rt);
+    click(&mut rt, "ac-disconnect");
+    settle(&mut rt, |s| s.accounts.book.connections.len() == 1);
+    assert_eq!(store.keys().len(), 1);
+    assert!(store.keys()[0].starts_with("github:"));
+}
+
+#[test]
+fn a_rejected_gitlab_token_leaves_nothing_behind_and_explains_why() {
+    let gitlab = Fake::start_script("fake_gitlab.py");
+    let store = Arc::new(MemoryStore::default());
+    let mut rt = screen(store.clone());
+    connect_gitlab_account(&mut rt, &gitlab, "gone");
+    settle(&mut rt, |s| !s.accounts.busy && s.accounts.error.is_some());
+    assert!(shows(&rt, "expiré, révoqué ou invalide"));
+    assert!(store.keys().is_empty() && rt.state.accounts.book.connections.is_empty());
 }

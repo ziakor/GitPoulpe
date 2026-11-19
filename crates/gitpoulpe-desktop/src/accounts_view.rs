@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use gitpoulpe_core::Connection;
+use gitpoulpe_core::{Connection, Provider};
 use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text};
 
 use crate::accounts::Status;
@@ -15,12 +15,18 @@ fn status_line(s: &State, connection: &Connection) -> (String, bool) {
         None => ("état non vérifié".to_owned(), false),
         Some(Status::Checking) => ("vérification…".to_owned(), false),
         Some(Status::Ok(session)) => (
-            if session.fine_grained {
-                "connecté · jeton à permissions détaillées".to_owned()
-            } else if session.scopes.is_empty() {
-                "connecté · aucune portée accordée".to_owned()
-            } else {
-                format!("connecté · portées : {}", session.scopes.join(", "))
+            {
+                let base = if session.fine_grained {
+                    "connecté · jeton à permissions détaillées".to_owned()
+                } else if session.scopes.is_empty() {
+                    "connecté · aucune portée accordée".to_owned()
+                } else {
+                    format!("connecté · portées : {}", session.scopes.join(", "))
+                };
+                match &session.expires_at {
+                    Some(date) => format!("{base} · expire le {date}"),
+                    None => base,
+                }
             },
             false,
         ),
@@ -146,11 +152,26 @@ fn panel(s: &State) -> El {
                     ),
             );
     }
-    panel = panel.child(
-        text("Connecter un compte GitHub".to_owned())
-            .font(theme::BODY_STRONG)
-            .color(p.text),
-    );
+    let provider = s.accounts.provider;
+    panel = panel
+        .child(
+            text(format!("Connecter un compte {}", provider.caption()))
+                .key("ac-connect-title")
+                .font(theme::BODY_STRONG)
+                .color(p.text),
+        )
+        .child(
+            row()
+                .gap(8.0)
+                .child(
+                    action(s, "ac-prov-github", "GitHub", provider == Provider::Github)
+                        .on_press(|s: &mut State| s.set_provider(Provider::Github)),
+                )
+                .child(
+                    action(s, "ac-prov-gitlab", "GitLab", provider == Provider::Gitlab)
+                        .on_press(|s: &mut State| s.set_provider(Provider::Gitlab)),
+                ),
+        );
     if let Some(code) = &s.accounts.device {
         panel = panel
             .child(
@@ -180,7 +201,7 @@ fn panel(s: &State) -> El {
                 action(s, "ac-device-cancel", "Annuler", false)
                     .on_press(|s: &mut State| s.cancel_device()),
             );
-    } else if !s.accounts.enterprise {
+    } else if !s.accounts.enterprise && provider == Provider::Github {
         panel = panel.child(
             action(
                 s,
@@ -197,7 +218,7 @@ fn panel(s: &State) -> El {
     }
     panel = panel
         .child(
-            text("Le jeton est gardé dans le trousseau du système, jamais dans les préférences ni dans un dépôt. Sans navigateur, ou pour GitHub Enterprise Server, collez un jeton d'accès personnel.".to_owned())
+            text("Le jeton est gardé dans le trousseau du système, jamais dans les préférences ni dans un dépôt. Sans navigateur, pour une instance privée ou pour GitLab, collez un jeton d'accès personnel.".to_owned())
                 .key("ac-help")
                 .font(theme::SMALL)
                 .color(p.muted)
@@ -207,7 +228,11 @@ fn panel(s: &State) -> El {
             toggle(
                 s,
                 "ac-enterprise",
-                "GitHub Enterprise Server",
+                if provider == Provider::Github {
+                    "GitHub Enterprise Server"
+                } else {
+                    "Instance GitLab auto-hébergée"
+                },
                 s.accounts.enterprise,
             )
             .on_press(|s: &mut State| {
