@@ -937,6 +937,7 @@ impl State {
                 self.apply_patch_previewed(request, result)
             }
             Event::PatchChecked { request, result } => self.apply_patch_checked(request, result),
+            Event::PatchExported { request, result } => self.apply_patch_exported(request, result),
             Event::PatchApplied { request, result } => self.apply_patch_applied(request, result),
             Event::IssuesListed { request, result } => self.apply_issues_listed(request, result),
             Event::IssueLoaded {

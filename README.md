@@ -338,6 +338,10 @@ The list shows opened, closed (including merged) or all merge requests with thei
 
 "Importer un patch…" (command palette) opens a patch file made by `git diff` or `git format-patch`. The patch is inspected first: files touched, added and removed lines, binary files. Nothing changes until you choose where to apply it (working tree, index, or both) and run "Vérifier", which must report that the whole patch applies. Application is all-or-nothing. An optional three-way fallback applies what it can and leaves conflict markers in the files. Patches over 8 MiB and paths escaping the repository (absolute, `..`, drive letters, backslashes) are refused.
 
+## Exporting a patch
+
+"Exporter en patch…" (command palette) writes a patch file from one of three sources: tracked local changes, the index, or commits (a single revision or a range such as `main..HEAD`, written as `git format-patch` mail patches). You type the absolute destination path. An existing file is only replaced after you tick the replacement box. The file is written to a temporary file in the destination folder and renamed, so a failed write never leaves a partial patch. Untracked files are not included; stage them first. Patches over 8 MiB are refused.
+
 ## Build and run
 
 Requirements: Rust 1.100.0 (`rustup toolchain install 1.100.0`), Git on the `PATH` (tested with 2.53.0), a GPU and a Linux graphical session. The folder picker uses the XDG desktop portal.

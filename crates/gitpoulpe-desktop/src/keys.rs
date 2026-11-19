@@ -6,7 +6,7 @@ use crate::view::row_key;
 const LINES_PER_KEY: usize = 3;
 const SIDEWAYS_STEP: f32 = 96.0;
 
-const TEXT_INPUTS: [&str; 43] = [
+const TEXT_INPUTS: [&str; 45] = [
     "ac-server",
     "ac-token",
     "br-filter",
@@ -47,6 +47,8 @@ const TEXT_INPUTS: [&str; 43] = [
     "pal-input",
     "sc-search",
     "ws-new-name",
+    "pt-revision",
+    "pt-dest",
     "ws-name",
     "fv-search",
     "is-query",

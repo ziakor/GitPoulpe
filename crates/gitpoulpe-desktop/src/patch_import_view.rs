@@ -1,14 +1,91 @@
 use gitpoulpe_git::ApplyMode;
 use rune::{El, ScrollSpec, col, row, text};
 
-use crate::patch_import::mode_caption;
+use crate::patch_import::{PatchTab, SourceKind, mode_caption};
 use crate::state::State;
 use crate::theme;
-use crate::widgets::action;
+use crate::widgets::{action, field};
 
 fn mode_button(s: &State, key: &str, mode: ApplyMode) -> El {
     action(s, key, mode_caption(mode), s.patches.mode == mode)
         .on_press(move |s: &mut State| s.patch_set_mode(mode))
+}
+
+fn source_button(s: &State, key: &str, label: &str, kind: SourceKind) -> El {
+    action(s, key, label, s.patches.source == kind)
+        .on_press(move |s: &mut State| s.patch_set_source(kind))
+}
+
+fn export_body(s: &State, mut body: El) -> El {
+    let p = s.palette;
+    let screen = &s.patches;
+    body = body
+        .child(
+            text("Source".to_owned())
+                .font(theme::BODY_STRONG)
+                .color(p.text),
+        )
+        .child(
+            row()
+                .gap(8.0)
+                .child(source_button(
+                    s,
+                    "pt-src-tree",
+                    "Changements locaux (fichiers suivis)",
+                    SourceKind::WorkingTree,
+                ))
+                .child(source_button(s, "pt-src-index", "Index", SourceKind::Index))
+                .child(source_button(
+                    s,
+                    "pt-src-commits",
+                    "Commits",
+                    SourceKind::Commits,
+                )),
+        );
+    if screen.source == SourceKind::Commits {
+        body = body.child(
+            field(
+                s,
+                "pt-revision",
+                "Commit ou plage (HEAD, abc123, main..HEAD)",
+                &screen.revision,
+                "HEAD~2..HEAD",
+            )
+            .on_edit(|s: &mut State| &mut s.patches.revision),
+        );
+    } else {
+        body = body.child(
+            text("Les fichiers non suivis ne sont pas inclus : indexez-les d'abord pour les exporter.".to_owned())
+                .key("pt-untracked")
+                .font(theme::SMALL)
+                .color(p.muted)
+                .wrap(),
+        );
+    }
+    body.child(
+        field(
+            s,
+            "pt-dest",
+            "Fichier de destination (chemin absolu)",
+            &screen.destination,
+            "/home/moi/changements.patch",
+        )
+        .on_edit(|s: &mut State| &mut s.patches.destination),
+    )
+    .child(
+        action(
+            s,
+            "pt-overwrite",
+            if screen.overwrite {
+                "[x] Remplacer le fichier s'il existe"
+            } else {
+                "[ ] Remplacer le fichier s'il existe"
+            },
+            false,
+        )
+        .on_press(|s: &mut State| s.patch_toggle_overwrite()),
+    )
+    .child(action(s, "pt-export", "Exporter", true).on_press(|s: &mut State| s.patch_export()))
 }
 
 pub fn patch_import_screen(s: &State) -> El {
@@ -21,10 +98,10 @@ pub fn patch_import_screen(s: &State) -> El {
         .py(10.0)
         .gap(12.0)
         .child(
-            text(if screen.name.is_empty() {
-                "Importer un patch".to_owned()
-            } else {
-                format!("Importer un patch · {}", screen.name)
+            text(match (screen.tab, screen.name.is_empty()) {
+                (PatchTab::Export, _) => "Exporter en patch".to_owned(),
+                (PatchTab::Import, true) => "Importer un patch".to_owned(),
+                (PatchTab::Import, false) => format!("Importer un patch · {}", screen.name),
             })
             .key("pt-title")
             .font(theme::BODY_STRONG)
@@ -33,9 +110,29 @@ pub fn patch_import_screen(s: &State) -> El {
             .truncate(),
         )
         .child(
-            action(s, "pt-pick", "Choisir un fichier…", true)
-                .on_press_tx(|s: &mut State, tx| s.patch_pick(tx)),
+            action(
+                s,
+                "pt-tab-import",
+                "Importer",
+                screen.tab == PatchTab::Import,
+            )
+            .on_press(|s: &mut State| s.patch_set_tab(PatchTab::Import)),
         )
+        .child(
+            action(
+                s,
+                "pt-tab-export",
+                "Exporter",
+                screen.tab == PatchTab::Export,
+            )
+            .on_press(|s: &mut State| s.patch_set_tab(PatchTab::Export)),
+        )
+        .child(if screen.tab == PatchTab::Import {
+            action(s, "pt-pick", "Choisir un fichier…", true)
+                .on_press_tx(|s: &mut State, tx| s.patch_pick(tx))
+        } else {
+            row()
+        })
         .child(
             action(s, "pt-close", "Fermer", false).on_press(|s: &mut State| s.close_patch_import()),
         );
@@ -52,10 +149,14 @@ pub fn patch_import_screen(s: &State) -> El {
         });
     if screen.busy {
         body = body.child(
-            text("Lecture du patch…".to_owned())
-                .key("pt-busy")
-                .font(theme::SMALL)
-                .color(p.muted),
+            text(if screen.tab == PatchTab::Export {
+                "Export en cours…".to_owned()
+            } else {
+                "Lecture du patch…".to_owned()
+            })
+            .key("pt-busy")
+            .font(theme::SMALL)
+            .color(p.muted),
         );
     }
     if let Some(error) = &screen.error {
@@ -75,6 +176,14 @@ pub fn patch_import_screen(s: &State) -> El {
                 .color(p.muted)
                 .wrap(),
         );
+    }
+    if screen.tab == PatchTab::Export {
+        return col()
+            .w_full()
+            .grow(1.0)
+            .min_h(0.0)
+            .child(header)
+            .child(export_body(s, body));
     }
     match &screen.preview {
         None if screen.error.is_none() && !screen.busy => {

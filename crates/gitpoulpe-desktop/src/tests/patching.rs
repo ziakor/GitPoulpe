@@ -199,3 +199,99 @@ fn a_late_answer_and_closing_discard_stale_work() {
     rt.state.open_patch_import();
     assert!(!rt.state.apply_patch_checked(stale, Ok(())));
 }
+
+fn exporter(dir: &Path) -> Runtime<State> {
+    let mut rt = runtime(super::opened(dir));
+    for _ in 0..20 {
+        step(&mut rt);
+    }
+    rt.state.open_patch_export();
+    step(&mut rt);
+    rt
+}
+
+fn destination(rt: &mut Runtime<State>, path: &Path) {
+    rt.state.patches.destination = rune::TextEdit::new(path.to_str().unwrap());
+    step(rt);
+}
+
+#[test]
+fn exporting_writes_exactly_the_chosen_source_to_the_chosen_file() {
+    let dir = repo();
+    std::fs::write(dir.path().join("a.txt"), "one\nTWO\nthree\n").unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let file = out.path().join("changes.patch");
+    let mut rt = exporter(dir.path());
+    assert!(shows(&rt, "Exporter en patch"));
+    destination(&mut rt, &file);
+    click(&mut rt, "pt-src-index");
+    step(&mut rt);
+    click(&mut rt, "pt-export");
+    settle(&mut rt, |s| !s.patches.busy && s.patches.error.is_some());
+    assert!(shows(&rt, "rien à exporter"));
+    assert!(!file.exists());
+    click(&mut rt, "pt-src-tree");
+    step(&mut rt);
+    click(&mut rt, "pt-export");
+    settle(&mut rt, |s| !s.patches.busy && s.patches.notice.is_some());
+    let written = std::fs::read_to_string(&file).unwrap();
+    assert!(written.contains("+TWO") && written.contains("a.txt"));
+    assert!(shows(&rt, "Patch exporté"));
+    assert_eq!(git(dir.path(), &["status", "--porcelain"]), "M a.txt");
+}
+
+#[test]
+fn commits_are_exported_and_the_file_reapplies_on_a_compatible_base() {
+    let dir = repo();
+    std::fs::write(dir.path().join("a.txt"), "one\nTWO\nthree\n").unwrap();
+    git(dir.path(), &["commit", "-qam", "change two"]);
+    let out = tempfile::tempdir().unwrap();
+    let file = out.path().join("c.patch");
+    let mut rt = exporter(dir.path());
+    destination(&mut rt, &file);
+    click(&mut rt, "pt-src-commits");
+    step(&mut rt);
+    assert!(rect_of(&rt, "pt-revision").is_some());
+    click(&mut rt, "pt-export");
+    settle(&mut rt, |s| !s.patches.busy && s.patches.notice.is_some());
+    let other = repo();
+    let mut import = screen(other.path());
+    load(&mut import, file);
+    assert!(shows(&import, "1 fichier(s) ciblé(s)"));
+    click(&mut import, "pt-check");
+    settle(&mut import, |s| {
+        !s.patches.busy && s.patches.checked.is_some()
+    });
+    assert!(matches!(import.state.patches.checked, Some(Ok(()))));
+}
+
+#[test]
+fn an_unusable_destination_reports_the_failure_and_leaves_no_file() {
+    let dir = repo();
+    std::fs::write(dir.path().join("a.txt"), "changed\n").unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let existing = out.path().join("keep.patch");
+    std::fs::write(&existing, "precious").unwrap();
+    let mut rt = exporter(dir.path());
+    click(&mut rt, "pt-export");
+    step(&mut rt);
+    assert!(shows(&rt, "Indiquez le fichier de destination"));
+    destination(&mut rt, &out.path().join("missing/x.patch"));
+    click(&mut rt, "pt-export");
+    settle(&mut rt, |s| !s.patches.busy && s.patches.error.is_some());
+    assert!(shows(&rt, "destination inutilisable"));
+    assert!(!rt.state.patches.notice.is_some());
+    destination(&mut rt, &existing);
+    click(&mut rt, "pt-export");
+    settle(&mut rt, |s| !s.patches.busy && s.patches.error.is_some());
+    assert_eq!(std::fs::read_to_string(&existing).unwrap(), "precious");
+    click(&mut rt, "pt-overwrite");
+    step(&mut rt);
+    click(&mut rt, "pt-export");
+    settle(&mut rt, |s| !s.patches.busy && s.patches.notice.is_some());
+    assert!(
+        std::fs::read_to_string(&existing)
+            .unwrap()
+            .contains("changed")
+    );
+}

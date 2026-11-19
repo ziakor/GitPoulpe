@@ -389,6 +389,12 @@ pub enum Command {
         patch: std::sync::Arc<Vec<u8>>,
         mode: gitpoulpe_git::ApplyMode,
     },
+    PatchExport {
+        request: u64,
+        source: gitpoulpe_git::ExportSource,
+        destination: std::path::PathBuf,
+        overwrite: bool,
+    },
     PatchApply {
         request: u64,
         patch: std::sync::Arc<Vec<u8>>,
@@ -805,6 +811,10 @@ pub enum Event {
     PatchChecked {
         request: u64,
         result: Result<(), String>,
+    },
+    PatchExported {
+        request: u64,
+        result: Result<usize, String>,
     },
     PatchApplied {
         request: u64,
@@ -1862,6 +1872,33 @@ async fn run(
                                 .await
                                 .map_err(|e| e.to_string());
                             shared.emit(Event::PatchChecked { request, result });
+                        });
+                    }
+                    Command::PatchExport {
+                        request,
+                        source,
+                        destination,
+                        overwrite,
+                    } => {
+                        let Some(current) = session.clone() else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        tokio::spawn(async move {
+                            let result = match shared.git.export_patch(&current.info, &source).await
+                            {
+                                Ok(bytes) => {
+                                    let size = bytes.len();
+                                    tokio::task::spawn_blocking(move || {
+                                        gitpoulpe_git::write_export(&destination, &bytes, overwrite)
+                                    })
+                                    .await
+                                    .map_err(|e| e.to_string())
+                                    .and_then(|r| r.map(|()| size).map_err(|e| e.to_string()))
+                                }
+                                Err(error) => Err(error.to_string()),
+                            };
+                            shared.emit(Event::PatchExported { request, result });
                         });
                     }
                     Command::PatchApply {

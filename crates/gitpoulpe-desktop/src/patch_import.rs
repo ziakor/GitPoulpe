@@ -1,14 +1,32 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use gitpoulpe_git::{ApplyMode, PATCH_LIMIT, PatchOutcome, PatchPreview};
-use rune::Tx;
+use gitpoulpe_git::{ApplyMode, ExportSource, PATCH_LIMIT, PatchOutcome, PatchPreview};
+use rune::{TextEdit, Tx};
 
 use crate::engine::Command;
 use crate::state::State;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PatchTab {
+    Import,
+    Export,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SourceKind {
+    WorkingTree,
+    Index,
+    Commits,
+}
+
 pub struct PatchState {
     pub open: bool,
+    pub tab: PatchTab,
+    pub source: SourceKind,
+    pub revision: TextEdit,
+    pub destination: TextEdit,
+    pub overwrite: bool,
     pub name: String,
     pub bytes: Option<Arc<Vec<u8>>>,
     pub preview: Option<PatchPreview>,
@@ -26,6 +44,11 @@ impl Default for PatchState {
     fn default() -> Self {
         Self {
             open: false,
+            tab: PatchTab::Import,
+            source: SourceKind::WorkingTree,
+            revision: TextEdit::new("HEAD"),
+            destination: TextEdit::new(""),
+            overwrite: false,
             name: String::new(),
             bytes: None,
             preview: None,
@@ -51,6 +74,14 @@ pub fn mode_caption(mode: ApplyMode) -> &'static str {
 
 impl State {
     pub fn open_patch_import(&mut self) {
+        self.open_patches(PatchTab::Import);
+    }
+
+    pub fn open_patch_export(&mut self) {
+        self.open_patches(PatchTab::Export);
+    }
+
+    fn open_patches(&mut self, tab: PatchTab) {
         if self.repo.is_none() {
             return;
         }
@@ -84,6 +115,7 @@ impl State {
         let request = self.patches.request + 1;
         self.patches = PatchState {
             open: true,
+            tab,
             request,
             ..PatchState::default()
         };
@@ -276,6 +308,79 @@ impl State {
         if applied {
             self.request_refresh(false);
         }
+        true
+    }
+}
+
+impl State {
+    pub fn patch_set_tab(&mut self, tab: PatchTab) {
+        self.patches.tab = tab;
+        self.patches.error = None;
+        self.patches.notice = None;
+        self.patches.version += 1;
+    }
+
+    pub fn patch_set_source(&mut self, source: SourceKind) {
+        self.patches.source = source;
+        self.patches.error = None;
+        self.patches.notice = None;
+        self.patches.version += 1;
+    }
+
+    pub fn patch_toggle_overwrite(&mut self) {
+        self.patches.overwrite = !self.patches.overwrite;
+        self.patches.version += 1;
+    }
+
+    pub fn patch_export(&mut self) {
+        let patches = &mut self.patches;
+        if patches.busy {
+            return;
+        }
+        let destination = patches.destination.text.trim().to_owned();
+        if destination.is_empty() {
+            patches.error = Some("Indiquez le fichier de destination (chemin absolu).".to_owned());
+            patches.version += 1;
+            return;
+        }
+        let source = match patches.source {
+            SourceKind::WorkingTree => ExportSource::WorkingTree,
+            SourceKind::Index => ExportSource::Index,
+            SourceKind::Commits => ExportSource::Commits(patches.revision.text.clone()),
+        };
+        patches.request += 1;
+        patches.busy = true;
+        patches.error = None;
+        patches.notice = None;
+        patches.version += 1;
+        let (request, overwrite) = (patches.request, patches.overwrite);
+        if let Some(engine) = &self.engine {
+            engine.send(Command::PatchExport {
+                request,
+                source,
+                destination: PathBuf::from(destination),
+                overwrite,
+            });
+        }
+    }
+
+    pub fn apply_patch_exported(&mut self, request: u64, result: Result<usize, String>) -> bool {
+        let patches = &mut self.patches;
+        if !patches.open || request != patches.request {
+            return false;
+        }
+        patches.busy = false;
+        match result {
+            Ok(size) => {
+                patches.notice = Some(format!(
+                    "Patch exporté : {size} octet(s) écrits dans {}.",
+                    patches.destination.text.trim()
+                ));
+                patches.overwrite = false;
+            }
+            Err(message) => patches.error = Some(message),
+        }
+        patches.version += 1;
         true
     }
 }
