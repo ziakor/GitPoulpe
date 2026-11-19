@@ -3,10 +3,10 @@ use std::borrow::Cow;
 use gitpoulpe_hosting::{PullFilter, PullState, PullSummary};
 use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text};
 
-use crate::pull_list::short;
+use crate::pull_list::{CommentKind, numbered_lines, short};
 use crate::state::State;
 use crate::theme;
-use crate::widgets::action;
+use crate::widgets::{action, field, toggle};
 
 const ROW_HEIGHT: f32 = 52.0;
 const MAX_PATCH_LINES: usize = 3000;
@@ -157,6 +157,7 @@ fn detail(s: &State) -> El {
                 .wrap(),
         );
     }
+    panel = panel.child(compose(s));
     panel = panel.child(
         text(format!("{} commit(s)", detail.commits.len()))
             .font(theme::BODY_STRONG)
@@ -215,26 +216,60 @@ fn detail(s: &State) -> El {
                 );
             }
             Some(patch) => {
-                for (n, line) in patch.lines().enumerate() {
+                for (n, numbered) in numbered_lines(patch).into_iter().enumerate() {
                     if budget == 0 {
                         break;
                     }
                     budget -= 1;
-                    let mut line_el = row().w_full().px(6.0).child(
-                        text(line.to_owned())
-                            .key(format!("prl-f{i}l{n}"))
-                            .font(theme::CODE)
-                            .color(p.text),
-                    );
+                    let line = numbered.text;
+                    let picked = list.pick.as_ref().is_some_and(|k| {
+                        k.path == file.change.path
+                            && numbered.anchor.is_some_and(|(l, side)| {
+                                side == k.side && l >= k.start.unwrap_or(k.line) && l <= k.line
+                            })
+                    });
+                    let mut line_el = row()
+                        .key(format!("prl-f{i}l{n}"))
+                        .w_full()
+                        .px(6.0)
+                        .child(text(line.clone()).font(theme::CODE).color(p.text));
                     if line.starts_with('+') {
                         line_el = line_el.fill(p.added);
                     } else if line.starts_with('-') {
                         line_el = line_el.fill(p.removed);
                     }
+                    if picked {
+                        line_el = line_el.fill(p.selected);
+                    }
+                    if let Some((number, side)) = numbered.anchor {
+                        let path = file.change.path.clone();
+                        line_el = line_el.on_press(move |s: &mut State| {
+                            s.pull_pick_line(path.clone(), number, side)
+                        });
+                    }
                     panel = panel.child(line_el);
                 }
+                panel = panel.child(threads(s, &file.change.path, i));
             }
         }
+    }
+    panel = panel.child(
+        text(format!(
+            "{} commentaire(s) généraux",
+            s.pulls.list.comments.issue.len()
+        ))
+        .key("prc-general-title")
+        .font(theme::BODY_STRONG)
+        .color(p.text),
+    );
+    for (i, comment) in s.pulls.list.comments.issue.iter().enumerate() {
+        panel = panel.child(
+            text(format!("{} : {}", comment.author, comment.body))
+                .key(format!("prc-general{i}"))
+                .font(theme::SMALL)
+                .color(p.text)
+                .wrap(),
+        );
     }
     if budget == 0 {
         panel = panel.child(
@@ -248,6 +283,170 @@ fn detail(s: &State) -> El {
         );
     }
     panel
+}
+
+fn compose(s: &State) -> El {
+    let p = s.palette;
+    let list = &s.pulls.list;
+    let target = match (&list.reply_to, &list.pick) {
+        (Some(id), _) => format!("Réponse au commentaire #{id}"),
+        (None, Some(k)) => format!(
+            "Ligne {}{} ({}) de {}",
+            k.start.map(|s| format!("{s}–")).unwrap_or_default(),
+            k.line,
+            if k.side == gitpoulpe_hosting::Side::Left {
+                "ancien côté"
+            } else {
+                "nouveau côté"
+            },
+            k.path
+        ),
+        (None, None) => "Commentaire général (cliquez une ligne de diff pour l'ancrer)".to_owned(),
+    };
+    let mut block = col()
+        .gap(6.0)
+        .child(
+            text("Commenter".to_owned())
+                .font(theme::BODY_STRONG)
+                .color(p.text),
+        )
+        .child(
+            text(target)
+                .key("prc-target")
+                .font(theme::SMALL)
+                .color(p.muted)
+                .wrap(),
+        )
+        .child(
+            toggle(
+                s,
+                "prc-range",
+                "Sélectionner une plage de lignes",
+                list.range_mode,
+            )
+            .on_press(|s: &mut State| s.pull_toggle_range()),
+        )
+        .child(
+            field(
+                s,
+                "prc-body",
+                "Commentaire",
+                &list.compose,
+                "Votre commentaire",
+            )
+            .on_edit(|s: &mut State| &mut s.pulls.list.compose),
+        );
+    let mut buttons = row().gap(8.0);
+    if list.reply_to.is_some() {
+        buttons = buttons.child(
+            action(s, "prc-send-reply", "Répondre", true)
+                .on_press(|s: &mut State| s.pull_send_comment(CommentKind::Reply)),
+        );
+    } else {
+        if list.pick.is_some() {
+            buttons = buttons.child(
+                action(s, "prc-send-line", "Commenter la ligne", true)
+                    .on_press(|s: &mut State| s.pull_send_comment(CommentKind::Line)),
+            );
+        }
+        buttons = buttons.child(
+            action(
+                s,
+                "prc-send-general",
+                "Commentaire général",
+                list.pick.is_none(),
+            )
+            .on_press(|s: &mut State| s.pull_send_comment(CommentKind::General)),
+        );
+    }
+    block = block.child(buttons);
+    if list.sending {
+        block = block.child(
+            text("Envoi…".to_owned())
+                .key("prc-sending")
+                .font(theme::SMALL)
+                .color(p.muted),
+        );
+    }
+    if let Some(notice) = &list.send_notice {
+        block = block.child(
+            text(notice.clone())
+                .key("prc-notice")
+                .font(theme::SMALL)
+                .color(p.text)
+                .wrap(),
+        );
+    }
+    if let Some(error) = &list.send_error {
+        block = block.child(
+            text(error.clone())
+                .key("prc-error")
+                .font(theme::SMALL)
+                .color(p.red)
+                .wrap(),
+        );
+    }
+    if list.unverified.is_some() {
+        block = block
+            .child(
+                text("Le résultat de l'envoi est inconnu : vérifiez avant de réessayer, pour ne pas publier deux fois.".to_owned())
+                    .key("prc-unknown")
+                    .font(theme::SMALL)
+                    .color(p.red)
+                    .wrap(),
+            )
+            .child(
+                action(s, "prc-verify", "Vérifier si le commentaire est parti", false)
+                    .on_press(|s: &mut State| s.pull_verify_comment()),
+            );
+    }
+    block
+}
+
+fn threads(s: &State, path: &str, file_index: usize) -> El {
+    let p = s.palette;
+    let comments = &s.pulls.list.comments;
+    let mut column = col().gap(4.0).px(6.0);
+    for root in comments
+        .review
+        .iter()
+        .filter(|c| c.path == path && c.in_reply_to.is_none())
+    {
+        let id = root.id;
+        column = column.child(
+            text(format!(
+                "{} : {} (ligne {}{})",
+                root.author,
+                root.body,
+                root.line
+                    .map(|l| l.to_string())
+                    .unwrap_or_else(|| "?".to_owned()),
+                if root.outdated { ", périmé" } else { "" }
+            ))
+            .key(format!("prc-f{file_index}c{id}"))
+            .font(theme::SMALL)
+            .color(p.text)
+            .wrap(),
+        );
+        for reply in comments
+            .review
+            .iter()
+            .filter(|c| c.in_reply_to == Some(root.id))
+        {
+            column = column.child(
+                text(format!("    ↳ {} : {}", reply.author, reply.body))
+                    .key(format!("prc-f{file_index}r{}", reply.id))
+                    .font(theme::SMALL)
+                    .color(p.muted)
+                    .wrap(),
+            );
+        }
+        column = column.child(
+            action(s, &format!("prc-reply{id}"), "Répondre", false)
+                .on_press(move |s: &mut State| s.pull_reply_to(id)),
+        );
+    }
+    column
 }
 
 pub fn pull_list_screen(s: &State) -> El {

@@ -25,8 +25,8 @@ use gitpoulpe_git::{
     Signal, SigningCheck, StashError, SubmoduleError, WorktreeError, check_signing, coalesce,
 };
 use gitpoulpe_hosting::{
-    DeviceCode, ForkOutcome, HostedPull, Listing, Organization, PullDetail, PullSummary,
-    PullTarget, RepoSummary, Session as AccountSession,
+    DeviceCode, ForkOutcome, HostedPull, Listing, Organization, PullComments, PullDetail,
+    PullSummary, PullTarget, RepoSummary, Session as AccountSession,
 };
 use rune::Waker;
 use std::time::Duration;
@@ -792,6 +792,17 @@ pub enum Event {
     AccountConnected {
         request: u64,
         result: Result<(Connection, AccountSession), String>,
+    },
+    PullCommentsLoaded {
+        request: u64,
+        number: u64,
+        result: Result<PullComments, String>,
+    },
+    PullCommentSent {
+        request: u64,
+        number: u64,
+        unknown: bool,
+        result: Result<(), String>,
     },
     PullListed {
         request: u64,

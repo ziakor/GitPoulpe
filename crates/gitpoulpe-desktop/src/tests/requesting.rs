@@ -107,6 +107,13 @@ fn settle(rt: &mut Runtime<State>, until: impl Fn(&State) -> bool) {
 }
 
 fn click(rt: &mut Runtime<State>, key: &str) {
+    if key.starts_with("prc-") || key.starts_with("prl-f") {
+        let target = key.to_owned();
+        rt.update(move |_, tx| tx.scroll_into_view_in("prl-panel", target));
+        for _ in 0..8 {
+            step(rt);
+        }
+    }
     if key.starts_with("pr-") {
         let target = key.to_owned();
         rt.update(move |_, tx| tx.scroll_into_view_in("pr-panel", target));
@@ -357,4 +364,167 @@ fn an_update_during_reading_and_a_removed_access_are_reported_without_mixing_res
     assert!(shows(&rt, "introuvable ou non autorisée"));
     assert!(rt.state.pulls.list.detail.is_none());
     assert!(!shows(&rt, "#1 PR 1 "));
+}
+
+fn comments_ready(rt: &mut Runtime<State>) {
+    settle(rt, |s| {
+        !s.pulls.list.detail_loading && !s.pulls.list.comments.review.is_empty()
+    });
+}
+
+fn compose(rt: &mut Runtime<State>, text: &str) {
+    rt.state.pulls.list.compose = TextEdit::new(text);
+    step(rt);
+}
+
+#[test]
+fn a_line_comment_targets_the_revision_side_and_line_shown_and_threads_are_visible() {
+    let fake = Fake::start();
+    let (_dir, mut rt) = list_screen(&fake);
+    click(&mut rt, "prlk0");
+    loaded(&mut rt, 1);
+    comments_ready(&mut rt);
+    assert!(shows(&rt, "reviewer : root (ligne 1)"));
+    assert!(shows(&rt, "↳ octo : answer"));
+    assert!(shows(&rt, "reviewer : old (ligne 3, périmé)"));
+    assert!(shows(&rt, "1 commentaire(s) généraux"));
+    click(&mut rt, "prl-f0l2");
+    step(&mut rt);
+    assert!(shows(&rt, "Ligne 1 (nouveau côté) de f1.rs"));
+    click(&mut rt, "prl-f0l1");
+    step(&mut rt);
+    assert!(shows(&rt, "Ligne 1 (ancien côté) de f1.rs"));
+    click(&mut rt, "prl-f0l2");
+    compose(&mut rt, "please rename");
+    click(&mut rt, "prc-send-line");
+    settle(&mut rt, |s| {
+        !s.pulls.list.sending
+            && s.pulls
+                .list
+                .comments
+                .review
+                .iter()
+                .any(|c| c.body == "please rename")
+    });
+    assert!(shows(&rt, "Commentaire publié."));
+    assert!(shows(&rt, "Octo : please rename (ligne 1)"));
+    assert_eq!(rt.state.pulls.list.compose.text, "");
+}
+
+#[test]
+fn replies_join_their_thread_and_a_range_needs_two_lines_on_the_same_side() {
+    let fake = Fake::start();
+    let (_dir, mut rt) = list_screen(&fake);
+    click(&mut rt, "prlk0");
+    loaded(&mut rt, 1);
+    comments_ready(&mut rt);
+    click(&mut rt, "prc-reply10");
+    step(&mut rt);
+    assert!(shows(&rt, "Réponse au commentaire #10"));
+    compose(&mut rt, "agreed");
+    click(&mut rt, "prc-send-reply");
+    settle(&mut rt, |s| {
+        !s.pulls.list.sending
+            && s.pulls
+                .list
+                .comments
+                .review
+                .iter()
+                .any(|c| c.body == "agreed" && c.in_reply_to == Some(10))
+    });
+    assert!(shows(&rt, "↳ Octo : agreed"));
+    rt.state.pull_toggle_range();
+    rt.state
+        .pull_pick_line("f1.rs".to_owned(), 1, gitpoulpe_hosting::Side::Right);
+    rt.state
+        .pull_pick_line("f1.rs".to_owned(), 3, gitpoulpe_hosting::Side::Right);
+    step(&mut rt);
+    assert!(shows(&rt, "Ligne 1–3 (nouveau côté) de f1.rs"));
+    rt.state
+        .pull_pick_line("f1.rs".to_owned(), 5, gitpoulpe_hosting::Side::Left);
+    rt.state
+        .pull_pick_line("f1.rs".to_owned(), 2, gitpoulpe_hosting::Side::Left);
+    let pick = rt.state.pulls.list.pick.clone().unwrap();
+    assert_eq!((pick.start, pick.line), (None, 2));
+}
+
+#[test]
+fn a_stale_anchor_keeps_the_text_and_a_lost_answer_is_checked_before_any_retry() {
+    let fake = Fake::start();
+    let (_dir, mut rt) = list_screen(&fake);
+    click(&mut rt, "prlk0");
+    loaded(&mut rt, 1);
+    rt.state
+        .pulls
+        .list
+        .detail
+        .as_mut()
+        .unwrap()
+        .summary
+        .head_sha = "oldsha0".to_owned();
+    click(&mut rt, "prl-f0l2");
+    compose(&mut rt, "stale thought");
+    click(&mut rt, "prc-send-line");
+    settle(&mut rt, |s| {
+        !s.pulls.list.sending && s.pulls.list.send_error.is_some()
+    });
+    assert!(shows(&rt, "l'ancrage du commentaire est périmé"));
+    assert_eq!(rt.state.pulls.list.compose.text, "stale thought");
+    assert!(rt.state.pulls.list.unverified.is_none());
+    compose(&mut rt, "FLAKY retry");
+    click(&mut rt, "prc-send-general");
+    settle(&mut rt, |s| {
+        !s.pulls.list.sending && s.pulls.list.unverified.is_some()
+    });
+    assert!(shows(&rt, "Le résultat de l'envoi est inconnu"));
+    assert_eq!(rt.state.pulls.list.compose.text, "FLAKY retry");
+    click(&mut rt, "prc-verify");
+    settle(&mut rt, |s| {
+        !s.pulls.list.verifying && s.pulls.list.unverified.is_none()
+    });
+    assert!(shows(&rt, "déjà publié : ne le renvoyez pas"));
+    assert_eq!(rt.state.pulls.list.compose.text, "");
+}
+
+#[test]
+fn diff_lines_are_numbered_from_each_hunk_header_on_the_side_they_belong_to() {
+    use gitpoulpe_hosting::Side::{Left, Right};
+    let lines = crate::pull_list::numbered_lines(
+        "@@ -10,2 +40,3 @@\n ctx\n-gone\n+added\n+more\n\\ No newline at end of file\n@@ -90 +100 @@\n-a\n+b",
+    );
+    let anchors: Vec<_> = lines.iter().map(|l| l.anchor).collect();
+    assert_eq!(
+        anchors,
+        [
+            None,
+            Some((40, Right)),
+            Some((11, Left)),
+            Some((41, Right)),
+            Some((42, Right)),
+            None,
+            None,
+            Some((90, Left)),
+            Some((100, Right)),
+        ]
+    );
+}
+
+#[test]
+fn a_comment_answer_arriving_after_another_pull_request_was_selected_is_dropped() {
+    let fake = Fake::start();
+    let (_dir, mut rt) = list_screen(&fake);
+    rt.state.select_pull(1);
+    loaded(&mut rt, 1);
+    compose(&mut rt, "late note");
+    rt.state
+        .pull_send_comment(crate::pull_list::CommentKind::General);
+    rt.state.select_pull(4);
+    for _ in 0..60 {
+        step(&mut rt);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let list = &rt.state.pulls.list;
+    assert!(list.send_notice.is_none() && !list.sending);
+    assert!(list.comments.issue.iter().all(|c| c.body != "late note") || list.selected == Some(4));
+    assert!(list.send_error.is_none());
 }

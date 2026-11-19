@@ -52,6 +52,7 @@ pub enum GithubError {
     Validation(String),
     PullExists(u64, String),
     BranchNotPublished(String),
+    AnchorStale { prepared: String, current: String },
 }
 
 impl std::fmt::Display for GithubError {
@@ -92,6 +93,10 @@ impl std::fmt::Display for GithubError {
             Self::BranchNotPublished(branch) => write!(
                 f,
                 "la branche {branch} n'est pas publiée sur le dépôt distant : publiez-la d'abord"
+            ),
+            Self::AnchorStale { prepared, current } => write!(
+                f,
+                "la pull request a été mise à jour ({prepared} → {current}) : l'ancrage du commentaire est périmé, relisez le diff avant de publier"
             ),
             Self::DeviceDenied => f.write_str("l'autorisation a été refusée dans le navigateur"),
             Self::DeviceExpired => {

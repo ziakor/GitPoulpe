@@ -920,6 +920,17 @@ impl State {
             Event::AccountConnected { request, result } => {
                 self.apply_account_connected(request, result)
             }
+            Event::PullCommentsLoaded {
+                request,
+                number,
+                result,
+            } => self.apply_pull_comments(request, number, result),
+            Event::PullCommentSent {
+                request,
+                number,
+                unknown,
+                result,
+            } => self.apply_pull_comment_sent(request, number, unknown, result),
             Event::PullListed { request, result } => self.apply_pull_listed(request, result),
             Event::PullLoaded {
                 request,

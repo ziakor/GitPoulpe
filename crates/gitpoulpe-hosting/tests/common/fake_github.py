@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 LOG = sys.argv[1]
 POLLS = [0]
 FORKS = {}
+SENT = []
 USERS = {
     "good": {"login": "Octo", "name": "Octo Cat", "scopes": "repo, read:org"},
     "fine": {"login": "Octo", "name": "Octo Cat", "scopes": None},
@@ -90,6 +91,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"ahead_by": 2, "behind_by": 1, "files": [
                 {"filename": "src/a.rs", "status": "modified", "additions": 3, "deletions": 1},
                 {"filename": "README.md", "status": "added", "additions": 10, "deletions": 0}]})
+        if rest.startswith("acme/proj/issues/") and rest.endswith("/comments"):
+            return self.reply(200, [{"id": 1, "user": {"login": "octo"}, "body": "hello", "created_at": "t1"}]
+                              + [c for c in SENT if c["kind"] == "issue"])
         if rest.startswith("acme/proj/pulls") and "head" not in params:
             return self.pull_read(rest, params)
         if rest.endswith("/pulls"):
@@ -133,6 +137,15 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, [
                 {"sha": "c0", "commit": {"message": "first\n\nbody", "author": {"name": "A"}}, "author": {"login": "authorx"}},
                 {"sha": last, "commit": {"message": "second", "author": {"name": "B"}}, "author": None}])
+        if parts[4] == "comments":
+            base = [
+                {"id": 10, "user": {"login": "reviewer"}, "body": "root", "path": "f1.rs", "line": 1, "side": "RIGHT",
+                 "commit_id": "sha1", "created_at": "t2"},
+                {"id": 11, "user": {"login": "octo"}, "body": "answer", "path": "f1.rs", "line": 1, "side": "RIGHT",
+                 "commit_id": "sha1", "in_reply_to_id": 10, "created_at": "t3"},
+                {"id": 12, "user": {"login": "reviewer"}, "body": "old", "path": "f2.rs", "line": None,
+                 "original_line": 3, "side": "LEFT", "commit_id": "sha0", "created_at": "t0"}]
+            return self.reply(200, base + [c for c in SENT if c["kind"] == "review"])
         if parts[4] == "files":
             page = int(params.get("page", "1"))
             files = [{"filename": f"f{i}.rs", "status": "modified", "additions": i, "deletions": 1,
@@ -165,6 +178,30 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, self.repo(*name.split("/"), fork=True,
                                              parent={"full_name": "acme/" + name.split("/")[1]}))
         self.reply(404, {"message": "Not Found"})
+
+    def comment_post(self, body):
+        parts = self.path.split("/")
+        text = body.get("body", "")
+        if parts[4] == "issues":
+            c = {"kind": "issue", "id": 100 + len(SENT), "user": {"login": "Octo"}, "body": text, "created_at": "t9"}
+        else:
+            if parts[-3] == "comments" and parts[-1] == "replies":
+                c = {"kind": "review", "id": 100 + len(SENT), "user": {"login": "Octo"}, "body": text,
+                     "path": "f1.rs", "line": 1, "side": "RIGHT", "commit_id": "sha1",
+                     "in_reply_to_id": int(parts[-2]), "created_at": "t9"}
+            else:
+                if not body.get("commit_id") or not body.get("path"):
+                    return self.reply(422, {"message": "Validation Failed", "errors": [{"message": "path missing"}]})
+                c = {"kind": "review", "id": 100 + len(SENT), "user": {"login": "Octo"}, "body": text,
+                     "path": body["path"], "line": body.get("line"), "side": body.get("side"),
+                     "commit_id": body["commit_id"], "start_line": body.get("start_line"), "created_at": "t9"}
+        SENT.append(c)
+        if "FLAKY" in text:
+            self.send_response(500)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        self.reply(201, c)
 
     def pull_post(self, body):
         parts = self.path.split("/")
@@ -200,6 +237,8 @@ class Handler(BaseHTTPRequestHandler):
         body = json.loads(raw or "{}")
         if self.path.startswith("/api/v3/"):
             self.path = self.path[len("/api/v3"):]
+        if self.path.startswith("/repos/acme/proj/") and "/comments" in self.path:
+            return self.comment_post(body)
         if self.path.startswith("/repos/") and self.path.endswith("/pulls"):
             return self.pull_post(body)
         if self.path.startswith("/repos/") and self.path.endswith("/forks"):
