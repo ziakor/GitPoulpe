@@ -380,6 +380,13 @@ pub enum Command {
         request: u64,
         path: String,
     },
+    OverviewRefresh {
+        jobs: Vec<(String, u64)>,
+        timeout_ms: u64,
+    },
+    OverviewCancel {
+        paths: Vec<String>,
+    },
     ToolEditor {
         request: u64,
         program: String,
@@ -776,6 +783,11 @@ pub enum Event {
         result: Result<gitpoulpe_git::Blame, String>,
     },
     TerminalOutput,
+    OverviewRepo {
+        path: String,
+        job: u64,
+        result: Result<gitpoulpe_git::RepoOverview, String>,
+    },
     ToolFinished {
         request: u64,
         result: Result<(), String>,
@@ -1109,6 +1121,8 @@ impl Session {
 
 struct Shared {
     git: Git,
+    overview: gitpoulpe_git::Bounded,
+    overview_cancels: std::sync::Mutex<std::collections::HashMap<String, Cancel>>,
     reader: DiffReader,
     events: Sender<Event>,
     waker: WakerSlot,
@@ -1156,6 +1170,11 @@ async fn run(
     };
     let shared = Arc::new(Shared {
         reader: DiffReader::new(git.clone(), cache),
+        overview: gitpoulpe_git::Bounded::new(
+            crate::overview::OVERVIEW_LIMIT,
+            std::time::Duration::from_millis(crate::overview::OVERVIEW_TIMEOUT_MS),
+        ),
+        overview_cancels: std::sync::Mutex::new(std::collections::HashMap::new()),
         git,
         events,
         waker,
@@ -1771,6 +1790,54 @@ async fn run(
                                     .await;
                             shared.emit(Event::ToolFinished { request, result });
                         });
+                    }
+                    Command::OverviewCancel { paths } => {
+                        let mut cancels = shared.overview_cancels.lock().unwrap();
+                        for path in paths {
+                            if let Some(cancel) = cancels.remove(&path) {
+                                cancel.cancel();
+                            }
+                        }
+                    }
+                    Command::OverviewRefresh { jobs, timeout_ms } => {
+                        for (path, job) in jobs {
+                            let cancel = Cancel::new();
+                            if let Some(old) = shared
+                                .overview_cancels
+                                .lock()
+                                .unwrap()
+                                .insert(path.clone(), cancel.clone())
+                            {
+                                old.cancel();
+                            }
+                            let shared = shared.clone();
+                            tokio::spawn(async move {
+                                let bounded = gitpoulpe_git::Bounded::with_shared(
+                                    &shared.overview,
+                                    std::time::Duration::from_millis(timeout_ms),
+                                );
+                                let outcome = bounded
+                                    .run(&cancel, |c| {
+                                        let git = shared.git.clone();
+                                        let target = path.clone();
+                                        async move {
+                                            git.repo_overview(std::path::Path::new(&target), &c).await
+                                        }
+                                    })
+                                    .await;
+                                let result = match outcome {
+                                    Ok(Ok(overview)) => Ok(overview),
+                                    Ok(Err(gitpoulpe_git::OverviewError::Cancelled))
+                                    | Err(gitpoulpe_git::BoundedError::Cancelled) => return,
+                                    Ok(Err(error)) => Err(error.to_string()),
+                                    Err(gitpoulpe_git::BoundedError::TimedOut) => Err(format!(
+                                        "délai dépassé ({} s) : ce dépôt est trop lent à lire ; les autres ne sont pas bloqués",
+                                        timeout_ms / 1000
+                                    )),
+                                };
+                                shared.emit(Event::OverviewRepo { path, job, result });
+                            });
+                        }
                     }
                     Command::FileEditRead { request, path } => {
                         let Some(current) = session.clone() else {

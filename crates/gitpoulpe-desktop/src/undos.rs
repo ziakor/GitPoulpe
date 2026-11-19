@@ -191,6 +191,7 @@ impl State {
         self.close_shortcuts();
         self.close_workspaces();
         self.close_favorites();
+        self.close_overview();
         self.profiles_open = false;
         self.undo_screen.open = true;
         self.undo_screen.message = None;

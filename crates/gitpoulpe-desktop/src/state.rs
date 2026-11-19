@@ -211,6 +211,7 @@ pub struct State {
     pub shortcuts: crate::shortcuts::ShortcutState,
     pub workspaces: crate::workspaces::WorkspacesState,
     pub favorites: crate::favorites::FavoritesState,
+    pub overview: crate::overview::OverviewState,
     pub publishing: crate::publishing::PublishSlot,
     pub pulling: crate::pulling::PullSlot,
     pub operation_kind: Option<gitpoulpe_core::OperationKind>,
@@ -360,6 +361,7 @@ impl State {
             file_edit: crate::file_edit::FileEditState::default(),
             terminal: crate::terminal::TerminalState::default(),
             commands: crate::palette::PaletteState::default(),
+            overview: crate::overview::OverviewState::default(),
             favorites: crate::favorites::FavoritesState {
                 book: prefs
                     .get::<gitpoulpe_core::FavoriteBook>(crate::favorites::FAVORITES_KEY)
@@ -919,6 +921,9 @@ impl State {
             Event::FileBlameLoaded { request, result } => self.apply_file_blame(request, result),
             Event::ToolFinished { request, result } => self.apply_tool_finished(request, result),
             Event::TerminalOutput => self.apply_terminal_output(),
+            Event::OverviewRepo { path, job, result } => {
+                self.apply_overview_repo(path, job, result)
+            }
             Event::FileEditLoaded { request, result } => {
                 self.apply_file_edit_loaded(request, result)
             }
@@ -2115,6 +2120,7 @@ impl State {
         self.close_shortcuts();
         self.close_workspaces();
         self.close_favorites();
+        self.close_overview();
         let selected = self
             .active_profile()
             .or_else(|| self.book.profiles.first())
@@ -2486,6 +2492,7 @@ impl State {
         self.close_shortcuts();
         self.close_workspaces();
         self.close_favorites();
+        self.close_overview();
         self.start_history();
     }
 
@@ -2632,6 +2639,7 @@ impl State {
         self.close_shortcuts();
         self.close_workspaces();
         self.close_favorites();
+        self.close_overview();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::CommitInspect {

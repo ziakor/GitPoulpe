@@ -81,6 +81,7 @@ impl State {
         self.close_shortcuts();
         self.close_workspaces();
         self.close_favorites();
+        self.close_overview();
         self.profiles_open = false;
         self.stashes.open = true;
         self.reload_stashes();

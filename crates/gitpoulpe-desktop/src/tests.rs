@@ -27,6 +27,7 @@ mod initializing;
 mod inspecting;
 mod lfsing;
 mod merging;
+mod overviewing;
 mod palette_commands;
 mod profiles;
 mod publishing;

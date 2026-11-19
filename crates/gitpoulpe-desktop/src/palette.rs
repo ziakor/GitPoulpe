@@ -101,6 +101,13 @@ pub const COMMANDS: &[PaletteCommand] = &[
         run: |s, _| s.open_shortcuts(),
     },
     PaletteCommand {
+        id: "overview",
+        label: "Vue multi-dépôts…",
+        keywords: "etat plusieurs depots agregee statut espaces favoris",
+        available: always,
+        run: |s, _| s.open_overview(),
+    },
+    PaletteCommand {
         id: "favorites",
         label: "Favoris…",
         keywords: "depots favoris marque-pages recherche",

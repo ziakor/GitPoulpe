@@ -70,6 +70,7 @@ impl State {
         self.close_terminal();
         self.close_shortcuts();
         self.close_workspaces();
+        self.close_overview();
         self.accounts.open = false;
         self.profiles_open = false;
         self.favorites.open = true;

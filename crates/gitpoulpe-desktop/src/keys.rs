@@ -198,6 +198,10 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         return copy_selection(s, tx);
     }
     s.notice = None;
+    if s.overview.open && event.key == Key::Escape {
+        s.close_overview();
+        return true;
+    }
     if s.favorites.open && event.key == Key::Escape {
         s.close_favorites();
         return true;
@@ -374,6 +378,7 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         || s.shortcuts.open
         || s.workspaces.open
         || s.favorites.open
+        || s.overview.open
         || s.undo_screen.open
         || s.worktrees.open
         || s.hooks.open

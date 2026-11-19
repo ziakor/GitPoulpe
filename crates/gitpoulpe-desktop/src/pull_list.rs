@@ -456,6 +456,7 @@ impl State {
         self.close_shortcuts();
         self.close_workspaces();
         self.close_favorites();
+        self.close_overview();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::PullInspect {

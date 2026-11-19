@@ -79,6 +79,7 @@ impl State {
         self.close_shortcuts();
         self.close_workspaces();
         self.close_favorites();
+        self.close_overview();
         self.profiles_open = false;
         self.worktrees.open = true;
         self.reload_worktrees();

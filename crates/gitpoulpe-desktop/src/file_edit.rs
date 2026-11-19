@@ -55,6 +55,7 @@ impl State {
         self.close_shortcuts();
         self.close_workspaces();
         self.close_favorites();
+        self.close_overview();
         self.profiles_open = false;
         let request = self.file_edit.request + 1;
         self.file_edit = FileEditState {
