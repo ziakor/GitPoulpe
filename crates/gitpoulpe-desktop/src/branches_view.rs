@@ -812,6 +812,10 @@ pub fn branches_screen(s: &State) -> El {
                 .truncate(),
         )
         .child(
+            action(s, "branches-pulls", "Pull request", false)
+                .on_press(|s: &mut State| s.open_pulls()),
+        )
+        .child(
             action(s, "branches-gitflow", "Gitflow", false)
                 .on_press(|s: &mut State| s.open_gitflow()),
         )

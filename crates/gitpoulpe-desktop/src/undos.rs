@@ -183,6 +183,7 @@ impl State {
         self.close_lfs();
         self.close_submodules();
         self.close_gitflow();
+        self.close_pulls();
         self.profiles_open = false;
         self.undo_screen.open = true;
         self.undo_screen.message = None;

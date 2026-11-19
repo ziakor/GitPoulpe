@@ -128,6 +128,7 @@ impl State {
         self.close_lfs();
         self.close_submodules();
         self.close_gitflow();
+        self.close_pulls();
         self.profiles_open = false;
         self.remotes.open = true;
         self.reload_remotes();
@@ -139,7 +140,7 @@ impl State {
         self.remotes.confirm_remove = None;
     }
 
-    fn reload_remotes(&mut self) {
+    pub(crate) fn reload_remotes(&mut self) {
         self.remotes.request += 1;
         self.remotes.loading = true;
         self.remotes.error = None;
@@ -285,6 +286,7 @@ impl State {
                 }
                 self.remotes.remotes = list;
                 self.remotes.error = None;
+                self.pulls_remotes_ready();
             }
             Err(message) => self.remotes.error = Some(message),
         }

@@ -73,6 +73,8 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
         crate::hook_screen_view::hooks_screen(s)
     } else if s.gitflow.open {
         crate::gitflow_screen_view::gitflow_screen(s)
+    } else if s.pulls.open {
+        crate::pull_screen_view::pulls_screen(s)
     } else if s.submodules.open {
         crate::submodule_screen_view::submodules_screen(s)
     } else if s.lfs.open {

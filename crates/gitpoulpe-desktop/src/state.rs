@@ -186,6 +186,7 @@ pub struct State {
     pub branches: crate::branches::BranchesState,
     pub tags: crate::tags::TagsState,
     pub remotes: crate::remotes::RemotesState,
+    pub pulls: crate::pull_screen::PullsState,
     pub init: crate::initialize::InitState,
     pub conflicts: crate::conflicts::ConflictsState,
     pub stashes: crate::stashes::StashesState,
@@ -324,6 +325,7 @@ impl State {
             branches: crate::branches::BranchesState::default(),
             tags: crate::tags::TagsState::default(),
             remotes: crate::remotes::RemotesState::default(),
+            pulls: crate::pull_screen::PullsState::default(),
             init: crate::initialize::InitState::default(),
             conflicts: crate::conflicts::ConflictsState::default(),
             stashes: crate::stashes::StashesState::default(),
@@ -918,6 +920,8 @@ impl State {
             Event::AccountConnected { request, result } => {
                 self.apply_account_connected(request, result)
             }
+            Event::PullPrepared { request, result } => self.apply_pull_prepared(request, result),
+            Event::PullCreated { request, result } => self.apply_pull_created(request, result),
             Event::BrowserFork { request, result } => self.apply_browser_fork(request, result),
             Event::BrowserOrgs { request, result } => self.apply_browser_orgs(request, result),
             Event::BrowserRepos { request, result } => self.apply_browser_repos(request, result),
@@ -1981,6 +1985,7 @@ impl State {
         self.close_lfs();
         self.close_submodules();
         self.close_gitflow();
+        self.close_pulls();
         let selected = self
             .active_profile()
             .or_else(|| self.book.profiles.first())
@@ -2344,6 +2349,7 @@ impl State {
         self.close_lfs();
         self.close_submodules();
         self.close_gitflow();
+        self.close_pulls();
         self.start_history();
     }
 
@@ -2482,6 +2488,7 @@ impl State {
         self.close_lfs();
         self.close_submodules();
         self.close_gitflow();
+        self.close_pulls();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::CommitInspect {

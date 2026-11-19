@@ -49,6 +49,9 @@ pub enum GithubError {
     DeviceExpired,
     ForkPending,
     NameTaken(String),
+    Validation(String),
+    PullExists(u64, String),
+    BranchNotPublished(String),
 }
 
 impl std::fmt::Display for GithubError {
@@ -80,6 +83,15 @@ impl std::fmt::Display for GithubError {
             Self::NameTaken(name) => write!(
                 f,
                 "{name} existe déjà et n'est pas un fork de ce dépôt : choisissez une autre destination"
+            ),
+            Self::Validation(why) => write!(f, "GitHub refuse la demande : {why}"),
+            Self::PullExists(number, url) => write!(
+                f,
+                "une pull request est déjà ouverte pour cette branche : #{number} ({url})"
+            ),
+            Self::BranchNotPublished(branch) => write!(
+                f,
+                "la branche {branch} n'est pas publiée sur le dépôt distant : publiez-la d'abord"
             ),
             Self::DeviceDenied => f.write_str("l'autorisation a été refusée dans le navigateur"),
             Self::DeviceExpired => {
@@ -129,7 +141,29 @@ pub(crate) fn interpret_failure(response: &Response) -> GithubError {
             })
         }
         404 => GithubError::NotFound,
+        422 => GithubError::Validation(validation_message(response, &message)),
         status => GithubError::Server(status),
+    }
+}
+
+fn validation_message(response: &Response, fallback: &str) -> String {
+    let detail = response
+        .json()
+        .ok()
+        .and_then(|v| v.get("errors")?.as_array().cloned())
+        .and_then(|errors| {
+            errors.iter().find_map(|e| {
+                e.get("message")
+                    .and_then(|m| m.as_str())
+                    .or_else(|| e.as_str())
+                    .map(str::to_owned)
+            })
+        });
+    match (detail, fallback.is_empty()) {
+        (Some(d), false) => format!("{fallback} ({d})"),
+        (Some(d), true) => d,
+        (None, false) => fallback.to_owned(),
+        (None, true) => "données invalides".to_owned(),
     }
 }
 

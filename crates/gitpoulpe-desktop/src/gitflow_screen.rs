@@ -93,6 +93,7 @@ impl State {
         self.close_hooks();
         self.close_lfs();
         self.close_submodules();
+        self.close_pulls();
         self.profiles_open = false;
         self.gitflow = GitflowState {
             open: true,

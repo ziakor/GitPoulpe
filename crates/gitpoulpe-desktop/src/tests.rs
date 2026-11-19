@@ -29,6 +29,7 @@ mod pulling;
 mod rebasing;
 mod reflogging;
 mod remoting;
+mod requesting;
 mod resetting;
 mod sequencing;
 mod staging;

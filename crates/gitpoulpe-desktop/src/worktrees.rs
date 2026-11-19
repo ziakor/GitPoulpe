@@ -71,6 +71,7 @@ impl State {
         self.close_lfs();
         self.close_submodules();
         self.close_gitflow();
+        self.close_pulls();
         self.profiles_open = false;
         self.worktrees.open = true;
         self.reload_worktrees();

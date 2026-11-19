@@ -72,9 +72,43 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, pages[page], headers)
         return self.reply(404, {"message": "Not Found"})
 
+    def pull_routes(self, rest, query):
+        from urllib.parse import unquote
+        params = dict(p.split("=", 1) for p in query.split("&") if "=" in p)
+        parts = rest.split("/")
+        repo = parts[0] + "/" + parts[1]
+        if "/git/ref/heads/" in rest:
+            branch = rest.split("/git/ref/heads/", 1)[1]
+            if branch in ("feature/x", "wip", "feature/dup", "feature/bad"):
+                return self.reply(200, {"ref": "refs/heads/" + branch})
+            return self.reply(404, {"message": "Not Found"})
+        if "/compare/" in rest:
+            spec = unquote(rest.split("/compare/", 1)[1])
+            base, head = spec.split("...", 1)
+            if repo == "acme/proj" and not head.startswith("octo:") or repo == "octo/proj" and ":" in head:
+                return self.reply(404, {"message": "Not Found"})
+            return self.reply(200, {"ahead_by": 2, "behind_by": 1, "files": [
+                {"filename": "src/a.rs", "status": "modified", "additions": 3, "deletions": 1},
+                {"filename": "README.md", "status": "added", "additions": 10, "deletions": 0}]})
+        if rest.endswith("/pulls"):
+            head = unquote(params.get("head", ""))
+            if head.endswith(":feature/dup"):
+                return self.reply(200, [{"number": 7, "html_url": f"https://example.test/{repo}/pull/7",
+                                         "title": "dup", "state": "open", "draft": False,
+                                         "head": {"ref": "feature/dup"}, "base": {"ref": "main"}}])
+            return self.reply(200, [])
+        return None
+
     def repo_get(self, token):
-        name = self.path[len("/repos/"):].split("?")[0].lower()
-        sources = {"acme/tool": None, "octo/taken": None,
+        rest, _, query = self.path[len("/repos/"):].partition("?")
+        rest = rest.lower() if "/git/ref/" not in rest and "/compare/" not in rest else rest
+        if rest.count("/") > 1:
+            handled = self.pull_routes(rest, query)
+            if handled is not None:
+                return handled
+        name = rest
+        sources = {"acme/tool": None, "octo/taken": None, "octo/proj": None,
+                   "acme/proj": None, "octo/forked": "acme/proj",
                    "octo/existing": "acme/existing", "acme/existing": None}
         if name in sources:
             extra = {"fork": True, "parent": {"full_name": sources[name]}} if sources[name] else {}
@@ -86,6 +120,18 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, self.repo(*name.split("/"), fork=True,
                                              parent={"full_name": "acme/" + name.split("/")[1]}))
         self.reply(404, {"message": "Not Found"})
+
+    def pull_post(self, body):
+        parts = self.path.split("/")
+        repo = parts[2] + "/" + parts[3]
+        if repo == "acme/locked":
+            return self.reply(403, {"message": "Resource not accessible by personal access token"})
+        if body.get("head") == "feature/bad":
+            return self.reply(422, {"message": "Validation Failed",
+                                    "errors": [{"message": "No commits between main and feature/bad"}]})
+        self.reply(201, {"number": 12, "html_url": f"https://example.test/{repo}/pull/12",
+                         "title": body.get("title"), "state": "open", "draft": body.get("draft", False),
+                         "head": {"ref": body.get("head")}, "base": {"ref": body.get("base")}})
 
     def fork_post(self, body):
         parts = self.path.split("/")
@@ -109,6 +155,8 @@ class Handler(BaseHTTPRequestHandler):
         body = json.loads(raw or "{}")
         if self.path.startswith("/api/v3/"):
             self.path = self.path[len("/api/v3"):]
+        if self.path.startswith("/repos/") and self.path.endswith("/pulls"):
+            return self.pull_post(body)
         if self.path.startswith("/repos/") and self.path.endswith("/forks"):
             return self.fork_post(body)
         if body.get("client_id") != "client-1":

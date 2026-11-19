@@ -24,6 +24,8 @@ mod perf;
 mod profiles;
 mod profiles_view;
 mod publishing;
+mod pull_screen;
+mod pull_screen_view;
 mod pulling;
 mod rebasing;
 mod reflogs;
