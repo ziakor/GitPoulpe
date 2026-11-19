@@ -16,6 +16,7 @@ mod cloning;
 mod committing;
 mod conflicting;
 mod external_tooling;
+mod favoriting;
 mod file_editing;
 mod file_histories;
 mod gitflowing;

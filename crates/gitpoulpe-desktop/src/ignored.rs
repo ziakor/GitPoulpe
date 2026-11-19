@@ -87,6 +87,7 @@ impl State {
         self.close_terminal();
         self.close_shortcuts();
         self.close_workspaces();
+        self.close_favorites();
         self.profiles_open = false;
         self.ignored.open = true;
         self.ignored.target = None;

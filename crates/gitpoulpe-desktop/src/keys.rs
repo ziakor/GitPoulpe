@@ -6,7 +6,7 @@ use crate::view::row_key;
 const LINES_PER_KEY: usize = 3;
 const SIDEWAYS_STEP: f32 = 96.0;
 
-const TEXT_INPUTS: [&str; 41] = [
+const TEXT_INPUTS: [&str; 42] = [
     "ac-server",
     "ac-token",
     "br-filter",
@@ -48,6 +48,7 @@ const TEXT_INPUTS: [&str; 41] = [
     "sc-search",
     "ws-new-name",
     "ws-name",
+    "fv-search",
 ];
 
 pub fn open_dialog(tx: &mut Tx) {
@@ -197,6 +198,10 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         return copy_selection(s, tx);
     }
     s.notice = None;
+    if s.favorites.open && event.key == Key::Escape {
+        s.close_favorites();
+        return true;
+    }
     if s.workspaces.open && event.key == Key::Escape {
         s.close_workspaces();
         return true;
@@ -368,6 +373,7 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         || s.commands.open
         || s.shortcuts.open
         || s.workspaces.open
+        || s.favorites.open
         || s.undo_screen.open
         || s.worktrees.open
         || s.hooks.open

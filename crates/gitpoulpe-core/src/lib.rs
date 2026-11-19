@@ -3,6 +3,7 @@ mod commit;
 mod connection;
 mod diff;
 mod error;
+mod favorite;
 mod gitflow;
 mod history;
 mod hooks;
@@ -42,6 +43,7 @@ pub use diff::{
     FileRef, Hunk, RangeData, RangeError,
 };
 pub use error::{Diagnostic, OpenError, ReadError};
+pub use favorite::{Favorite, FavoriteBook, FavoriteError};
 pub use gitflow::{
     FlowBranch, FlowKind, FlowOutcome, FlowPlan, FlowStep, GitflowConfig, GitflowView,
 };

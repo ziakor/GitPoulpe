@@ -101,6 +101,20 @@ pub const COMMANDS: &[PaletteCommand] = &[
         run: |s, _| s.open_shortcuts(),
     },
     PaletteCommand {
+        id: "favorites",
+        label: "Favoris…",
+        keywords: "depots favoris marque-pages recherche",
+        available: always,
+        run: |s, _| s.open_favorites(),
+    },
+    PaletteCommand {
+        id: "favorite-current",
+        label: "Ajouter le dépôt courant aux favoris",
+        keywords: "favori etoile marquer",
+        available: in_repo,
+        run: |s, _| s.favorites_add_current(),
+    },
+    PaletteCommand {
         id: "workspaces",
         label: "Espaces de travail…",
         keywords: "groupe depots projets restaurer",

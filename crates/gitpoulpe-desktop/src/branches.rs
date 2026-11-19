@@ -90,6 +90,7 @@ impl State {
         self.close_terminal();
         self.close_shortcuts();
         self.close_workspaces();
+        self.close_favorites();
         self.profiles_open = false;
         self.branches.open = true;
         self.reload_branches();

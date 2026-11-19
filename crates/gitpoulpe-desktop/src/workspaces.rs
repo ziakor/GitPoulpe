@@ -96,6 +96,7 @@ impl State {
         self.close_tools();
         self.close_terminal();
         self.close_shortcuts();
+        self.close_favorites();
         self.profiles_open = false;
         self.workspace_remember();
         let book = &self.workspaces.book;

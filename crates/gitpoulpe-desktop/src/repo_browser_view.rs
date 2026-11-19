@@ -191,10 +191,15 @@ fn detail(s: &State) -> El {
     if !tags.is_empty() {
         panel = panel.child(text(tags).key("br-tags").font(theme::SMALL).color(p.muted));
     }
-    panel = panel.child(
-        action(s, "br-clone", "Cloner ce dépôt", true)
-            .on_press(|s: &mut State| s.clone_selected_repo()),
-    );
+    panel = panel
+        .child(
+            action(s, "br-clone", "Cloner ce dépôt", true)
+                .on_press(|s: &mut State| s.clone_selected_repo()),
+        )
+        .child(
+            action(s, "br-favorite", "Ajouter aux favoris", false)
+                .on_press(|s: &mut State| s.favorite_selected_repo()),
+        );
     let browser = &s.accounts.browser;
     if let Some(done) = &browser.fork_done {
         panel = panel.child(

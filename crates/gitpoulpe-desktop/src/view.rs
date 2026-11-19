@@ -41,7 +41,9 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
             message_screen(&p, "Impossible d'ouvrir ce dépôt", &detail, true, here)
         }
     };
-    let body = if s.workspaces.open {
+    let body = if s.favorites.open {
+        crate::favorites_view::favorites_screen(s)
+    } else if s.workspaces.open {
         crate::workspaces_view::workspaces_screen(s)
     } else if s.shortcuts.open {
         crate::shortcuts_view::shortcuts_screen(s)

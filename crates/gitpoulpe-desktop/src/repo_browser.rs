@@ -334,4 +334,10 @@ impl State {
         self.begin_clone();
         self.clone.url = TextEdit::new(url);
     }
+
+    pub fn favorite_selected_repo(&mut self) {
+        if let Some(repo) = self.accounts.browser.selected_repo().cloned() {
+            self.favorites_add_remote(&repo);
+        }
+    }
 }

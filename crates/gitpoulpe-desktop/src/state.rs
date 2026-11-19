@@ -210,6 +210,7 @@ pub struct State {
     pub commands: crate::palette::PaletteState,
     pub shortcuts: crate::shortcuts::ShortcutState,
     pub workspaces: crate::workspaces::WorkspacesState,
+    pub favorites: crate::favorites::FavoritesState,
     pub publishing: crate::publishing::PublishSlot,
     pub pulling: crate::pulling::PullSlot,
     pub operation_kind: Option<gitpoulpe_core::OperationKind>,
@@ -359,6 +360,12 @@ impl State {
             file_edit: crate::file_edit::FileEditState::default(),
             terminal: crate::terminal::TerminalState::default(),
             commands: crate::palette::PaletteState::default(),
+            favorites: crate::favorites::FavoritesState {
+                book: prefs
+                    .get::<gitpoulpe_core::FavoriteBook>(crate::favorites::FAVORITES_KEY)
+                    .unwrap_or_default(),
+                ..crate::favorites::FavoritesState::default()
+            },
             workspaces: crate::workspaces::WorkspacesState {
                 book: prefs
                     .get::<gitpoulpe_core::WorkspaceBook>(crate::workspaces::WORKSPACES_KEY)
@@ -2107,6 +2114,7 @@ impl State {
         self.close_terminal();
         self.close_shortcuts();
         self.close_workspaces();
+        self.close_favorites();
         let selected = self
             .active_profile()
             .or_else(|| self.book.profiles.first())
@@ -2477,6 +2485,7 @@ impl State {
         self.close_terminal();
         self.close_shortcuts();
         self.close_workspaces();
+        self.close_favorites();
         self.start_history();
     }
 
@@ -2622,6 +2631,7 @@ impl State {
         self.close_terminal();
         self.close_shortcuts();
         self.close_workspaces();
+        self.close_favorites();
         self.inspect_request += 1;
         if let Some(engine) = &self.engine {
             engine.send(Command::CommitInspect {
