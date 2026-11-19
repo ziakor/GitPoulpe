@@ -4,7 +4,7 @@ use std::path::Path;
 
 use common::{commit_all, git as run_git, init_repo, write};
 use gitpoulpe_core::SessionInfo;
-use gitpoulpe_git::{Cancel, Git, NetError, PullRangeError};
+use gitpoulpe_git::{Cancel, Git, NetError, PullRangeError, ReviewRefs};
 
 struct Env {
     source: tempfile::TempDir,
@@ -83,6 +83,7 @@ async fn range(
         .prepare_pull_range(
             &e.info,
             "origin",
+            ReviewRefs::Github,
             number,
             base_ref,
             base,
@@ -165,6 +166,7 @@ async fn unsafe_inputs_are_refused_before_git_runs() {
         .prepare_pull_range(
             &e.info,
             "nope",
+            ReviewRefs::Github,
             7,
             "main",
             &e.base,
@@ -186,4 +188,37 @@ fn gitpoulpe_git_exists(e: &Env) -> bool {
         &["cat-file", "-e", &format!("{}^{{commit}}", e.head)],
     );
     output.status.success()
+}
+
+#[tokio::test]
+async fn a_gitlab_merge_request_is_fetched_from_its_own_ref_namespace() {
+    let e = env(5).await;
+    run_git(
+        e.source.path(),
+        &["update-ref", "refs/merge-requests/8/head", &e.head],
+    );
+    let cancel = Cancel::new();
+    let fetch = |refs| {
+        e.git.prepare_pull_range(
+            &e.info,
+            "origin",
+            refs,
+            8,
+            "main",
+            &e.base,
+            &e.head,
+            &cancel,
+            |_| {},
+        )
+    };
+    assert!(matches!(
+        fetch(ReviewRefs::Github).await.unwrap_err(),
+        PullRangeError::Net(NetError::Refused(m)) if m.contains("couldn't find remote ref")
+    ));
+    let found = fetch(ReviewRefs::Gitlab).await.unwrap();
+    assert!(found.fetched);
+    assert_eq!(
+        (found.head, found.merge_base),
+        (e.head.clone(), e.root.clone())
+    );
 }

@@ -65,7 +65,7 @@ pub use merge::MergeError;
 pub use net::{NetError, NetProgress, SshTools, parse_progress, remote_host};
 pub use parse::{ParseError, StatusParser};
 pub use pull::{PullError, PullRequest};
-pub use pull_range::{PullRange, PullRangeError};
+pub use pull_range::{PullRange, PullRangeError, ReviewRefs};
 pub use push::{PushError, PushRejection, PushRequest};
 pub use rebase::{RebaseError, validate_plan};
 pub use reflog::{REFLOG_LIMIT, ReflogError};

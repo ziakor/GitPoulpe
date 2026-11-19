@@ -282,6 +282,12 @@ For an open pull request, the "Fusion" section reads the repository's real rules
 
 The GitHub API caps a pull request's file list at 3000 files, so "Lire toute la PR depuis Git" reads the exact revisions instead: it fetches the pull request's head (`refs/pull/N/head`) and, if needed, the target branch from the remote that matched your account, computes the merge base with Git, and opens the commit reader on that range. All files are listed without truncation and their diffs are read progressively by the same virtualized reader used for commits. If a revision cannot be fetched (the pull request moved or was deleted, no common ancestor, network or disk error), the screen says so and does not claim the pull request was loaded. Cloning access for private repositories relies on your Git credentials. The rendering benchmark on reference GPU hardware is a separate measurement that has not been run here.
 
+### GitLab merge requests
+
+With a GitLab account the same screens create and read merge requests. A project in nested groups ("acme/platform/api") is recognised from its remote, and the branch is compared with its target before anything is sent, with the commit counts and the changed files counted from the diffs. From a fork the merge request is created in the fork with the parent project as its target. A draft is sent by prefixing the title with "Draft:", once. A branch that is not published, a merge request already open for the same source project, source branch and target branch, a missing title and a refusal from GitLab each stop with their own message and create nothing.
+
+The list shows opened, closed (including merged) or all merge requests with their real state. A selected merge request shows its revisions, description, commits and every page of its diffs in one continuous scroll. Files GitLab returns without a diff (binary, too large) say so. If the server has no paginated diffs endpoint, the older single-response one is used and a possible overflow is shown as a truncated file list; "Lire toute la PR depuis Git" then reads the revisions from `refs/merge-requests/N/head` instead. A merge request that moved while it was loading is flagged. Comments, review, pipelines and merging are not available for GitLab yet, and the view says so instead of showing empty sections.
+
 ## Build and run
 
 Requirements: Rust 1.100.0 (`rustup toolchain install 1.100.0`), Git on the `PATH` (tested with 2.53.0), a GPU and a Linux graphical session. The folder picker uses the XDG desktop portal.

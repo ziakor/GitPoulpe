@@ -165,6 +165,21 @@ impl Default for PullListState {
 }
 
 impl State {
+    pub fn pull_is_gitlab(&self) -> bool {
+        self.pulls
+            .candidates
+            .get(self.pulls.choice)
+            .is_some_and(|c| c.connection.provider == gitpoulpe_core::Provider::Gitlab)
+    }
+
+    pub fn pull_noun(&self) -> &'static str {
+        if self.pull_is_gitlab() {
+            "merge request"
+        } else {
+            "pull request"
+        }
+    }
+
     fn pull_list_target(&self) -> Option<(gitpoulpe_core::Connection, String, String)> {
         let candidate = self.pulls.candidates.get(self.pulls.choice)?;
         let (owner, name) = match &self.pulls.target {
@@ -366,6 +381,7 @@ impl State {
         result: Result<Box<PullDetail>, String>,
     ) -> bool {
         let key = self.review_key().unwrap_or_default();
+        let noun = self.pull_noun();
         let list = &mut self.pulls.list;
         if !list.open || request != list.detail_request || list.selected != Some(number) {
             return false;
@@ -380,14 +396,14 @@ impl State {
                     .filter(|old| old.summary.head_sha != detail.summary.head_sha)
                     .map(|old| {
                         format!(
-                            "La pull request a été mise à jour depuis votre lecture ({} → {}).",
+                            "La {noun} a été mise à jour depuis votre lecture ({} → {}).",
                             short(&old.summary.head_sha),
                             short(&detail.summary.head_sha)
                         )
                     });
                 list.notice = moved.or_else(|| {
                     detail.changed_during_load.then(|| {
-                        "La pull request a changé pendant le chargement : actualisez pour relire une version cohérente.".to_owned()
+                        format!("La {noun} a changé pendant le chargement : actualisez pour relire une version cohérente.")
                     })
                 });
                 let fresh = *detail;
@@ -438,6 +454,11 @@ impl State {
             engine.send(Command::PullInspect {
                 request: self.inspect_request,
                 remote: candidate.remote,
+                refs: if candidate.connection.provider == gitpoulpe_core::Provider::Gitlab {
+                    gitpoulpe_git::ReviewRefs::Gitlab
+                } else {
+                    gitpoulpe_git::ReviewRefs::Github
+                },
                 number: summary.number,
                 base_ref: summary.base_ref,
                 base_sha: summary.base_sha,
@@ -447,6 +468,9 @@ impl State {
     }
 
     pub fn load_pull_merge_info(&mut self) {
+        if self.pull_is_gitlab() {
+            return;
+        }
         let Some((connection, owner, name)) = self.pull_list_target() else {
             return;
         };
@@ -677,6 +701,9 @@ impl State {
     }
 
     pub fn load_pull_checks(&mut self) {
+        if self.pull_is_gitlab() {
+            return;
+        }
         let Some((connection, owner, name)) = self.pull_list_target() else {
             return;
         };
@@ -749,6 +776,9 @@ impl State {
     }
 
     pub fn reload_pull_comments(&mut self) {
+        if self.pull_is_gitlab() {
+            return;
+        }
         let Some(number) = self.pulls.list.selected else {
             return;
         };
@@ -1163,6 +1193,9 @@ impl State {
     }
 
     pub fn reload_reviews(&mut self, verify: bool) {
+        if self.pull_is_gitlab() {
+            return;
+        }
         let Some(number) = self.pulls.list.selected else {
             return;
         };

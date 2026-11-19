@@ -18,16 +18,32 @@ pub fn pulls_screen(s: &State) -> El {
         .py(10.0)
         .gap(12.0)
         .child(
-            text(format!("Pull request · {branch}"))
-                .key("pr-title-line")
-                .font(theme::BODY_STRONG)
-                .color(p.text)
-                .grow(1.0)
-                .truncate(),
+            text(format!(
+                "{} · {branch}",
+                if s.pull_is_gitlab() {
+                    "Merge request"
+                } else {
+                    "Pull request"
+                }
+            ))
+            .key("pr-title-line")
+            .font(theme::BODY_STRONG)
+            .color(p.text)
+            .grow(1.0)
+            .truncate(),
         )
         .child(
-            action(s, "pr-list", "Voir les pull requests", false)
-                .on_press(|s: &mut State| s.open_pull_list()),
+            action(
+                s,
+                "pr-list",
+                if s.pull_is_gitlab() {
+                    "Voir les merge requests"
+                } else {
+                    "Voir les pull requests"
+                },
+                false,
+            )
+            .on_press(|s: &mut State| s.open_pull_list()),
         )
         .child(
             action(s, "pr-refresh", "Actualiser", false)
@@ -65,7 +81,7 @@ pub fn pulls_screen(s: &State) -> El {
     }
     if pulls.loading {
         body = body.child(
-            text("Préparation de la pull request…".to_owned())
+            text(format!("Préparation de la {}…", s.pull_noun()))
                 .key("pr-loading")
                 .font(theme::SMALL)
                 .color(p.muted),
@@ -141,8 +157,11 @@ pub fn pulls_screen(s: &State) -> El {
     if let Some(existing) = &target.existing {
         body = body.child(
             text(format!(
-                "Une pull request est déjà ouverte : #{} {} ({}).",
-                existing.number, existing.title, existing.url
+                "Une {} est déjà ouverte : #{} {} ({}).",
+                s.pull_noun(),
+                existing.number,
+                existing.title,
+                existing.url
             ))
             .key("pr-existing")
             .font(theme::SMALL)
@@ -193,7 +212,11 @@ pub fn pulls_screen(s: &State) -> El {
                     "pr-title",
                     "Titre",
                     &pulls.title,
-                    "Titre de la pull request",
+                    if s.pull_is_gitlab() {
+                        "Titre de la merge request"
+                    } else {
+                        "Titre de la pull request"
+                    },
                 )
                 .on_edit(|s: &mut State| &mut s.pulls.title),
             )
@@ -218,7 +241,11 @@ pub fn pulls_screen(s: &State) -> El {
                     if pulls.busy {
                         "Création…"
                     } else {
-                        "Créer la pull request"
+                        if s.pull_is_gitlab() {
+                            "Créer la merge request"
+                        } else {
+                            "Créer la pull request"
+                        }
                     },
                     true,
                 )

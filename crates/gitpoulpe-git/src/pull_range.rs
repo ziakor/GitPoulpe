@@ -6,6 +6,21 @@ use crate::Git;
 use crate::cancel::Cancel;
 use crate::net::{NetError, NetProgress};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReviewRefs {
+    Github,
+    Gitlab,
+}
+
+impl ReviewRefs {
+    fn head(self, number: u64) -> String {
+        match self {
+            Self::Github => format!("refs/pull/{number}/head"),
+            Self::Gitlab => format!("refs/merge-requests/{number}/head"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PullRange {
     pub head: String,
@@ -106,6 +121,7 @@ impl Git {
         &self,
         info: &SessionInfo,
         remote: &str,
+        refs: ReviewRefs,
         number: u64,
         base_ref: &str,
         base_sha: &str,
@@ -139,7 +155,7 @@ impl Git {
             .to_path_buf();
         let mut fetched = false;
         if !self.has_commit(info, head_sha).await? {
-            let spec = format!("+refs/pull/{number}/head:refs/gitpoulpe/pull/{number}/head");
+            let spec = format!("+{}:refs/gitpoulpe/pull/{number}/head", refs.head(number));
             self.network_ok(
                 &dir,
                 &fetch_args(remote, &spec),

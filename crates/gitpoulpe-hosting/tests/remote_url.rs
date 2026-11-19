@@ -34,11 +34,24 @@ fn local_paths_and_malformed_urls_are_not_taken_for_hosted_repositories() {
         "C:/x/y",
         "file:///srv/tool.git",
         "https://github.com/onlyowner",
-        "https://github.com/a/b/c",
+        "https://github.com/a//b",
+        "https://github.com//b",
         "https:///a/b",
         "git@:a/b",
         "ftp://h/a/b",
     ] {
         assert_eq!(parse_remote(url), None, "{url}");
     }
+}
+
+#[test]
+fn nested_namespaces_keep_every_group_in_the_owner() {
+    assert_eq!(
+        parse_remote("https://gitlab.com/acme/platform/infra/tool.git"),
+        r("gitlab.com", "acme/platform/infra", "tool")
+    );
+    assert_eq!(
+        parse_remote("git@gitlab.com:acme/platform/tool.git"),
+        r("gitlab.com", "acme/platform", "tool")
+    );
 }

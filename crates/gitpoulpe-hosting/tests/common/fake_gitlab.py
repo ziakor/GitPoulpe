@@ -3,6 +3,47 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 LOG = sys.argv[1]
+IDS = {"acme/platform/api": 100, "octo/api": 200, "octo/notes": 300}
+BRANCHES = {"acme/platform/api": {"main", "feature/x", "feature/dup", "shared/br"}, "octo/api": {"main", "feature/y", "feature/z", "shared/br"},
+            "octo/notes": {"main"}}
+SHA = lambda c: c * 40
+
+
+def mr(iid, state, source, target, source_project=100, title=None, draft=False, sha="a", **extra):
+    base = {"iid": iid, "state": state, "title": title or f"MR {iid}", "draft": draft, "source_branch": source,
+            "target_branch": target, "source_project_id": source_project, "target_project_id": 100,
+            "author": {"username": "octo"}, "sha": SHA(sha), "description": f"Body {iid}",
+            "web_url": f"https://gitlab.test/acme/platform/api/-/merge_requests/{iid}",
+            "updated_at": f"2026-11-{10 + iid}T10:00:00Z",
+            "diff_refs": {"base_sha": SHA("b"), "head_sha": SHA(sha), "start_sha": SHA("c")}}
+    base.update(extra)
+    return base
+
+
+MRS = [mr(3, "merged", "feature/m", "main"), mr(4, "closed", "feature/c", "main"),
+       mr(5, "opened", "feature/dup", "main", title="Draft: Work in progress", draft=True),
+       mr(7, "opened", "feature/y", "main", source_project=200, sha="d"),
+       mr(6, "opened", "shared/br", "main", source_project=200, sha="6"),
+       mr(8, "opened", "feature/old", "main", sha="e"), mr(9, "opened", "feature/race", "main", sha="f")]
+READS = {}
+
+
+def diff_entry(path, text, **flags):
+    entry = {"old_path": path, "new_path": path, "new_file": False, "renamed_file": False,
+             "deleted_file": False, "diff": text}
+    entry.update(flags)
+    return entry
+
+
+DIFFS = {
+    7: [[diff_entry("src/a.rs", "@@ -1,2 +1,3 @@\n keep\n-old\n+new\n+more\n"),
+         diff_entry("docs/new.md", "@@ -0,0 +1 @@\n+hello\n", new_file=True)],
+        [diff_entry("img/logo.png", "", new_file=True),
+         diff_entry("big.sql", "", too_large=True)]],
+    5: [[diff_entry("one.txt", "@@ -1 +1 @@\n-a\n+b\n")]],
+    8: [[diff_entry("legacy.txt", "@@ -1 +1 @@\n-a\n+b\n")]],
+    9: [[diff_entry("race.txt", "@@ -1 +1 @@\n-a\n+b\n")]],
+}
 USERS = {
     "glgood": {"username": "Octo", "name": "Octo Cat", "scopes": ["read_api", "read_repository", "write_repository"],
                "expires_at": "2027-01-31"},
@@ -50,6 +91,39 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"scopes": user["scopes"], "expires_at": user["expires_at"], "active": True})
         return self.projects_routes(path, token)
 
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        raw = self.rfile.read(length).decode()
+        auth = self.headers.get("Authorization", "")
+        with open(LOG, "a") as f:
+            f.write(json.dumps({"path": self.path, "auth": auth, "body": raw}) + "\n")
+        token = auth.removeprefix("Bearer ").strip()
+        if token not in USERS:
+            return self.reply(401, {"message": "401 Unauthorized"})
+        from urllib.parse import unquote
+        route = self.path[len("/api/v4"):]
+        if not (route.startswith("/projects/") and route.endswith("/merge_requests")):
+            return self.reply(404, {"message": "404 Not Found"})
+        full = unquote(route[len("/projects/"):-len("/merge_requests")])
+        body = json.loads(raw or "{}")
+        source_project = IDS.get(full)
+        if source_project is None or body.get("source_branch") not in BRANCHES.get(full, set()):
+            return self.reply(400, {"message": {"source_branch": ["is invalid"]}})
+        target_project = body.get("target_project_id", source_project)
+        if source_project != target_project and target_project != 100:
+            return self.reply(422, {"message": "target project is not a parent"})
+        for existing in MRS:
+            if (existing["state"] == "opened" and existing["source_branch"] == body["source_branch"]
+                    and existing["target_branch"] == body["target_branch"]
+                    and existing["source_project_id"] == source_project):
+                return self.reply(409, {"message": ["Another open merge request already exists for this source branch: !5"]})
+        title = body["title"]
+        created = mr(max(m["iid"] for m in MRS) + 1, "opened", body["source_branch"], body["target_branch"],
+                     source_project=source_project, title=title, draft=title.startswith("Draft: "), sha="9",
+                     description=body.get("description", ""))
+        MRS.append(created)
+        return self.reply(201, created)
+
     def project(self, full, **extra):
         namespace, _, name = full.rpartition("/")
         base = {"id": abs(hash(full)) % 10000, "path": name, "path_with_namespace": full,
@@ -86,6 +160,8 @@ class Handler(BaseHTTPRequestHandler):
             if page * 3 < len(items):
                 headers["Link"] = f'<http://127.0.0.1:{port}/api/v4/projects?page={page + 1}>; rel="next"'
             return self.reply(200, chunk, headers)
+        if route.startswith("/projects/"):
+            return self.project_routes(route, params)
         if route.startswith("/groups/") and route.endswith("/projects"):
             group = unquote(route[len("/groups/"):-len("/projects")])
             if group == "acme/platform":
@@ -93,6 +169,81 @@ class Handler(BaseHTTPRequestHandler):
             if group == "ghost":
                 return self.reply(404, {"message": "404 Group Not Found"})
             return self.reply(200, [])
+        return self.reply(404, {"message": "404 Not Found"})
+
+    def project_routes(self, route, params):
+        from urllib.parse import unquote
+        rest = route[len("/projects/"):]
+        enc, _, tail = rest.partition("/")
+        full = unquote(enc)
+        params = {k: unquote(v) for k, v in params.items()}
+        if full not in IDS:
+            return self.reply(404, {"message": "404 Project Not Found"})
+        if tail == "":
+            extra = {"id": IDS[full]}
+            if full == "octo/api":
+                extra["forked_from_project"] = {"path_with_namespace": "acme/platform/api"}
+            return self.reply(200, self.project(full, **extra))
+        if tail.startswith("repository/branches/"):
+            branch = unquote(tail[len("repository/branches/"):])
+            if branch in BRANCHES[full]:
+                return self.reply(200, {"name": branch})
+            return self.reply(404, {"message": "404 Branch Not Found"})
+        if tail == "repository/compare":
+            return self.compare(full, params)
+        if tail == "merge_requests":
+            items = [m for m in MRS if params.get("state", "all") in ("all", m["state"])
+                     and params.get("source_branch", m["source_branch"]) == m["source_branch"]
+                     and params.get("target_branch", m["target_branch"]) == m["target_branch"]]
+            return self.reply(200, sorted(items, key=lambda m: m["updated_at"], reverse=True))
+        if tail.startswith("merge_requests/"):
+            return self.mr_detail(tail[len("merge_requests/"):], params)
+        return self.reply(404, {"message": "404 Not Found"})
+
+    def compare(self, full, params):
+        src = params.get("from_project_id")
+        cross = (full == "octo/api" and params["from"] == "main") or (full == "acme/platform/api" and params["from"] in ("feature/y", "feature/z"))
+        if cross != (src is not None) or (src is not None and int(src) not in IDS.values()):
+            return self.reply(404, {"message": "404 Not Found"})
+        forward = params["from"] == "main"
+        if full == "octo/api":
+            count = 3
+        elif params["from"] in ("feature/y", "feature/z"):
+            count = 4
+        else:
+            count = 2 if forward else 1
+        commits = [{"id": SHA("1"), "title": f"commit {i}"} for i in range(count)]
+        diffs = [diff_entry("src/a.rs", "@@ -1 +1,2 @@\n-a\n+b\n+c\n"),
+                 diff_entry("docs/new.md", "@@ -0,0 +1 @@\n+x\n", new_file=True)] if forward else []
+        return self.reply(200, {"commits": commits, "diffs": diffs, "compare_timeout": False})
+
+    def mr_detail(self, tail, params):
+        iid_text, _, sub = tail.partition("/")
+        found = next((m for m in MRS if str(m["iid"]) == iid_text), None)
+        if found is None:
+            return self.reply(404, {"message": "404 Not Found"})
+        iid = found["iid"]
+        port = self.server.server_address[1]
+        if sub == "":
+            READS[iid] = READS.get(iid, 0) + 1
+            if iid == 9 and READS[iid] > 1:
+                return self.reply(200, dict(found, sha=SHA("0")))
+            return self.reply(200, found)
+        if sub == "commits":
+            return self.reply(200, [{"id": found["sha"], "title": "Second", "author_name": "Octo"},
+                                    {"id": SHA("2"), "title": "First", "author_name": "Octo"}])
+        if sub == "diffs":
+            if iid == 8:
+                return self.reply(404, {"message": "404 Not Found"})
+            chunks = DIFFS[iid]
+            page = int(params.get("page", "1"))
+            headers = {}
+            if page < len(chunks):
+                headers["Link"] = (f'<http://127.0.0.1:{port}/api/v4/projects/acme%2Fplatform%2Fapi/merge_requests/'
+                                   f'{iid}/diffs?page={page + 1}>; rel="next"')
+            return self.reply(200, chunks[page - 1], headers)
+        if sub == "changes" and iid == 8:
+            return self.reply(200, dict(found, changes=DIFFS[8][0], overflow=True))
         return self.reply(404, {"message": "404 Not Found"})
 
 

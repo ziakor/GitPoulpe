@@ -310,6 +310,11 @@ impl State {
     }
 
     pub fn apply_pull_created(&mut self, request: u64, result: Result<HostedPull, String>) -> bool {
+        let noun = if self.pull_is_gitlab() {
+            "Merge request"
+        } else {
+            "Pull request"
+        };
         let pulls = &mut self.pulls;
         if !pulls.open || request != pulls.request {
             return false;
@@ -318,7 +323,8 @@ impl State {
         match result {
             Ok(pr) => {
                 pulls.notice = Some(format!(
-                    "Pull request #{} créée{} : {}",
+                    "{} #{} créée{} : {}",
+                    noun,
                     pr.number,
                     if pr.draft { " (brouillon)" } else { "" },
                     pr.url

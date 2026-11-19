@@ -90,7 +90,7 @@ fn detail(s: &State) -> El {
     }
     if list.detail_loading {
         panel = panel.child(
-            text("Chargement de la pull request…".to_owned())
+            text(format!("Chargement de la {}…", s.pull_noun()))
                 .key("prl-loading")
                 .font(theme::SMALL)
                 .color(p.muted),
@@ -108,7 +108,7 @@ fn detail(s: &State) -> El {
     let Some(detail) = &list.detail else {
         if list.selected.is_none() {
             panel = panel.child(
-                text("Sélectionnez une pull request.".to_owned())
+                text(format!("Sélectionnez une {}.", s.pull_noun()))
                     .key("prl-hint")
                     .font(theme::SMALL)
                     .color(p.muted),
@@ -154,7 +154,15 @@ fn detail(s: &State) -> El {
         action(s, "prl-git", "Lire toute la PR depuis Git", false)
             .on_press(|s: &mut State| s.open_pull_from_git()),
     );
-    if detail.files_truncated || detail.files.len() >= 3000 {
+    if s.pull_is_gitlab() && detail.files_truncated {
+        panel = panel.child(
+            text("GitLab n'a pas renvoyé la liste complète des fichiers (limite de l'API) : utilisez « Lire toute la PR depuis Git » pour tous les fichiers.".to_owned())
+                .key("prl-cap")
+                .font(theme::SMALL)
+                .color(p.red)
+                .wrap(),
+        );
+    } else if !s.pull_is_gitlab() && (detail.files_truncated || detail.files.len() >= 3000) {
         panel = panel.child(
             text("L'API GitHub plafonne la liste à 3000 fichiers : utilisez « Lire toute la PR depuis Git » pour tous les fichiers.".to_owned())
                 .key("prl-cap")
@@ -172,11 +180,21 @@ fn detail(s: &State) -> El {
                 .wrap(),
         );
     }
-    panel = panel
-        .child(checks_panel(s))
-        .child(merge_panel(s))
-        .child(compose(s))
-        .child(review_panel(s));
+    if s.pull_is_gitlab() {
+        panel = panel.child(
+            text("Commentaires, revue, pipelines et fusion ne sont pas encore disponibles pour les merge requests GitLab : cette vue ne montre que les changements, les commits et la description.".to_owned())
+                .key("prl-gitlab-limits")
+                .font(theme::SMALL)
+                .color(p.red)
+                .wrap(),
+        );
+    } else {
+        panel = panel
+            .child(checks_panel(s))
+            .child(merge_panel(s))
+            .child(compose(s))
+            .child(review_panel(s));
+    }
     panel = panel.child(
         text(format!("{} commit(s)", detail.commits.len()))
             .font(theme::BODY_STRONG)
@@ -268,27 +286,31 @@ fn detail(s: &State) -> El {
                     }
                     panel = panel.child(line_el);
                 }
-                panel = panel.child(threads(s, &file.change.path, i));
+                if !s.pull_is_gitlab() {
+                    panel = panel.child(threads(s, &file.change.path, i));
+                }
             }
         }
     }
-    panel = panel.child(
-        text(format!(
-            "{} commentaire(s) généraux",
-            s.pulls.list.comments.issue.len()
-        ))
-        .key("prc-general-title")
-        .font(theme::BODY_STRONG)
-        .color(p.text),
-    );
-    for (i, comment) in s.pulls.list.comments.issue.iter().enumerate() {
+    if !s.pull_is_gitlab() {
         panel = panel.child(
-            text(format!("{} : {}", comment.author, comment.body))
-                .key(format!("prc-general{i}"))
-                .font(theme::SMALL)
-                .color(p.text)
-                .wrap(),
+            text(format!(
+                "{} commentaire(s) généraux",
+                s.pulls.list.comments.issue.len()
+            ))
+            .key("prc-general-title")
+            .font(theme::BODY_STRONG)
+            .color(p.text),
         );
+        for (i, comment) in s.pulls.list.comments.issue.iter().enumerate() {
+            panel = panel.child(
+                text(format!("{} : {}", comment.author, comment.body))
+                    .key(format!("prc-general{i}"))
+                    .font(theme::SMALL)
+                    .color(p.text)
+                    .wrap(),
+            );
+        }
     }
     if budget == 0 {
         panel = panel.child(
@@ -950,12 +972,20 @@ pub fn pull_list_screen(s: &State) -> El {
         .py(10.0)
         .gap(8.0)
         .child(
-            text(format!("Pull requests · {} résultat(s)", list.items.len()))
-                .key("prl-title-line")
-                .font(theme::BODY_STRONG)
-                .color(p.text)
-                .grow(1.0)
-                .truncate(),
+            text(format!(
+                "{} · {} résultat(s)",
+                if s.pull_is_gitlab() {
+                    "Merge requests"
+                } else {
+                    "Pull requests"
+                },
+                list.items.len()
+            ))
+            .key("prl-title-line")
+            .font(theme::BODY_STRONG)
+            .color(p.text)
+            .grow(1.0)
+            .truncate(),
         )
         .child(filter_button(s, "prl-open", "Ouvertes", PullFilter::Open))
         .child(filter_button(
@@ -996,7 +1026,7 @@ pub fn pull_list_screen(s: &State) -> El {
         );
     } else if list.items.is_empty() {
         left = left.child(
-            text("Aucune pull request pour ce filtre.".to_owned())
+            text(format!("Aucune {} pour ce filtre.", s.pull_noun()))
                 .key("prl-empty")
                 .font(theme::SMALL)
                 .color(p.muted)
@@ -1006,13 +1036,16 @@ pub fn pull_list_screen(s: &State) -> El {
     }
     if list.truncated {
         left = left.child(
-            text("Liste tronquée : trop de pull requests pour tout afficher.".to_owned())
-                .key("prl-truncated")
-                .font(theme::SMALL)
-                .color(p.muted)
-                .wrap()
-                .px(16.0)
-                .py(4.0),
+            text(format!(
+                "Liste tronquée : trop de {}s pour tout afficher.",
+                s.pull_noun()
+            ))
+            .key("prl-truncated")
+            .font(theme::SMALL)
+            .color(p.muted)
+            .wrap()
+            .px(16.0)
+            .py(4.0),
         );
     }
     left = left.child(

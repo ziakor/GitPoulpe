@@ -30,6 +30,7 @@ mod rebasing;
 mod reflogging;
 mod remoting;
 mod requesting;
+mod requesting_gitlab;
 mod resetting;
 mod sequencing;
 mod staging;

@@ -12,17 +12,22 @@ use super::{click_at, rect_of, runtime, step};
 use crate::accounts::Hosting;
 use crate::state::State;
 
-struct Fake {
+pub(super) struct Fake {
     child: Child,
-    port: u16,
+    pub(super) port: u16,
     _dir: tempfile::TempDir,
 }
 
 impl Fake {
     fn start() -> Self {
+        Self::start_script("fake_github.py")
+    }
+
+    pub(super) fn start_script(name: &str) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let script = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../gitpoulpe-hosting/tests/common/fake_github.py");
+            .join("../gitpoulpe-hosting/tests/common")
+            .join(name);
         let mut child = Command::new("python3")
             .arg("-I")
             .arg(script)
@@ -41,7 +46,7 @@ impl Fake {
         }
     }
 
-    fn base(&self) -> String {
+    pub(super) fn base(&self) -> String {
         format!("http://127.0.0.1:{}", self.port)
     }
 }
@@ -72,7 +77,7 @@ fn git(dir: &Path, args: &[&str]) {
     );
 }
 
-fn repo(origin: &str, branch: &str) -> tempfile::TempDir {
+pub(super) fn repo(origin: &str, branch: &str) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path();
     git(p, &["init", "-q", "-b", "main"]);
@@ -86,13 +91,13 @@ fn repo(origin: &str, branch: &str) -> tempfile::TempDir {
     dir
 }
 
-fn shows(rt: &Runtime<State>, needle: &str) -> bool {
+pub(super) fn shows(rt: &Runtime<State>, needle: &str) -> bool {
     rt.elements()
         .into_iter()
         .any(|e| e.text.as_deref().is_some_and(|t| t.contains(needle)))
 }
 
-fn settle(rt: &mut Runtime<State>, until: impl Fn(&State) -> bool) {
+pub(super) fn settle(rt: &mut Runtime<State>, until: impl Fn(&State) -> bool) {
     for _ in 0..400 {
         step(rt);
         if until(&rt.state) {
@@ -106,7 +111,7 @@ fn settle(rt: &mut Runtime<State>, until: impl Fn(&State) -> bool) {
     panic!("the screen never settled");
 }
 
-fn click(rt: &mut Runtime<State>, key: &str) {
+pub(super) fn click(rt: &mut Runtime<State>, key: &str) {
     if key.starts_with("prc-")
         || key.starts_with("prl-f")
         || key.starts_with("prv-")
@@ -140,12 +145,26 @@ fn connection(fake: &Fake, login: &str) -> Connection {
     }
 }
 
-fn screen(dir: &Path, fake: &Fake, logins: &[&str]) -> Runtime<State> {
+pub(super) fn screen(dir: &Path, fake: &Fake, logins: &[&str]) -> Runtime<State> {
+    screen_as(dir, fake, logins, connection)
+}
+
+pub(super) fn screen_as(
+    dir: &Path,
+    fake: &Fake,
+    logins: &[&str],
+    make: fn(&Fake, &str) -> Connection,
+) -> Runtime<State> {
     let store = Arc::new(MemoryStore::default());
     let mut state = State::new(None, rune::prefs::Prefs::memory());
     for login in logins {
-        let connection = connection(fake, login);
-        store.set(&connection.secret_key(), "good").unwrap();
+        let connection = make(fake, login);
+        let token = if connection.provider == Provider::Gitlab {
+            "glgood"
+        } else {
+            "good"
+        };
+        store.set(&connection.secret_key(), token).unwrap();
         state.accounts.book.upsert(connection);
     }
     state.hosting = Hosting::new(store);
@@ -279,7 +298,7 @@ fn list_screen(fake: &Fake) -> (tempfile::TempDir, Runtime<State>) {
     (dir, rt)
 }
 
-fn loaded(rt: &mut Runtime<State>, number: u64) {
+pub(super) fn loaded(rt: &mut Runtime<State>, number: u64) {
     settle(rt, move |s| {
         !s.pulls.list.detail_loading
             && s.pulls

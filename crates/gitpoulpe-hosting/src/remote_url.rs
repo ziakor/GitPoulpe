@@ -8,8 +8,8 @@ pub struct RemoteRef {
 fn split_path(path: &str) -> Option<(String, String)> {
     let path = path.trim_matches('/');
     let path = path.strip_suffix(".git").unwrap_or(path);
-    let (owner, repo) = path.split_once('/')?;
-    if owner.is_empty() || repo.is_empty() || repo.contains('/') {
+    let (owner, repo) = path.rsplit_once('/')?;
+    if repo.is_empty() || owner.split('/').any(str::is_empty) {
         return None;
     }
     Some((owner.to_owned(), repo.to_owned()))

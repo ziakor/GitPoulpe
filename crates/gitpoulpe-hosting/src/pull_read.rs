@@ -109,6 +109,10 @@ pub async fn list_pulls(
     name: &str,
     filter: PullFilter,
 ) -> Result<(Vec<PullSummary>, bool), GithubError> {
+    if connection.provider == gitpoulpe_core::Provider::Gitlab {
+        let client = client(store, connection)?;
+        return crate::gitlab_pulls::list_mrs(&client, (owner, name), filter).await;
+    }
     if !valid_org(owner) || !valid_org(name) {
         return Err(GithubError::NotFound);
     }
@@ -134,6 +138,10 @@ pub async fn load_pull(
     name: &str,
     number: u64,
 ) -> Result<PullDetail, GithubError> {
+    if connection.provider == gitpoulpe_core::Provider::Gitlab {
+        let client = client(store, connection)?;
+        return crate::gitlab_pulls::load_mr(&client, (owner, name), number).await;
+    }
     if !valid_org(owner) || !valid_org(name) {
         return Err(GithubError::NotFound);
     }

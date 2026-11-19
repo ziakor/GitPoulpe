@@ -6,7 +6,7 @@ use crate::http::ApiClient;
 use crate::repos::{RepoSummary, client, parse_repo, valid_org};
 use crate::secrets::SecretStore;
 
-const MAX_FILES: usize = 300;
+pub(crate) const MAX_FILES: usize = 300;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChangedFile {
@@ -59,7 +59,7 @@ pub struct PullDraft {
     pub draft: bool,
 }
 
-fn valid_branch(branch: &str) -> bool {
+pub(crate) fn valid_branch(branch: &str) -> bool {
     !branch.is_empty()
         && branch.len() <= 250
         && !branch.starts_with('/')
@@ -70,7 +70,7 @@ fn valid_branch(branch: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/'))
 }
 
-fn encode(value: &str) -> String {
+pub(crate) fn encode(value: &str) -> String {
     value
         .bytes()
         .map(|b| match b {
@@ -171,6 +171,18 @@ pub async fn prepare_pull(
     to_parent: bool,
     base: Option<&str>,
 ) -> Result<PullTarget, GithubError> {
+    if connection.provider == gitpoulpe_core::Provider::Gitlab {
+        let client = client(store, connection)?;
+        return crate::gitlab_pulls::prepare_mr(
+            &client,
+            connection,
+            (head_owner, head_name),
+            branch,
+            to_parent,
+            base,
+        )
+        .await;
+    }
     if !valid_org(head_owner)
         || !valid_org(head_name)
         || !valid_branch(branch)
@@ -265,6 +277,9 @@ pub async fn create_pull_request(
         return Err(GithubError::BranchNotPublished(prepared.branch.clone()));
     }
     let client = client(store, connection)?;
+    if connection.provider == gitpoulpe_core::Provider::Gitlab {
+        return crate::gitlab_pulls::create_mr(&client, connection, prepared, draft).await;
+    }
     if let Some(existing) = open_pull_for(
         &client,
         &prepared.target_repo,

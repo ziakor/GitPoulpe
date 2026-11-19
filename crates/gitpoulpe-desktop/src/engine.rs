@@ -231,6 +231,7 @@ pub enum Command {
     PullInspect {
         request: u64,
         remote: String,
+        refs: gitpoulpe_git::ReviewRefs,
         number: u64,
         base_ref: String,
         base_sha: String,
@@ -1192,6 +1193,7 @@ async fn run(
                     Command::PullInspect {
                         request,
                         remote,
+                        refs,
                         number,
                         base_ref,
                         base_sha,
@@ -1206,6 +1208,7 @@ async fn run(
                             PullInspectArgs {
                                 request,
                                 remote,
+                                refs,
                                 number,
                                 base_ref,
                                 base_sha,
@@ -2965,6 +2968,7 @@ async fn history_page(shared: Arc<Shared>, request: u64, handle: HistoryHandle) 
 struct PullInspectArgs {
     request: u64,
     remote: String,
+    refs: gitpoulpe_git::ReviewRefs,
     number: u64,
     base_ref: String,
     base_sha: String,
@@ -2979,6 +2983,7 @@ async fn inspect_pull(shared: Arc<Shared>, session: Arc<Session>, args: PullInsp
             .prepare_pull_range(
                 &session.info,
                 &args.remote,
+                args.refs,
                 args.number,
                 &args.base_ref,
                 &args.base_sha,

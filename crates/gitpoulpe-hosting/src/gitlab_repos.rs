@@ -20,6 +20,10 @@ pub(crate) fn valid_namespace(path: &str) -> bool {
         })
 }
 
+pub(crate) fn project_id(value: &Value) -> Option<u64> {
+    value.get("id")?.as_u64()
+}
+
 fn text(value: &Value, key: &str) -> Option<String> {
     value
         .get(key)
@@ -51,7 +55,7 @@ pub(crate) async fn list_groups(client: &ApiClient) -> Result<Listing<Organizati
     })
 }
 
-fn parse_project(connection: &Connection, value: &Value) -> Option<RepoSummary> {
+pub(crate) fn parse_project(connection: &Connection, value: &Value) -> Option<RepoSummary> {
     let name = text(value, "path")?;
     let owner = value.get("namespace").and_then(|n| text(n, "full_path"))?;
     let clone_url = text(value, "http_url_to_repo")?;
