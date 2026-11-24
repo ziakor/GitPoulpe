@@ -236,13 +236,13 @@ fn deleting_the_profile_of_a_repository_makes_it_follow_the_git_configuration_ag
 }
 
 #[test]
-fn the_profile_screen_opens_from_the_top_bar_saves_from_its_button_and_closes_with_escape() {
+fn the_profile_screen_opens_from_the_menu_saves_from_its_button_and_closes_with_escape() {
     let dir = repo();
     let mut state = state_with(Prefs::memory());
     open(&mut state, dir.path());
     let mut rt = runtime(state);
     rt.on_key = Some(crate::keys::on_key);
-    let button = rect_of(&rt, "profiles").expect("the top bar offers the profiles");
+    let button = rect_of(&rt, "profiles").expect("the menu offers the profiles");
     click_at(
         &mut rt,
         button[0] + 10.0,

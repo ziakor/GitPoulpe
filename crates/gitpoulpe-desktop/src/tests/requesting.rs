@@ -392,6 +392,20 @@ fn a_long_diff_is_read_to_its_last_line_and_the_side_panel_gives_way_to_a_tab() 
 }
 
 #[test]
+fn the_menu_entry_leads_straight_to_the_list_of_pull_requests() {
+    let fake = Fake::start();
+    let dir = repo(&format!("{}/acme/proj.git", fake.base()), "feature/x");
+    let mut rt = screen(dir.path(), &fake, &["Octo"]);
+    click(&mut rt, "nav-changes");
+    step(&mut rt);
+    assert!(!rt.state.pulls.open);
+    click(&mut rt, "nav-pulls");
+    settle(&mut rt, |s| s.pulls.list.open && !s.pulls.list.loading);
+    assert!(shows(&rt, "#1 · ouverte · author1"));
+    assert_eq!(rt.state.place(), crate::nav::Place::Pulls);
+}
+
+#[test]
 fn switching_pull_requests_never_shows_a_late_answer_for_the_previous_one() {
     let fake = Fake::start();
     let (_dir, mut rt) = list_screen(&fake);

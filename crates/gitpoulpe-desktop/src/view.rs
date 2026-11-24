@@ -134,7 +134,13 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
             }
         })
         .child(top_bar(s))
-        .child(body)
+        .child({
+            let mut middle = row().w_full().grow(1.0).min_h(0.0);
+            if s.nav_shown() {
+                middle = middle.child(crate::nav_view::sidebar(s));
+            }
+            middle.child(col().grow(1.0).min_w(0.0).h_full().child(body))
+        })
         .child(footer(s))
 }
 
@@ -271,26 +277,34 @@ fn top_bar(s: &State) -> El {
         .center_y()
         .fill(p.panel)
         .border(1.0, p.line)
+        .child(if s.nav_shown() {
+            el().w(0.0)
+        } else {
+            menu_button(s)
+        })
         .child(
             row()
-                .w(if s.window_width < 900.0 { 124.0 } else { 172.0 })
+                .w(if s.nav_shown() {
+                    crate::nav_view::NAV_WIDTH - 20.0
+                } else if s.window_width < 900.0 {
+                    124.0
+                } else {
+                    172.0
+                })
                 .child(text("git").font(theme::WORDMARK).color(p.text))
                 .child(text("poulpe").font(theme::WORDMARK_BOLD).color(p.text)),
         )
         .child(context)
-        .child(open_button(&p, false))
-        .child(history_button(s))
-        .child(ignored_button(s))
-        .child(profile_button(s))
         .child(refresh_button(s))
+        .child(palette_button(s))
         .child(theme_toggle)
 }
 
-fn ignored_button(s: &State) -> El {
+fn palette_button(s: &State) -> El {
     let p = s.palette;
-    el().key("ignored")
+    el().key("palette-open")
         .role("button")
-        .label("Fichiers ignorés")
+        .label("Palette de commandes")
         .focusable(true)
         .focus_ring(2.0, 2.0, p.accent)
         .h(32.0)
@@ -298,54 +312,25 @@ fn ignored_button(s: &State) -> El {
         .center()
         .radius(3.0)
         .hover(p.hover)
-        .on_press(|s: &mut State| {
-            if s.ignored.open {
-                s.close_ignored();
-            } else {
-                s.open_ignored(None);
-            }
-        })
-        .child(text("Ignorés".to_owned()).font(theme::BODY).color(p.muted))
-}
-
-fn history_button(s: &State) -> El {
-    let p = s.palette;
-    el().key("history")
-        .role("button")
-        .label("Historique")
-        .focusable(true)
-        .focus_ring(2.0, 2.0, p.accent)
-        .h(32.0)
-        .px(10.0)
-        .center()
-        .radius(3.0)
-        .hover(p.hover)
-        .on_press(|s: &mut State| {
-            if s.history_open {
-                s.close_history();
-            } else {
-                s.open_history();
-            }
-        })
+        .on_press_tx(|s: &mut State, tx: &mut Tx| s.open_palette(tx))
         .child(
-            text("Historique".to_owned())
-                .font(theme::BODY)
-                .color(p.muted),
+            row()
+                .gap(6.0)
+                .center_y()
+                .child(text("Commandes").font(theme::BODY).color(p.muted))
+                .child(
+                    text(s.shortcut_for("palette"))
+                        .font(theme::PATH_SMALL)
+                        .color(p.muted),
+                ),
         )
 }
 
-fn profile_button(s: &State) -> El {
+fn menu_button(s: &State) -> El {
     let p = s.palette;
-    let compact = s.window_width < 900.0;
-    let caption = match (s.repo.is_some(), s.active_profile()) {
-        _ if compact => "Profils".to_owned(),
-        (true, Some(profile)) => format!("Profil : {}", profile.label),
-        (true, None) => "Profil : configuration Git".to_owned(),
-        (false, _) => "Profils".to_owned(),
-    };
-    el().key("profiles")
+    el().key("nav-show")
         .role("button")
-        .label("Profils Git")
+        .label("Afficher le menu")
         .focusable(true)
         .focus_ring(2.0, 2.0, p.accent)
         .h(32.0)
@@ -353,9 +338,8 @@ fn profile_button(s: &State) -> El {
         .center()
         .radius(3.0)
         .hover(p.hover)
-        .on_press(|s: &mut State| s.open_profiles())
-        .max_w(260.0)
-        .child(text(caption).font(theme::BODY).color(p.muted).truncate())
+        .on_press(|s: &mut State| s.toggle_nav())
+        .child(text("Menu").font(theme::BODY).color(p.muted))
 }
 
 fn refresh_button(s: &State) -> El {

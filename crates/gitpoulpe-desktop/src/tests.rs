@@ -30,6 +30,7 @@ mod issuing;
 mod lfsing;
 mod linking;
 mod merging;
+mod navigating;
 mod noticing;
 mod overviewing;
 mod palette_commands;
@@ -677,14 +678,21 @@ fn page_keys_home_and_arrows_scroll_the_diff_from_the_keyboard() {
 fn every_focusable_control_shows_a_visible_focus_when_reached_by_tab() {
     let (_repo, mut rt) = keyboard_runtime(5);
     let mut visited = std::collections::BTreeSet::new();
-    for _ in 0..20 {
+    for _ in 0..60 {
         press(&mut rt, rune::Key::Tab);
         if let Some(info) = rt.elements().into_iter().find(|e| e.focused) {
             assert!(info.focus_visible, "no visible focus on {:?}", info.key);
             visited.insert(info.key.unwrap_or_default());
         }
     }
-    for expected in ["open", "theme", "filter", "viewport", "divider"] {
+    for expected in [
+        "theme",
+        "nav-changes",
+        "profiles",
+        "filter",
+        "viewport",
+        "divider",
+    ] {
         assert!(
             visited.contains(expected),
             "Tab never reached {expected}: {visited:?}"
@@ -1416,8 +1424,9 @@ fn the_file_list_never_takes_more_than_its_share_of_a_small_window() {
 
     let (_repo, large) = sized_runtime(6, 1440.0, 900.0);
     let divider = rect_of(&large, "divider").unwrap();
+    let nav = rect_of(&large, "nav").map_or(0.0, |r| r[2]);
     assert!(
-        (divider[0] - crate::state::LIST_WIDTH_DEFAULT).abs() < 1.0,
+        (divider[0] - nav - crate::state::LIST_WIDTH_DEFAULT).abs() < 1.0,
         "the chosen width is kept when there is room"
     );
 }
@@ -1425,13 +1434,15 @@ fn the_file_list_never_takes_more_than_its_share_of_a_small_window() {
 #[test]
 fn every_control_stays_inside_the_window_at_the_smallest_supported_size() {
     let (_repo, rt) = sized_runtime(6, 720.0, 480.0);
+    assert!(
+        rect_of(&rt, "nav").is_none(),
+        "the menu folds away in a small window"
+    );
     for key in [
-        "open",
-        "history",
-        "ignored",
+        "nav-show",
         "branch-name",
-        "profiles",
         "refresh",
+        "palette-open",
         "theme",
         "commit-message",
         "commit",
@@ -1609,7 +1620,7 @@ fn the_wordmark_fits_its_column_at_the_smallest_supported_size() {
             .map(|e| e.rect[0] + e.rect[2])
             .unwrap()
     };
-    let context_left = rect_of(&rt, "open").unwrap()[0];
+    let context_left = rect_of(&rt, "branch-name").unwrap()[0];
     assert!(
         right("poulpe") <= context_left,
         "{} > {context_left}",

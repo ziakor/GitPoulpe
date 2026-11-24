@@ -34,6 +34,7 @@ pub struct PullsState {
     pub request: u64,
     pub version: u32,
     pub list: crate::pull_list::PullListState,
+    pub list_wanted: bool,
 }
 
 impl Default for PullsState {
@@ -58,6 +59,7 @@ impl Default for PullsState {
             request: 0,
             version: 0,
             list: crate::pull_list::PullListState::default(),
+            list_wanted: false,
         }
     }
 }
@@ -181,9 +183,14 @@ impl State {
         }
         self.pulls.candidates = candidates;
         self.load_pull_preview();
-        if self.notices.pull_number.is_some() {
+        if self.notices.pull_number.is_some() || std::mem::take(&mut self.pulls.list_wanted) {
             self.open_pull_list();
         }
+    }
+
+    pub fn open_pull_list_direct(&mut self) {
+        self.open_pulls();
+        self.pulls.list_wanted = true;
     }
 
     pub fn load_pull_preview(&mut self) {

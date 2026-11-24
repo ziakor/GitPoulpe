@@ -258,7 +258,10 @@ fn screen_header(s: &State) -> El {
                 s.load_pull_detail();
             }),
         )
-        .child(action(s, "prl-back", "Retour", false).on_press(|s: &mut State| s.close_pull_list()))
+        .child(
+            action(s, "prl-back", "Nouvelle pull request…", false)
+                .on_press(|s: &mut State| s.close_pull_list()),
+        )
 }
 
 fn list_column(s: &State, width: f32) -> El {

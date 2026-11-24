@@ -35,6 +35,8 @@ mod issues_view;
 mod keys;
 mod lfs_screen;
 mod lfs_screen_view;
+mod nav;
+mod nav_view;
 mod notices;
 mod notices_view;
 mod overview;

@@ -34,15 +34,16 @@ The script refuses to install if shared libraries are missing and tells you whic
 
 - Run `gitpoulpe /path/to/repository`, or start it and use "Ouvrir un dépôt…" (`Ctrl+O`), or "Cloner un dépôt".
 - Reading a repository never changes it. The unstaged and staged views show every file with its diff in one scrolling stream.
-- `Ctrl+K` opens the command palette: type a few words to find any screen or action.
+- The menu on the left reaches every screen in one click: Travail (changes, history, ignored files), Collaboration (pull requests, issues, notifications), Références (branches, tags, remotes, stashes, worktrees), the folded "Outils avancés" and "Dépôts" groups, and Réglages at the bottom. Below 1100 points of width it folds away; "Menu" in the top bar brings it back.
+- `Ctrl+K` opens the command palette ("Commandes" in the top bar): type a few words to find any screen or action.
 
 ## Everyday work
 
 1. **Stage**: "Indexer" on a file, a block or selected lines (see [Writing](../README.md#writing)).
-2. **Commit**: write the message and commit with your Git profile ("Profils Git" in the palette sets name, email and signing). Hooks run as configured.
+2. **Commit**: write the message and commit with your Git profile ("Profils Git" in the menu's Réglages sets name, email and signing). Hooks run as configured.
 3. **Branch**: click the branch name in the top bar to create, switch, rename or delete branches.
 4. **Share**: "Intégrer les changements distants…" brings in remote work with the strategy you choose; "Publier…" sends a branch after showing exactly what will happen.
-5. **Review**: "Pull requests et merge requests" in the palette lists them, shows the diff against the exact commits, and lets you comment, review and merge once an account is connected ("Comptes fournisseurs"). Attached images are shown in place, and a changed image shows its old and new versions; videos and other files open in the browser.
+5. **Review**: "Pull requests" in the menu lists them, shows the diff against the exact commits, and lets you comment, review and merge once an account is connected ("Comptes fournisseurs"). Attached images are shown in place, and a changed image shows its old and new versions; videos and other files open in the browser.
 
 Other tools, each documented in the README: history and file history, blame, stash, tags, remotes, worktrees, hooks, Git LFS, submodules, Gitflow, interactive rebase, cherry-pick and revert, patches ("Importer un patch…", "Exporter en patch…"), links ("Ouvrir un lien…"), workspaces, favorites, multi-repository overview, notifications, issues, external tools and an embedded terminal.
 
