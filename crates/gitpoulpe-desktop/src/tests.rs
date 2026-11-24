@@ -50,6 +50,7 @@ mod shortcut_settings;
 mod staging;
 mod stashing;
 mod submoduling;
+mod switching;
 mod syncing;
 mod tagging;
 mod terminalling;

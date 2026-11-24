@@ -6,7 +6,7 @@ use crate::view::row_key;
 const LINES_PER_KEY: usize = 3;
 const SIDEWAYS_STEP: f32 = 96.0;
 
-const TEXT_INPUTS: [&str; 46] = [
+const TEXT_INPUTS: [&str; 47] = [
     "ac-server",
     "ac-token",
     "br-filter",
@@ -45,6 +45,7 @@ const TEXT_INPUTS: [&str; 46] = [
     "pf-email",
     "pf-key",
     "pal-input",
+    "sw-input",
     "sc-search",
     "ws-new-name",
     "pt-revision",
@@ -237,6 +238,9 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
     if s.commands.open && s.palette_key(&event.key, tx) {
         return true;
     }
+    if s.switcher.open && s.switcher_key(&event.key, tx) {
+        return true;
+    }
     if s.tools.open && event.key == Key::Escape {
         s.close_tools();
         return true;
@@ -395,6 +399,7 @@ pub fn on_key(s: &mut State, event: &KeyEvent, tx: &mut Tx) -> bool {
         || s.file_edit.open
         || s.terminal.open
         || s.commands.open
+        || s.switcher.open
         || s.shortcuts.open
         || s.workspaces.open
         || s.favorites.open

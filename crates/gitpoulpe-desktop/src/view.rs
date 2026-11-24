@@ -114,15 +114,16 @@ pub fn view(s: &State, _: &mut Cx<State>) -> El {
     } else {
         body
     };
-    let body = if s.commands.open {
-        col()
-            .w_full()
-            .grow(1.0)
-            .min_h(0.0)
-            .child(crate::palette_view::palette_bar(s))
-            .child(body)
+    let bar = if s.commands.open {
+        Some(crate::palette_view::palette_bar(s))
+    } else if s.switcher.open {
+        Some(crate::switcher_view::switcher_bar(s))
     } else {
-        body
+        None
+    };
+    let body = match bar {
+        Some(bar) => col().w_full().grow(1.0).min_h(0.0).child(bar).child(body),
+        None => body,
     };
     col()
         .w_full()
@@ -281,10 +282,33 @@ fn top_bar(s: &State) -> El {
         }
         context = context
             .child(
-                text(repo.name.clone())
-                    .font(theme::BODY_STRONG)
-                    .color(p.text)
-                    .truncate(),
+                row()
+                    .key("repo-switch")
+                    .role("button")
+                    .label("Changer de dépôt")
+                    .focusable(true)
+                    .focus_ring(2.0, 2.0, p.accent)
+                    .hover(p.hover)
+                    .radius(3.0)
+                    .gap(6.0)
+                    .center_y()
+                    .shrink()
+                    .self_start()
+                    .px(2.0)
+                    .fill(if s.switcher.open { p.selected } else { p.panel })
+                    .on_press_tx(|s: &mut State, tx: &mut Tx| s.toggle_switcher(tx))
+                    .child(
+                        text(repo.name.clone())
+                            .font(theme::BODY_STRONG)
+                            .color(p.text)
+                            .shrink()
+                            .truncate(),
+                    )
+                    .child(
+                        text(if s.switcher.open { "▴" } else { "▾" })
+                            .font(theme::SMALL)
+                            .color(p.muted),
+                    ),
             )
             .child(line);
         sync = link.as_ref().and_then(|link| sync_group(s, link));

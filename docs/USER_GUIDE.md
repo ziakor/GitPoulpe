@@ -36,6 +36,7 @@ The script refuses to install if shared libraries are missing and tells you whic
 - Reading a repository never changes it. The unstaged and staged views show every file with its diff in one scrolling stream.
 - The menu on the left reaches every screen in one click: Travail (changes, history, ignored files), Collaboration (pull requests, issues, notifications), Références (branches, tags, remotes, stashes, worktrees), the folded "Outils avancés" and "Dépôts" groups, and Réglages at the bottom, with "Thème clair" or "Thème sombre" next to "Masquer le menu". Below 1100 points of width it folds away; "Menu" in the top bar brings it back.
 - `Ctrl+K` opens the command palette ("Commandes" in the top bar): type a few words to find any screen or action.
+- Click the repository name in the top bar to switch to another repository: your favorites and the repositories of your workspaces are listed, with a filter, the keyboard arrows and `Entrée`. "Ouvrir un dépôt…", "Cloner un dépôt" and adding the open repository to the favorites are there too.
 - Under the repository name, the top bar shows the current branch and how it stands against the branch it tracks: "à jour avec origin", "à synchroniser avec origin" (your branch or the remote one has commits the other lacks; the exact counts are in the previews), "branche suivie introuvable" or "pas de branche distante".
 
 ## Everyday work

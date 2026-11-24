@@ -75,6 +75,8 @@ mod stashes_view;
 mod state;
 mod submodule_screen;
 mod submodule_screen_view;
+mod switcher;
+mod switcher_view;
 mod sync;
 mod tags;
 mod tags_view;
@@ -141,6 +143,30 @@ fn demo_branches(state: &mut State) {
     state.drain();
 }
 
+fn demo_switcher(state: &mut State) {
+    demo(state);
+    state.favorites.book = gitpoulpe_core::FavoriteBook::default();
+    state.workspaces.book = Default::default();
+    if let Some(dir) = std::env::var_os("GITPOULPE_DEMO_FAVORITES") {
+        for path in std::env::split_paths(&dir) {
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            state
+                .favorites
+                .book
+                .items
+                .push(gitpoulpe_core::Favorite::Local {
+                    path: path.display().to_string(),
+                    name,
+                });
+        }
+    }
+    state.switcher.open = true;
+    state.load_switcher();
+}
+
 fn demo_review_focus(state: &mut State) {
     demo_review_files(state);
     state.toggle_review_side();
@@ -200,6 +226,7 @@ fn main() {
             ("demo-review-focus", demo_review_focus),
             ("demo-history", demo_history),
             ("demo-branches", demo_branches),
+            ("demo-switcher", demo_switcher),
         ],
         ..AppSpec::new("GitPoulpe", (1280.0, 800.0), State::default, view::view)
     })

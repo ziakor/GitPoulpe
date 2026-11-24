@@ -411,6 +411,7 @@ impl State {
         if self.commands.open {
             return;
         }
+        self.close_switcher(tx, false);
         let restore = tx.focused().map(str::to_owned);
         self.commands = PaletteState {
             open: true,
