@@ -1,7 +1,7 @@
 use gitpoulpe_core::{Connection, Provider};
 use rune::TextEdit;
 
-use super::requesting::{Fake, click, loaded, repo, screen_as, settle, shows};
+use super::requesting::{Fake, click, loaded, repo, screen_as, settle, shows, text_of};
 use super::{rect_of, step};
 
 fn gitlab(fake: &Fake, login: &str) -> Connection {
@@ -65,14 +65,19 @@ fn merge_requests_are_listed_and_one_shows_its_revisions_files_and_commits() {
     let (_dir, mut rt) = open(&fake, "feature/x");
     click(&mut rt, "pr-list");
     settle(&mut rt, |s| s.pulls.list.open && !s.pulls.list.loading);
-    assert!(shows(&rt, "Merge requests · 5 résultat(s)"));
-    assert!(shows(&rt, "#9 MR 9") && shows(&rt, "#5 Work in progress"));
+    assert!(shows(&rt, "Merge requests"));
+    assert_eq!(text_of(&rt, "prl-count").as_deref(), Some("5"));
+    assert!(shows(&rt, "#9 · ouverte · octo") && shows(&rt, "Work in progress"));
     click(&mut rt, "prlk2");
     loaded(&mut rt, 7);
     assert!(shows(&rt, "feature/y (ddddddd) → main (bbbbbbb)"));
-    assert!(shows(&rt, "4 fichier(s)") && shows(&rt, "2 commit(s)"));
-    assert!(shows(&rt, "+more") && shows(&rt, "-old"));
-    assert!(shows(&rt, "Second — Octo"));
+    assert!(shows(&rt, "Fichiers 4") && shows(&rt, "Commits 2"));
+    click(&mut rt, "prl-tab-files");
+    step(&mut rt);
+    assert!(shows(&rt, "more") && shows(&rt, "old"));
+    click(&mut rt, "prl-tab-commits");
+    step(&mut rt);
+    assert!(shows(&rt, "Second") && shows(&rt, "Octo"));
 }
 
 #[test]
@@ -84,6 +89,8 @@ fn a_partial_file_list_from_an_older_server_is_flagged_next_to_the_git_reader() 
     click(&mut rt, "prlk1");
     loaded(&mut rt, 8);
     assert!(shows(&rt, "GitLab n'a pas renvoyé la liste complète"));
+    click(&mut rt, "prl-tab-files");
+    step(&mut rt);
     assert!(shows(&rt, "(liste tronquée)"));
     assert!(rect_of(&rt, "prl-git").is_some());
 }
@@ -107,7 +114,13 @@ fn review_screen(
 #[test]
 fn comments_checks_and_merge_rules_of_a_merge_request_are_read_from_gitlab() {
     let fake = Fake::start_script("fake_gitlab.py");
-    let (_dir, rt) = review_screen(&fake, 20);
+    let (_dir, mut rt) = review_screen(&fake, 20);
+    assert_eq!(
+        text_of(&rt, "prc-general0").as_deref(),
+        Some("General remark")
+    );
+    click(&mut rt, "prl-tab-files");
+    step(&mut rt);
     let general = &rt.state.pulls.list.comments.issue;
     assert_eq!(general.len(), 1);
     assert_eq!(general[0].body, "General remark");
@@ -149,7 +162,7 @@ fn gitlab_blockers_are_shown_next_to_the_merge_buttons() {
             .as_ref()
             .is_some_and(|m| m.head_sha.starts_with("44"))
     });
-    assert!(shows(&rt, "des conflits de fusion doivent être résolus"));
+    assert!(shows(&rt, "Des conflits de fusion doivent être résolus"));
 }
 
 #[test]
@@ -160,7 +173,7 @@ fn a_merge_request_is_merged_in_two_steps_and_confirmed_by_the_remote() {
     step(&mut rt);
     assert!(shows(
         &rt,
-        "Confirmer : Fusionner (commit de fusion) sur la révision 2222222"
+        "Commit de fusion sur la révision 2222222 : confirmez pour fusionner."
     ));
     assert!(rt.state.pulls.list.merge_notice.is_none() && !rt.state.pulls.list.merging);
     click(&mut rt, "mrg-confirm");

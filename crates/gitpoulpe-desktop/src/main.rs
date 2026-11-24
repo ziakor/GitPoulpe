@@ -61,6 +61,9 @@ mod remotes_view;
 mod repo_browser;
 mod repo_browser_view;
 mod resetting;
+mod review_demo;
+mod review_files_view;
+mod review_side_view;
 mod sequencing;
 mod shell;
 mod shortcuts;
@@ -111,6 +114,21 @@ fn demo_split(state: &mut State) {
     state.current = (!state.files.is_empty()).then_some(0);
 }
 
+fn demo_review(state: &mut State) {
+    demo(state);
+    review_demo::review_scene(state);
+}
+
+fn demo_review_files(state: &mut State) {
+    demo(state);
+    review_demo::review_files_scene(state);
+}
+
+fn demo_review_light(state: &mut State) {
+    state.set_dark(false);
+    demo_review(state);
+}
+
 fn demo_light(state: &mut State) {
     state.set_dark(false);
     demo(state);
@@ -141,6 +159,9 @@ fn main() {
             ("demo", demo),
             ("demo-light", demo_light),
             ("demo-split", demo_split),
+            ("demo-review", demo_review),
+            ("demo-review-light", demo_review_light),
+            ("demo-review-files", demo_review_files),
         ],
         ..AppSpec::new("GitPoulpe", (1280.0, 800.0), State::default, view::view)
     })

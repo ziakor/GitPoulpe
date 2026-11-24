@@ -166,6 +166,12 @@ fn footer(s: &State) -> El {
 }
 
 fn hints(s: &State) -> String {
+    if s.pulls.open && s.pulls.list.open {
+        return format!(
+            "Cliquez une ligne du diff pour la commenter · {} : palette de commandes",
+            s.shortcut_for("palette")
+        );
+    }
     format!(
         "{} filtrer · {} et {} : fichier suivant ou précédent · {} et {} : changer de vue · {} : unifié ou séparé · ↑ ↓ ← → PgUp PgDn : lire · {} : actualiser · {} : indexer · {} : désindexer · {} : sélectionner · {} : appliquer à la sélection · clic sur un numéro de ligne : sélectionner (Maj pour étendre) · {} : ouvrir un dépôt · {} : palette de commandes",
         s.shortcut_for("filter"),

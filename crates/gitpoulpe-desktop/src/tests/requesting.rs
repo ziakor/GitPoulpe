@@ -111,14 +111,25 @@ pub(super) fn settle(rt: &mut Runtime<State>, until: impl Fn(&State) -> bool) {
     panic!("the screen never settled");
 }
 
+pub(super) fn text_of(rt: &Runtime<State>, key: &str) -> Option<String> {
+    rt.elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some(key))
+        .and_then(|e| e.text)
+}
+
 pub(super) fn click(rt: &mut Runtime<State>, key: &str) {
-    if key.starts_with("prc-")
-        || key.starts_with("prl-f")
-        || key.starts_with("prv-")
-        || key.starts_with("mrg-")
+    let container = if key.starts_with("prv-") || key.starts_with("mrg-") || key.starts_with("chk-")
     {
+        Some("prl-side")
+    } else if key.starts_with("prc-") || key.starts_with("prl-f") || key.starts_with("prl-body") {
+        Some("prl-panel")
+    } else {
+        None
+    };
+    if let Some(container) = container {
         let target = key.to_owned();
-        rt.update(move |_, tx| tx.scroll_into_view_in("prl-panel", target));
+        rt.update(move |_, tx| tx.scroll_into_view_in(container, target));
         for _ in 0..8 {
             step(rt);
         }
@@ -313,15 +324,22 @@ pub(super) fn loaded(rt: &mut Runtime<State>, number: u64) {
 fn pull_requests_are_listed_by_state_and_one_shows_its_revisions_commits_and_diffs() {
     let fake = Fake::start();
     let (_dir, mut rt) = list_screen(&fake);
-    assert!(shows(&rt, "#1 PR 1") && shows(&rt, "#4 PR 4"));
-    assert!(!shows(&rt, "#2 PR 2"));
+    assert!(shows(&rt, "#1 · ouverte · author1") && shows(&rt, "#4 · brouillon · author4"));
+    assert!(!shows(&rt, "#2 · "));
     click(&mut rt, "prlk0");
     loaded(&mut rt, 1);
+    assert_eq!(text_of(&rt, "prl-title").as_deref(), Some("PR 1"));
     assert!(shows(&rt, "feature/1 (sha1) → main (basesha)"));
     assert!(shows(&rt, "par author1"));
-    assert!(shows(&rt, "2 commit(s)") && shows(&rt, "3 fichier(s)"));
-    assert!(shows(&rt, "+new3") && shows(&rt, "-old1"));
-    assert!(shows(&rt, "first — authorx"));
+    assert!(shows(&rt, "Commits 2") && shows(&rt, "Fichiers 3"));
+    click(&mut rt, "prl-tab-files");
+    step(&mut rt);
+    assert!(shows(&rt, "3 fichiers · +6 −3"));
+    assert!(shows(&rt, "new3") && shows(&rt, "old1"));
+    click(&mut rt, "prl-tab-commits");
+    step(&mut rt);
+    assert!(rect_of(&rt, "prl-commit0").is_some() && rect_of(&rt, "prl-commit1").is_some());
+    assert!(shows(&rt, "first") && shows(&rt, "authorx"));
     click(&mut rt, "prl-all");
     settle(&mut rt, |s| {
         s.pulls.list.filter == gitpoulpe_hosting::PullFilter::All
@@ -346,7 +364,8 @@ fn switching_pull_requests_never_shows_a_late_answer_for_the_previous_one() {
     }
     let detail = rt.state.pulls.list.detail.as_ref().unwrap();
     assert_eq!(detail.summary.number, 1);
-    assert!(shows(&rt, "#1 PR 1") && !shows(&rt, "#5 PR 5 "));
+    let meta = text_of(&rt, "prl-meta").unwrap();
+    assert!(meta.starts_with("#1 · ") && !meta.contains("#5"));
 }
 
 #[test]
@@ -386,7 +405,7 @@ fn an_update_during_reading_and_a_removed_access_are_reported_without_mixing_res
     });
     assert!(shows(&rt, "introuvable ou non autorisée"));
     assert!(rt.state.pulls.list.detail.is_none());
-    assert!(!shows(&rt, "#1 PR 1 "));
+    assert!(text_of(&rt, "prl-meta").is_none());
 }
 
 fn comments_ready(rt: &mut Runtime<State>) {
@@ -407,16 +426,19 @@ fn a_line_comment_targets_the_revision_side_and_line_shown_and_threads_are_visib
     click(&mut rt, "prlk0");
     loaded(&mut rt, 1);
     comments_ready(&mut rt);
-    assert!(shows(&rt, "reviewer : root (ligne 1)"));
-    assert!(shows(&rt, "↳ octo : answer"));
-    assert!(shows(&rt, "reviewer : old (ligne 3, périmé)"));
-    assert!(shows(&rt, "1 commentaire(s) généraux"));
+    assert_eq!(text_of(&rt, "prc-general0").as_deref(), Some("hello"));
+    click(&mut rt, "prl-tab-files");
+    step(&mut rt);
+    assert_eq!(text_of(&rt, "prc-f0c10").as_deref(), Some("root"));
+    assert_eq!(text_of(&rt, "prc-f0r11").as_deref(), Some("answer"));
+    assert_eq!(text_of(&rt, "prc-f1c12").as_deref(), Some("old"));
+    assert!(shows(&rt, "ligne 1") && shows(&rt, "ligne 3, version précédente"));
     click(&mut rt, "prl-f0l2");
     step(&mut rt);
-    assert!(shows(&rt, "Ligne 1 (nouveau côté) de f1.rs"));
+    assert!(shows(&rt, "ligne 1 (nouveau côté) de f1.rs"));
     click(&mut rt, "prl-f0l1");
     step(&mut rt);
-    assert!(shows(&rt, "Ligne 1 (ancien côté) de f1.rs"));
+    assert!(shows(&rt, "ligne 1 (ancien côté) de f1.rs"));
     click(&mut rt, "prl-f0l2");
     compose(&mut rt, "please rename");
     click(&mut rt, "prc-send-line");
@@ -430,7 +452,8 @@ fn a_line_comment_targets_the_revision_side_and_line_shown_and_threads_are_visib
                 .any(|c| c.body == "please rename")
     });
     assert!(shows(&rt, "Commentaire publié."));
-    assert!(shows(&rt, "Octo : please rename (ligne 1)"));
+    assert!(shows(&rt, "please rename"));
+    assert!(rect_of(&rt, "prc-box").is_none());
     assert_eq!(rt.state.pulls.list.compose.text, "");
 }
 
@@ -441,9 +464,12 @@ fn replies_join_their_thread_and_a_range_needs_two_lines_on_the_same_side() {
     click(&mut rt, "prlk0");
     loaded(&mut rt, 1);
     comments_ready(&mut rt);
+    click(&mut rt, "prl-tab-files");
+    step(&mut rt);
     click(&mut rt, "prc-reply10");
     step(&mut rt);
-    assert!(shows(&rt, "Réponse au commentaire #10"));
+    assert!(shows(&rt, "Réponse au fil"));
+    assert!(rect_of(&rt, "prc-thread10").is_some() && rect_of(&rt, "prc-box").is_some());
     compose(&mut rt, "agreed");
     click(&mut rt, "prc-send-reply");
     settle(&mut rt, |s| {
@@ -455,14 +481,14 @@ fn replies_join_their_thread_and_a_range_needs_two_lines_on_the_same_side() {
                 .iter()
                 .any(|c| c.body == "agreed" && c.in_reply_to == Some(10))
     });
-    assert!(shows(&rt, "↳ Octo : agreed"));
+    assert!(shows(&rt, "agreed"));
     rt.state.pull_toggle_range();
     rt.state
         .pull_pick_line("f1.rs".to_owned(), 1, gitpoulpe_hosting::Side::Right);
     rt.state
         .pull_pick_line("f1.rs".to_owned(), 3, gitpoulpe_hosting::Side::Right);
     step(&mut rt);
-    assert!(shows(&rt, "Ligne 1–3 (nouveau côté) de f1.rs"));
+    assert!(shows(&rt, "ligne 1–3 (nouveau côté) de f1.rs"));
     rt.state
         .pull_pick_line("f1.rs".to_owned(), 5, gitpoulpe_hosting::Side::Left);
     rt.state
@@ -485,6 +511,8 @@ fn a_stale_anchor_keeps_the_text_and_a_lost_answer_is_checked_before_any_retry()
         .unwrap()
         .summary
         .head_sha = "oldsha0".to_owned();
+    click(&mut rt, "prl-tab-files");
+    step(&mut rt);
     click(&mut rt, "prl-f0l2");
     compose(&mut rt, "stale thought");
     click(&mut rt, "prc-send-line");
@@ -494,6 +522,9 @@ fn a_stale_anchor_keeps_the_text_and_a_lost_answer_is_checked_before_any_retry()
     assert!(shows(&rt, "l'ancrage du commentaire est périmé"));
     assert_eq!(rt.state.pulls.list.compose.text, "stale thought");
     assert!(rt.state.pulls.list.unverified.is_none());
+    click(&mut rt, "prc-cancel");
+    click(&mut rt, "prl-tab-conversation");
+    step(&mut rt);
     compose(&mut rt, "FLAKY retry");
     click(&mut rt, "prc-send-general");
     settle(&mut rt, |s| {
@@ -556,6 +587,8 @@ fn open_one(rt: &mut Runtime<State>, number: u64, row: usize) {
     click(rt, &format!("prlk{row}"));
     loaded(rt, number);
     settle(rt, |s| !s.pulls.list.comments.review.is_empty());
+    click(rt, "prl-tab-files");
+    step(rt);
 }
 
 fn add_to_draft(rt: &mut Runtime<State>, line_key: &str, text: &str) {
@@ -579,8 +612,11 @@ fn a_multi_file_draft_is_submitted_as_one_review_with_the_chosen_decision_and_th
     add_to_draft(&mut rt, "prl-f0l2", "first remark");
     add_to_draft(&mut rt, "prl-f1l2", "second remark");
     assert_eq!(draft_len(&rt), 2);
-    assert!(shows(&rt, "Revue en tant que Octo@"));
-    assert!(shows(&rt, "2 commentaire(s) dans le brouillon"));
+    assert!(shows(&rt, "En tant que Octo sur"));
+    assert_eq!(
+        text_of(&rt, "prv-count").as_deref(),
+        Some("2 commentaires de ligne en attente")
+    );
     rt.state.pulls.list.review_body = TextEdit::new("please fix");
     step(&mut rt);
     click(&mut rt, "prv-dec-changes");
@@ -658,9 +694,12 @@ fn an_update_during_the_review_flags_what_to_reread_without_losing_the_work_and_
     assert_eq!(flags, [true, false]);
     assert!(shows(
         &rt,
-        "mise à jour depuis la préparation du brouillon (révision older00)"
+        "a changé depuis le début du brouillon (révision older00)"
     ));
-    assert!(shows(&rt, "À RELIRE"));
+    assert_eq!(
+        text_of(&rt, "prv-entry0").as_deref(),
+        Some("remark one — à relire")
+    );
     rt.state.pulls.list.review_body = TextEdit::new("msg");
     step(&mut rt);
     click(&mut rt, "prv-submit");
@@ -774,20 +813,36 @@ fn checks_are_shown_per_state_for_the_current_revision_and_absence_is_not_succes
     let (_dir, mut rt) = list_screen(&fake);
     rt.state.select_pull(1);
     checks_ready(&mut rt, 1);
-    assert!(shows(
-        &rt,
-        "Révision sha1 : 1 en attente, 2 réussie(s), 1 échouée(s), 1 annulée(s), 1 ignorée(s)"
-    ));
-    assert!(shows(&rt, "lint : échouée — https://ci.test/2"));
-    assert!(shows(&rt, "deploy : en attente"));
-    assert!(shows(&rt, "legacy/ok : réussie (statut)"));
+    assert!(shows(&rt, "révision sha1"));
+    for count in [
+        "1 échouée",
+        "1 en attente",
+        "1 annulée",
+        "2 réussies",
+        "1 ignorée",
+    ] {
+        assert!(shows(&rt, count), "{count}");
+    }
+    assert!(shows(&rt, "lint") && shows(&rt, "deploy") && shows(&rt, "e2e"));
+    assert!(
+        !shows(&rt, "legacy/ok (statut)"),
+        "successes wait behind the toggle"
+    );
+    rt.take_url_requests();
+    click(&mut rt, "chk-item1");
+    step(&mut rt);
+    assert_eq!(rt.take_url_requests(), ["https://ci.test/2"]);
+    click(&mut rt, "chk-more");
+    step(&mut rt);
+    assert!(shows(&rt, "legacy/ok (statut)") && shows(&rt, "docs"));
     rt.state.select_pull(4);
     checks_ready(&mut rt, 4);
-    assert!(shows(&rt, "Aucune vérification pour la révision newsha."));
-    assert!(!shows(&rt, "réussie(s)"));
+    assert!(shows(&rt, "Aucune vérification pour cette révision."));
+    assert!(shows(&rt, "révision newsha"));
+    assert!(rect_of(&rt, "chk-summary").is_none());
     rt.state.select_pull(2);
     checks_ready(&mut rt, 2);
-    assert!(shows(&rt, "legacy/ci : en attente (statut)"));
+    assert!(shows(&rt, "legacy/ci (statut)"));
 }
 
 #[test]
@@ -902,10 +957,13 @@ fn only_allowed_methods_are_offered_with_their_effect_and_the_blockers_are_liste
     merge_ready(&mut rt, 1);
     assert!(rect_of(&rt, "mrg-merge").is_some() && rect_of(&rt, "mrg-squash").is_some());
     assert!(rect_of(&rt, "mrg-rebase").is_none());
-    assert!(shows(&rt, "Crée un commit de fusion"));
     assert!(shows(
         &rt,
-        "Regroupe tous les commits de la branche en un seul commit"
+        "Tous les commits de la branche restent dans l'historique."
+    ));
+    assert!(shows(
+        &rt,
+        "Les commits de la branche sont regroupés en un commit sur la cible."
     ));
     assert!(shows(&rt, "« lint » n'a pas réussi"));
     assert!(shows(&rt, "« missing » est absente"));
@@ -913,7 +971,7 @@ fn only_allowed_methods_are_offered_with_their_effect_and_the_blockers_are_liste
     rt.state.select_pull(4);
     merge_ready(&mut rt, 4);
     assert!(rect_of(&rt, "mrg-merge").is_none());
-    assert!(shows(&rt, "la pull request est un brouillon"));
+    assert!(shows(&rt, "La pull request est un brouillon."));
 }
 
 #[test]
@@ -926,7 +984,7 @@ fn a_merge_needs_a_confirmation_names_the_revision_and_is_verified_on_the_remote
     step(&mut rt);
     assert!(shows(
         &rt,
-        "Confirmer : Fusionner en un seul commit sur la révision sha1"
+        "Un seul commit sur la révision sha1 : confirmez pour fusionner."
     ));
     assert!(rt.state.pulls.list.merge_notice.is_none() && !rt.state.pulls.list.merging);
     click(&mut rt, "mrg-cancel");
@@ -947,7 +1005,7 @@ fn a_merge_needs_a_confirmation_names_the_revision_and_is_verified_on_the_remote
                 .as_ref()
                 .is_some_and(|d| d.summary.state == gitpoulpe_hosting::PullState::Merged)
     });
-    assert!(shows(&rt, "fusionnée · par author1"));
+    assert!(shows(&rt, "Fusionnée · par author1"));
 }
 
 #[test]
@@ -1005,7 +1063,7 @@ fn a_server_refusal_is_shown_as_a_refusal_and_a_late_merge_answer_is_dropped() {
     rt.state.select_pull(2);
     merge_ready(&mut rt, 2);
     assert!(rect_of(&rt, "mrg-merge").is_none());
-    assert!(shows(&rt, "la pull request n'est plus ouverte"));
+    assert!(shows(&rt, "La pull request n'est plus ouverte"));
 }
 
 fn review_error_has(rt: &Runtime<State>, needle: &str) -> bool {

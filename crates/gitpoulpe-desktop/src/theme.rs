@@ -80,6 +80,7 @@ pub const BODY_STRONG: TextStyle = TextStyle::new(13.0, 600.0);
 pub const SMALL: TextStyle = TextStyle::new(12.0, 400.0);
 pub const TINY: TextStyle = TextStyle::new(11.0, 400.0);
 pub const TITLE: TextStyle = TextStyle::new(20.0, 600.0);
+pub const HEADING: TextStyle = TextStyle::new(16.0, 600.0);
 pub const WORDMARK: TextStyle = TextStyle::new(24.0, 400.0);
 pub const WORDMARK_BOLD: TextStyle = TextStyle::new(24.0, 600.0);
 

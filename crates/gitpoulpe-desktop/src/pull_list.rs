@@ -53,6 +53,15 @@ fn patch_hash(detail: &PullDetail, path: &str) -> u64 {
     hasher.finish()
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ReviewTab {
+    #[default]
+    Conversation,
+    Files,
+    Commits,
+    Decision,
+}
+
 pub struct PullListState {
     pub merge: Option<MergeReadiness>,
     pub merge_loading: bool,
@@ -106,6 +115,8 @@ pub struct PullListState {
     pub detail_request: u64,
     pub version: u32,
     pub media: HashMap<String, Media>,
+    pub tab: ReviewTab,
+    pub checks_expanded: bool,
 }
 
 impl Default for PullListState {
@@ -163,6 +174,8 @@ impl Default for PullListState {
             detail_request: 0,
             version: 0,
             media: HashMap::new(),
+            tab: ReviewTab::default(),
+            checks_expanded: false,
         }
     }
 }
@@ -348,6 +361,7 @@ impl State {
             list.verifying = false;
             list.compose = TextEdit::new("");
             list.media.clear();
+            list.checks_expanded = false;
             self.load_review_text();
         }
         self.load_pull_detail();
@@ -913,6 +927,15 @@ impl State {
         list.version += 1;
     }
 
+    pub fn pull_clear_target(&mut self) {
+        let list = &mut self.pulls.list;
+        list.pick = None;
+        list.reply_to = None;
+        list.range_start = None;
+        list.range_mode = false;
+        list.version += 1;
+    }
+
     pub fn pull_toggle_range(&mut self) {
         let list = &mut self.pulls.list;
         list.range_mode = !list.range_mode;
@@ -1457,6 +1480,8 @@ pub fn review_state_label(state: &str) -> &'static str {
 pub struct NumberedLine {
     pub text: String,
     pub anchor: Option<(u64, Side)>,
+    pub old: Option<u64>,
+    pub new: Option<u64>,
 }
 
 pub fn numbered_lines(patch: &str) -> Vec<NumberedLine> {
@@ -1478,31 +1503,61 @@ pub fn numbered_lines(patch: &str) -> Vec<NumberedLine> {
             out.push(NumberedLine {
                 text: line.to_owned(),
                 anchor: None,
+                old: None,
+                new: None,
             });
             continue;
         }
-        let anchor = match line.chars().next() {
+        let (anchor, numbers) = match line.chars().next() {
             Some('+') => {
                 new += 1;
-                Some((new - 1, Side::Right))
+                (Some((new - 1, Side::Right)), (None, Some(new - 1)))
             }
             Some('-') => {
                 old += 1;
-                Some((old - 1, Side::Left))
+                (Some((old - 1, Side::Left)), (Some(old - 1), None))
             }
-            Some('\\') => None,
+            Some('\\') => (None, (None, None)),
             _ => {
                 old += 1;
                 new += 1;
-                Some((new - 1, Side::Right))
+                (Some((new - 1, Side::Right)), (Some(old - 1), Some(new - 1)))
             }
         };
         out.push(NumberedLine {
             text: line.to_owned(),
             anchor,
+            old: numbers.0,
+            new: numbers.1,
         });
     }
     out
+}
+
+impl State {
+    pub fn set_review_tab(&mut self, tab: ReviewTab) {
+        self.pulls.list.tab = tab;
+        self.pulls.list.version += 1;
+    }
+
+    pub fn toggle_all_checks(&mut self) {
+        self.pulls.list.checks_expanded = !self.pulls.list.checks_expanded;
+        self.pulls.list.version += 1;
+    }
+}
+
+pub fn when(stamp: &str) -> String {
+    let (date, time) = stamp.split_once('T').unwrap_or((stamp, ""));
+    let mut parts = date.split('-');
+    let (Some(y), Some(m), Some(d)) = (parts.next(), parts.next(), parts.next()) else {
+        return stamp.to_owned();
+    };
+    let clock = time.get(..5).filter(|t| t.len() == 5);
+    match clock {
+        Some(clock) if stamp.ends_with('Z') => format!("{d}/{m}/{y} {clock} UTC"),
+        Some(clock) => format!("{d}/{m}/{y} {clock}"),
+        None => format!("{d}/{m}/{y}"),
+    }
 }
 
 pub fn short(sha: &str) -> &str {
