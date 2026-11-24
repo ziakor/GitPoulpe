@@ -176,6 +176,15 @@ async fn a_preview_outside_the_provider_hosts_is_refused_before_any_request() {
         "{refused}"
     );
     assert!(requests(&api).is_empty());
+
+    let bounced = fetch_preview(
+        &store,
+        &conn,
+        &Preview::Anonymous(format!("{}/redirect", api.base())),
+    )
+    .await
+    .unwrap_err();
+    assert!(bounced.to_string().contains("non autorisée"), "{bounced}");
 }
 
 #[tokio::test]

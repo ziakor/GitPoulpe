@@ -1,3 +1,4 @@
+use std::net::IpAddr;
 use std::ops::Range;
 
 use gitpoulpe_core::Connection;
@@ -665,6 +666,59 @@ fn redirect_target(current: &str, location: &str) -> Option<String> {
     }
 }
 
+fn host_name(url: &str) -> Option<String> {
+    let authority = http::authority(url)?.to_ascii_lowercase();
+    let host = match authority.strip_prefix('[') {
+        Some(inner) => inner.split(']').next()?.to_owned(),
+        None => authority
+            .rsplit_once(':')
+            .map_or(authority.as_str(), |(h, _)| h)
+            .to_owned(),
+    };
+    Some(host)
+}
+
+fn internal(host: &str) -> bool {
+    if host == "localhost" || host.ends_with(".localhost") {
+        return true;
+    }
+    match host.parse::<IpAddr>() {
+        Ok(IpAddr::V4(ip)) => {
+            ip.is_loopback() || ip.is_private() || ip.is_link_local() || ip.is_unspecified()
+        }
+        Ok(IpAddr::V6(ip)) => {
+            ip.is_loopback()
+                || ip.is_unspecified()
+                || ip.is_unique_local()
+                || ip.is_unicast_link_local()
+                || ip
+                    .to_ipv4_mapped()
+                    .is_some_and(|v4| v4.is_loopback() || v4.is_private() || v4.is_link_local())
+        }
+        Err(_) => false,
+    }
+}
+
+fn github_storage_host(host: &str) -> bool {
+    host.starts_with("github-production-user-asset-") && host.ends_with(".s3.amazonaws.com")
+}
+
+fn redirect_allowed(url: &str, connection: &Connection, preview: &Preview) -> bool {
+    if same_host(url, &connection.web) || same_host(url, &connection.api) {
+        return true;
+    }
+    let Some(host) = host_name(url) else {
+        return false;
+    };
+    if !url.starts_with("https://") || internal(&host) {
+        return false;
+    }
+    match preview {
+        Preview::Anonymous(_) => github_content_host(url) || github_storage_host(&host),
+        Preview::Api(_) | Preview::Contents(_) => true,
+    }
+}
+
 fn refused(why: &str) -> GithubError {
     GithubError::Http(HttpError::Other(why.to_owned()))
 }
@@ -705,6 +759,11 @@ pub async fn fetch_preview(
             return Err(refused("trop de redirections"));
         }
         url = redirect_target(&url, location).ok_or_else(|| refused("redirection invalide"))?;
+        if !redirect_allowed(&url, connection, preview) {
+            return Err(refused(
+                "redirection vers une adresse non autorisée refusée",
+            ));
+        }
         response = http::get_anonymous(&url, MEDIA_LIMIT).await?;
     }
     if !response.ok() {
@@ -884,6 +943,61 @@ mod tests {
             found[0].link,
             format!("https://gitlab.test/grp/sub/proj/uploads/{secret}/screen%20shot.png")
         );
+    }
+
+    #[test]
+    fn redirect_hops_stay_on_provider_or_public_storage_hosts() {
+        let github = Connection {
+            id: "github.com/octo".to_owned(),
+            provider: gitpoulpe_core::Provider::Github,
+            api: "https://api.github.com".to_owned(),
+            web: "https://github.com".to_owned(),
+            login: "octo".to_owned(),
+            scopes: Vec::new(),
+        };
+        let image = Preview::Anonymous(String::new());
+        let api = Preview::Api(String::new());
+        let allowed = |url: &str, preview: &Preview| redirect_allowed(url, &github, preview);
+        assert!(allowed(
+            "https://github.com/user-attachments/assets/x",
+            &image
+        ));
+        assert!(allowed(
+            "https://private-user-images.githubusercontent.com/1/x.png",
+            &image
+        ));
+        assert!(allowed(
+            "https://github-production-user-asset-6210df.s3.amazonaws.com/1/x.gif?X-Amz-Expires=300",
+            &image
+        ));
+        assert!(!allowed("https://evil.test/x.png", &image));
+        assert!(!allowed("https://evil.s3.amazonaws.com/x.png", &image));
+        assert!(allowed("https://storage.example.com/bucket/x.png", &api));
+        for internal in [
+            "http://storage.example.com/x.png",
+            "https://localhost/x",
+            "https://127.0.0.1:8080/x",
+            "https://10.0.0.5/x",
+            "https://192.168.1.1/x",
+            "https://169.254.169.254/latest/meta-data/",
+            "https://[::1]/x",
+            "https://[fd00::1]/x",
+            "https://[::ffff:127.0.0.1]/x",
+        ] {
+            assert!(!allowed(internal, &api), "{internal}");
+            assert!(!allowed(internal, &image), "{internal}");
+        }
+        let local = Connection {
+            web: "http://127.0.0.1:9000".to_owned(),
+            api: "http://127.0.0.1:9000/api/v4".to_owned(),
+            ..github.clone()
+        };
+        assert!(redirect_allowed(
+            "http://127.0.0.1:9000/storage/x.png",
+            &local,
+            &api
+        ));
+        assert!(!redirect_allowed("http://127.0.0.1:9001/x", &local, &api));
     }
 
     #[test]
