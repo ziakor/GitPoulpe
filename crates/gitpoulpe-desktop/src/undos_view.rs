@@ -4,7 +4,7 @@ use rune::{El, ScrollSpec, col, el, row, text};
 use crate::history_state::format_date;
 use crate::state::State;
 use crate::theme;
-use crate::widgets::action;
+use crate::widgets::{action, counted, screen_head};
 
 const ROW_HEIGHT: f32 = 48.0;
 
@@ -159,27 +159,13 @@ pub fn undo_screen(s: &State) -> El {
     let p = s.palette;
     let mut records = s.undo_records();
     records.reverse();
-    let header = row()
-        .w_full()
-        .center_y()
-        .px(20.0)
-        .py(10.0)
-        .gap(12.0)
-        .child(
-            text(format!(
-                "Annuler / refaire · {} opération(s)",
-                records.len()
-            ))
-            .font(theme::BODY_STRONG)
-            .color(p.text)
-            .grow(1.0)
-            .truncate(),
-        )
-        .child(
-            action(s, "undo-branches", "Branches", false)
-                .on_press(|s: &mut State| s.open_branches()),
-        )
-        .child(action(s, "undo-close", "Fermer", false).on_press(|s: &mut State| s.close_undo()));
+    let header = screen_head(
+        s,
+        "undo-head",
+        "Annuler ou rétablir",
+        counted(records.len(), "opération", "opérations"),
+        Vec::new(),
+    );
     let list: El = if records.is_empty() {
         col().w_full().grow(1.0).center().child(
             text("Aucune opération enregistrée depuis GitPoulpe pour ce dépôt.".to_owned())

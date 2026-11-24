@@ -422,6 +422,15 @@ fn a_chosen_file_is_released_once_it_is_no_longer_the_first_on_screen() {
     assert_eq!(state.pinned, None);
 }
 
+fn head_context(rt: &Runtime<State>, head: &str) -> String {
+    let key = format!("{head}-context");
+    rt.elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some(key.as_str()))
+        .and_then(|e| e.text)
+        .unwrap_or_default()
+}
+
 fn menu(rt: &mut Runtime<State>, key: &str) {
     for fold in ["nav-more", "nav-repositories"] {
         if rect_of(rt, key).is_some() {

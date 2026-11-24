@@ -3,39 +3,27 @@ use rune::{El, ScrollSpec, col, el, row, text, text_input};
 use crate::shortcuts::{ACTIONS, display};
 use crate::state::State;
 use crate::theme;
-use crate::widgets::action;
+use crate::widgets::{action, screen_head};
 
 pub fn shortcuts_screen(s: &State) -> El {
     let p = s.palette;
     let screen = &s.shortcuts;
-    let header = row()
-        .w_full()
-        .center_y()
-        .px(20.0)
-        .py(10.0)
-        .gap(12.0)
-        .child(
-            text("Raccourcis clavier".to_owned())
-                .font(theme::BODY_STRONG)
-                .color(p.text)
-                .grow(1.0),
-        )
-        .child(
+    let header = screen_head(
+        s,
+        "sc-head",
+        "Raccourcis clavier",
+        String::new(),
+        vec![
             action(s, "sc-modify", "Modifier", true).on_press_tx(|s: &mut State, tx| {
                 s.shortcut_begin_capture();
                 tx.blur();
             }),
-        )
-        .child(
             action(s, "sc-reset", "Rétablir", false).on_press(|s: &mut State| s.shortcut_reset()),
-        )
-        .child(
             action(s, "sc-reset-all", "Tout rétablir", false)
                 .on_press(|s: &mut State| s.shortcut_reset_all()),
-        )
-        .child(
             action(s, "sc-close", "Fermer", false).on_press(|s: &mut State| s.close_shortcuts()),
-        );
+        ],
+    );
     let search = text_input(&screen.query, theme::BODY)
         .key("sc-search")
         .label("Rechercher un raccourci")

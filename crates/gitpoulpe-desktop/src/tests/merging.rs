@@ -211,7 +211,7 @@ fn predicted_conflicts_are_shown_and_a_conflicting_merge_opens_the_resolution() 
             .as_deref()
             .is_some_and(|n| n.contains("conflits"))
     );
-    assert!(shows(&rt, "Résolution · fusion"));
+    assert!(super::head_context(&rt, "conflicts-head").starts_with("fusion · "));
 }
 
 #[test]

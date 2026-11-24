@@ -6,7 +6,7 @@ use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text, text_input};
 
 use crate::state::State;
 use crate::theme;
-use crate::widgets::action;
+use crate::widgets::{action, counted, screen_head};
 
 const ROW_HEIGHT: f32 = 44.0;
 const PREVIEW_LINES: usize = 60;
@@ -447,29 +447,21 @@ fn footer(s: &State) -> El {
 pub fn conflicts_screen(s: &State) -> El {
     let p = s.palette;
     let c = &s.conflicts;
-    let title = match &c.operation {
+    let context = match &c.operation {
         Some(op) => format!(
-            "Résolution · {} · {} fichier(s) à traiter",
+            "{} · {} à traiter",
             op.kind.caption(),
-            c.remaining()
+            counted(c.remaining(), "fichier", "fichiers")
         ),
-        None if c.loading => "Résolution · lecture…".to_owned(),
+        None if c.loading => "Lecture…".to_owned(),
         None => "Aucune opération en cours".to_owned(),
     };
-    let header = row()
-        .w_full()
-        .center_y()
-        .px(20.0)
-        .py(10.0)
-        .gap(12.0)
-        .child(
-            text(title)
-                .font(theme::BODY_STRONG)
-                .color(p.text)
-                .grow(1.0)
-                .truncate(),
-        )
-        .child(
+    let header = screen_head(
+        s,
+        "conflicts-head",
+        "Résoudre les conflits",
+        context,
+        vec![
             action(s, "cf-external-merge", "Outil de fusion externe", false).on_press(
                 |s: &mut State| {
                     if let Some(path) = s.conflicts.selected.clone() {
@@ -477,14 +469,9 @@ pub fn conflicts_screen(s: &State) -> El {
                     }
                 },
             ),
-        )
-        .child(
             action(s, "cf-tools", "Outils…", false).on_press(|s: &mut State| s.open_tools_config()),
-        )
-        .child(
-            action(s, "conflicts-close", "Fermer", false)
-                .on_press(|s: &mut State| s.close_conflicts()),
-        );
+        ],
+    );
     let rows = c.rows();
     let list: El = if let Some(error) = &c.error {
         col().w_full().grow(1.0).center().child(

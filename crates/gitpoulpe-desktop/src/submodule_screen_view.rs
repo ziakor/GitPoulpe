@@ -5,7 +5,7 @@ use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text};
 
 use crate::state::State;
 use crate::theme;
-use crate::widgets::action;
+use crate::widgets::{action, counted, screen_head};
 
 const ROW_HEIGHT: f32 = 52.0;
 
@@ -212,30 +212,12 @@ fn panel(s: &State) -> El {
 
 pub fn submodules_screen(s: &State) -> El {
     let p = s.palette;
-    let title = if s.submodules.loading {
-        "Submodules · lecture…".to_owned()
+    let context = if s.submodules.loading {
+        "Lecture…".to_owned()
     } else {
-        format!("Submodules · {}", s.submodules.list.len())
+        counted(s.submodules.list.len(), "sous-module", "sous-modules")
     };
-    let header = row()
-        .w_full()
-        .center_y()
-        .px(20.0)
-        .py(10.0)
-        .gap(12.0)
-        .child(
-            text(title)
-                .font(theme::BODY_STRONG)
-                .color(p.text)
-                .grow(1.0)
-                .truncate(),
-        )
-        .child(
-            action(s, "sm-branches", "Branches", false).on_press(|s: &mut State| s.open_branches()),
-        )
-        .child(
-            action(s, "sm-close", "Fermer", false).on_press(|s: &mut State| s.close_submodules()),
-        );
+    let header = screen_head(s, "sm-head", "Sous-modules", context, Vec::new());
     let list: El = if s.submodules.list.is_empty() && !s.submodules.loading {
         col().w_full().grow(1.0).center().child(
             text("Ce dépôt n'a pas de submodule.".to_owned())

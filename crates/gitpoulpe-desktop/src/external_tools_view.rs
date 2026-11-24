@@ -1,9 +1,9 @@
 use gitpoulpe_core::ToolKind;
-use rune::{El, col, row, text};
+use rune::{El, col, text};
 
 use crate::state::State;
 use crate::theme;
-use crate::widgets::{action, field};
+use crate::widgets::{action, field, screen_head};
 
 pub fn tool_status(s: &State) -> Option<El> {
     let p = s.palette;
@@ -94,23 +94,17 @@ fn section(s: &State, kind: ToolKind) -> El {
 
 pub fn tools_screen(s: &State) -> El {
     let p = s.palette;
-    let header = row()
-        .w_full()
-        .center_y()
-        .px(20.0)
-        .py(10.0)
-        .gap(12.0)
-        .child(
-            text("Outils externes".to_owned())
-                .font(theme::BODY_STRONG)
-                .color(p.text)
-                .grow(1.0),
-        )
-        .child(
+    let header = screen_head(
+        s,
+        "tl-head",
+        "Outils externes",
+        String::new(),
+        vec![
             action(s, "tl-save", "Enregistrer", true)
                 .on_press(|s: &mut State| s.save_tools_config()),
-        )
-        .child(action(s, "tl-close", "Fermer", false).on_press(|s: &mut State| s.close_tools()));
+            action(s, "tl-close", "Fermer", false).on_press(|s: &mut State| s.close_tools()),
+        ],
+    );
     let mut body = col()
         .w_full()
         .grow(1.0)

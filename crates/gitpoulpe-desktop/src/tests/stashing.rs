@@ -180,7 +180,7 @@ fn a_conflicting_application_keeps_the_stash_and_opens_the_resolution() {
     click(&mut rt, "st-pop");
     settle(&mut rt, |s| s.conflicts.open && s.operation_kind.is_some());
     assert_eq!(git(dir.path(), &["stash", "list"]).lines().count(), 1);
-    assert!(shows(&rt, "Résolution · application du stash"));
+    assert!(super::head_context(&rt, "conflicts-head").starts_with("application du stash · "));
     assert!(shows(&rt, "Le stash est conservé"));
     assert!(
         rt.state

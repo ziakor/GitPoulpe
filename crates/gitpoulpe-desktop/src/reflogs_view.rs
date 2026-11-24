@@ -5,7 +5,7 @@ use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text};
 use crate::history_state::format_date;
 use crate::state::State;
 use crate::theme;
-use crate::widgets::{action, field};
+use crate::widgets::{action, counted, field, screen_head};
 
 const ROW_HEIGHT: f32 = 48.0;
 
@@ -171,29 +171,19 @@ fn detail(s: &State) -> El {
 
 pub fn reflog_screen(s: &State) -> El {
     let p = s.palette;
-    let title = if s.reflog.loading {
-        "Reflog · lecture…".to_owned()
+    let context = if s.reflog.loading {
+        "Lecture…".to_owned()
     } else {
-        format!("Reflog · {} entrée(s)", s.reflog.entries.len())
+        counted(s.reflog.entries.len(), "entrée", "entrées")
     };
-    let header = row()
-        .w_full()
-        .center_y()
-        .px(20.0)
-        .py(10.0)
-        .gap(12.0)
-        .child(
-            text(title)
-                .font(theme::BODY_STRONG)
-                .color(p.text)
-                .grow(1.0)
-                .truncate(),
-        )
-        .child(
+    let header = screen_head(
+        s,
+        "rl-head",
+        "Reflog",
+        context,
+        vec![
             action(s, "rl-scope-head", "HEAD", !s.reflog.branch_scope)
                 .on_press(|s: &mut State| s.reflog_set_scope(false)),
-        )
-        .child(
             action(
                 s,
                 "rl-scope-branch",
@@ -201,11 +191,8 @@ pub fn reflog_screen(s: &State) -> El {
                 s.reflog.branch_scope,
             )
             .on_press(|s: &mut State| s.reflog_set_scope(true)),
-        )
-        .child(
-            action(s, "rl-branches", "Branches", false).on_press(|s: &mut State| s.open_branches()),
-        )
-        .child(action(s, "rl-close", "Fermer", false).on_press(|s: &mut State| s.close_reflog()));
+        ],
+    );
     let list: El = if let Some(error) = &s.reflog.error {
         col().w_full().grow(1.0).center().child(
             text(format!("Lecture impossible : {error}"))

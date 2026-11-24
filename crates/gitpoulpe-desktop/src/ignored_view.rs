@@ -182,40 +182,13 @@ fn detail(s: &State) -> El {
 
 pub fn ignored_screen(s: &State) -> El {
     let p = s.palette;
-    let title = if s.ignored.loading {
-        "Fichiers ignorés · lecture…".to_owned()
+    let context = if s.ignored.loading {
+        "Lecture…".to_owned()
     } else {
-        format!("Fichiers ignorés · {}", s.ignored.paths.len())
+        crate::widgets::counted(s.ignored.paths.len(), "fichier ignoré", "fichiers ignorés")
     };
-    let header = row()
-        .w_full()
-        .center_y()
-        .px(20.0)
-        .py(10.0)
-        .gap(12.0)
-        .child(
-            text(title)
-                .font(theme::BODY_STRONG)
-                .color(p.text)
-                .grow(1.0)
-                .truncate(),
-        )
-        .child(
-            el().key("ignored-close")
-                .role("button")
-                .label("Fermer les fichiers ignorés")
-                .focusable(true)
-                .focus_ring(2.0, 2.0, p.accent)
-                .h(32.0)
-                .px(12.0)
-                .center()
-                .radius(3.0)
-                .fill(p.raised)
-                .border(1.0, p.line)
-                .hover(p.hover)
-                .on_press(|s: &mut State| s.close_ignored())
-                .child(text("Fermer".to_owned()).font(theme::BODY).color(p.text)),
-        );
+    let header =
+        crate::widgets::screen_head(s, "ignored-head", "Fichiers ignorés", context, Vec::new());
     let list: El = if let Some(error) = &s.ignored.error {
         col().w_full().grow(1.0).center().child(
             text(format!("Lecture impossible : {error}"))

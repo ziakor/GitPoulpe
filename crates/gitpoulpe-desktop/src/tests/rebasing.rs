@@ -197,7 +197,7 @@ fn a_conflict_pauses_the_rebase_and_opens_the_resolution_with_the_old_tip_named(
     step(&mut rt);
     click(&mut rt, "rebase-run");
     settle(&mut rt, |s| s.conflicts.open && s.operation_kind.is_some());
-    assert!(shows(&rt, "Résolution · rebase"));
+    assert!(super::head_context(&rt, "conflicts-head").starts_with("rebase · "));
     assert!(
         rt.state
             .notice

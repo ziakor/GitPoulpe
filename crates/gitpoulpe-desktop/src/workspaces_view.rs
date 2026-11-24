@@ -2,7 +2,7 @@ use rune::{El, ScrollSpec, col, el, row, text};
 
 use crate::state::State;
 use crate::theme;
-use crate::widgets::{action, field};
+use crate::widgets::{action, field, screen_head};
 use crate::workspaces::{RepoHealth, health};
 
 fn status(health: RepoHealth) -> (&'static str, bool) {
@@ -16,21 +16,13 @@ fn status(health: RepoHealth) -> (&'static str, bool) {
 pub fn workspaces_screen(s: &State) -> El {
     let p = s.palette;
     let screen = &s.workspaces;
-    let header = row()
-        .w_full()
-        .center_y()
-        .px(20.0)
-        .py(10.0)
-        .gap(12.0)
-        .child(
-            text("Espaces de travail".to_owned())
-                .font(theme::BODY_STRONG)
-                .color(p.text)
-                .grow(1.0),
-        )
-        .child(
-            action(s, "ws-close", "Fermer", false).on_press(|s: &mut State| s.close_workspaces()),
-        );
+    let header = screen_head(
+        s,
+        "ws-head",
+        "Espaces de travail",
+        String::new(),
+        Vec::new(),
+    );
     let mut list = col()
         .key("ws-list")
         .w(280.0)

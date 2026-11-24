@@ -5,7 +5,7 @@ use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text, text_input};
 
 use crate::state::State;
 use crate::theme;
-use crate::widgets::action;
+use crate::widgets::{action, counted, screen_head};
 
 const ROW_HEIGHT: f32 = 52.0;
 
@@ -277,39 +277,27 @@ pub fn issues_screen(s: &State) -> El {
             )
         })
         .unwrap_or_default();
-    let mut header = row()
-        .w_full()
-        .center_y()
-        .px(20.0)
-        .py(10.0)
-        .gap(12.0)
-        .child(
-            text(format!(
-                "Issues · {who} · {} résultat(s)",
-                issues.items.len()
-            ))
-            .key("is-header")
-            .font(theme::BODY_STRONG)
-            .color(p.text)
-            .grow(1.0)
-            .truncate(),
-        )
-        .child(filter_button(s, "is-open", "Ouvertes", IssueFilter::Open))
-        .child(filter_button(
-            s,
-            "is-closed",
-            "Fermées",
-            IssueFilter::Closed,
-        ))
-        .child(filter_button(s, "is-all", "Toutes", IssueFilter::All));
+    let mut actions = vec![
+        filter_button(s, "is-open", "Ouvertes", IssueFilter::Open),
+        filter_button(s, "is-closed", "Fermées", IssueFilter::Closed),
+        filter_button(s, "is-all", "Toutes", IssueFilter::All),
+    ];
     if issues.targets.len() > 1 {
-        header = header.child(
+        actions.push(
             action(s, "is-account", "Changer de compte", false)
                 .on_press(|s: &mut State| s.issues_switch_target()),
         );
     }
-    header = header
-        .child(action(s, "is-close", "Fermer", false).on_press(|s: &mut State| s.close_issues()));
+    let header = screen_head(
+        s,
+        "is-head",
+        "Issues",
+        format!(
+            "{who} · {}",
+            counted(issues.items.len(), "résultat", "résultats")
+        ),
+        actions,
+    );
     let search = row()
         .w_full()
         .px(20.0)

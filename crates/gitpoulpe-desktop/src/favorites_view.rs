@@ -4,35 +4,22 @@ use rune::{El, ScrollSpec, col, row, text, text_input};
 use crate::favorites::RemoteAccess;
 use crate::state::State;
 use crate::theme;
-use crate::widgets::action;
+use crate::widgets::{action, counted, screen_head};
 use crate::workspaces::{RepoHealth, health};
 
 pub fn favorites_screen(s: &State) -> El {
     let p = s.palette;
     let screen = &s.favorites;
-    let header = row()
-        .w_full()
-        .center_y()
-        .px(20.0)
-        .py(10.0)
-        .gap(12.0)
-        .child(
-            text(format!("Favoris · {}", screen.book.items.len()))
-                .font(theme::BODY_STRONG)
-                .color(p.text)
-                .grow(1.0),
-        )
-        .child(
+    let header = screen_head(
+        s,
+        "fv-head",
+        "Favoris",
+        counted(screen.book.items.len(), "favori", "favoris"),
+        vec![
             action(s, "fv-add-current", "Ajouter le dépôt courant", false)
                 .on_press(|s: &mut State| s.favorites_add_current()),
-        )
-        .child(
-            action(s, "fv-accounts", "Comptes fournisseurs", false)
-                .on_press(|s: &mut State| s.open_accounts()),
-        )
-        .child(
-            action(s, "fv-close", "Fermer", false).on_press(|s: &mut State| s.close_favorites()),
-        );
+        ],
+    );
     let search = text_input(&screen.query, theme::BODY)
         .key("fv-search")
         .label("Rechercher un favori")

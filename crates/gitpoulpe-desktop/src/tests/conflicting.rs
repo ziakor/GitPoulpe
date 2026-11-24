@@ -140,7 +140,7 @@ fn an_active_merge_is_announced_and_its_conflicts_are_listed_with_their_kind() {
         .collect();
     assert_eq!(paths, ["a.txt", "b.txt", "gone.txt"]);
     assert!(shows(&rt, "supprimé de votre côté, modifié de l'autre"));
-    assert!(shows(&rt, "Résolution · fusion"));
+    assert!(super::head_context(&rt, "conflicts-head").starts_with("fusion · "));
 }
 
 #[test]

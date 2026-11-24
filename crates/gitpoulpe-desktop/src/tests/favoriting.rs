@@ -107,7 +107,7 @@ fn a_local_and_a_remote_favorite_are_found_again_after_a_restart() {
     let mut rt = restarted(&saved);
     rt.state.open_favorites();
     step(&mut rt);
-    assert!(shows(&rt, "Favoris · 2"));
+    assert_eq!(super::head_context(&rt, "fv-head"), "2 favoris");
     rt.state.favorites.query = TextEdit::new("eclair");
     step(&mut rt);
     let found: Vec<String> = rt

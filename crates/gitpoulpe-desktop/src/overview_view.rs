@@ -3,7 +3,7 @@ use rune::{El, ScrollSpec, col, row, text};
 use crate::overview::RowState;
 use crate::state::State;
 use crate::theme;
-use crate::widgets::action;
+use crate::widgets::{action, counted, screen_head};
 
 fn summary(overview: &gitpoulpe_git::RepoOverview) -> String {
     let branch = overview
@@ -35,35 +35,23 @@ pub fn overview_screen(s: &State) -> El {
     let p = s.palette;
     let screen = &s.overview;
     let candidates = s.overview_candidates();
-    let header = row()
-        .w_full()
-        .center_y()
-        .px(20.0)
-        .py(10.0)
-        .gap(12.0)
-        .child(
-            text(format!(
-                "Vue multi-dépôts · {} sur {} sélectionné(s)",
-                screen.selected.len(),
-                candidates.len()
-            ))
-            .font(theme::BODY_STRONG)
-            .color(p.text)
-            .grow(1.0)
-            .truncate(),
-        )
-        .child(
+    let header = screen_head(
+        s,
+        "ov-head",
+        "Vue multi-dépôts",
+        format!(
+            "{} sur {}",
+            counted(screen.selected.len(), "dépôt suivi", "dépôts suivis"),
+            candidates.len()
+        ),
+        vec![
             action(s, "ov-refresh-all", "Actualiser tout", true)
                 .on_press(|s: &mut State| s.overview_refresh_all()),
-        )
-        .child(
             action(s, "ov-all", "Tout sélectionner", false)
                 .on_press(|s: &mut State| s.overview_select_all()),
-        )
-        .child(
             action(s, "ov-none", "Aucun", false).on_press(|s: &mut State| s.overview_select_none()),
-        )
-        .child(action(s, "ov-close", "Fermer", false).on_press(|s: &mut State| s.close_overview()));
+        ],
+    );
     let mut list = col().key("ov-list").w_full().gap(6.0).scroll(ScrollSpec {
         stick_bottom: false,
     });

@@ -197,7 +197,7 @@ fn a_conflict_in_the_integration_is_not_hidden_and_opens_the_resolution() {
     step(&mut rt);
     click(&mut rt, "pull-run");
     settle(&mut rt, |s| s.conflicts.open && s.operation_kind.is_some());
-    assert!(shows(&rt, "Résolution · fusion"));
+    assert!(super::head_context(&rt, "conflicts-head").starts_with("fusion · "));
     assert!(
         rt.state
             .notice

@@ -106,7 +106,7 @@ fn screen(store: Arc<MemoryStore>) -> Runtime<State> {
     rt.on_key = Some(crate::keys::on_key);
     click(&mut rt, "profiles");
     settle(&mut rt, |s| s.profiles_open);
-    click(&mut rt, "accounts");
+    super::menu(&mut rt, "nav-accounts");
     settle(&mut rt, |s| s.accounts.open);
     rt
 }
@@ -247,6 +247,35 @@ fn browser_sign_in_connects_the_account_without_pasting_a_token() {
 }
 
 #[test]
+fn the_code_is_copied_and_the_verification_page_opened_in_one_click() {
+    let fake = Fake::start();
+    let store = Arc::new(MemoryStore::default());
+    let mut rt = screen(store.clone());
+    point_oauth_at(&mut rt, &fake, 60_000);
+    click(&mut rt, "ac-device");
+    settle(&mut rt, |s| s.accounts.device.is_some());
+    let issued = rt.state.accounts.device.clone().unwrap();
+    let clipboard = rune::clipboard::memory();
+    rt.use_clipboard(&clipboard);
+    rt.take_url_requests();
+    assert!(shows(&rt, "Copier le code"));
+    click(&mut rt, "ac-device-open");
+    step(&mut rt);
+    assert_eq!(
+        clipboard.text().map(|t| t.to_string()).as_deref(),
+        Some(issued.user_code.as_str())
+    );
+    assert_eq!(
+        rt.take_url_requests(),
+        std::slice::from_ref(&issued.verification_uri)
+    );
+    assert!(shows(&rt, "Code copié"));
+    click(&mut rt, "ac-device-cancel");
+    settle(&mut rt, |s| s.accounts.device.is_none() && !s.accounts.busy);
+    assert!(store.keys().is_empty());
+}
+
+#[test]
 fn the_code_is_shown_while_waiting_and_cancelling_stops_everything_and_stores_nothing() {
     let fake = Fake::start();
     let store = Arc::new(MemoryStore::default());
@@ -260,21 +289,6 @@ fn the_code_is_shown_while_waiting_and_cancelling_stops_everything_and_stores_no
     assert!(shows(&rt, "/login/device"));
     assert!(shows(&rt, "En attente de votre autorisation"));
     assert!(rect_of(&rt, "ac-device").is_none());
-    let clipboard = rune::clipboard::memory();
-    rt.use_clipboard(&clipboard);
-    rt.take_url_requests();
-    assert!(shows(&rt, "Copier le code"));
-    click(&mut rt, "ac-device-open");
-    step(&mut rt);
-    assert_eq!(
-        clipboard.text().map(|t| t.to_string()).as_deref(),
-        Some("ABCD-1234")
-    );
-    assert_eq!(
-        rt.take_url_requests(),
-        std::slice::from_ref(&issued.verification_uri)
-    );
-    assert!(shows(&rt, "Code copié"));
     click(&mut rt, "ac-device-cancel");
     settle(&mut rt, |s| s.accounts.device.is_none() && !s.accounts.busy);
     assert!(!shows(&rt, "ABCD-1234"));

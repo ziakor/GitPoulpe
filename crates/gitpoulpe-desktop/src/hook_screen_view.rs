@@ -5,7 +5,7 @@ use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text};
 
 use crate::state::State;
 use crate::theme;
-use crate::widgets::action;
+use crate::widgets::{action, counted, screen_head};
 
 const ROW_HEIGHT: f32 = 48.0;
 
@@ -220,28 +220,12 @@ fn detail(s: &State) -> El {
 pub fn hooks_screen(s: &State) -> El {
     let p = s.palette;
     let count = s.hooks.view.as_ref().map_or(0, |v| v.hooks.len());
-    let title = if s.hooks.loading {
-        "Hooks · lecture…".to_owned()
+    let context = if s.hooks.loading {
+        "Lecture…".to_owned()
     } else {
-        format!("Hooks · {count} fichier(s)")
+        counted(count, "fichier", "fichiers")
     };
-    let header = row()
-        .w_full()
-        .center_y()
-        .px(20.0)
-        .py(10.0)
-        .gap(12.0)
-        .child(
-            text(title)
-                .font(theme::BODY_STRONG)
-                .color(p.text)
-                .grow(1.0)
-                .truncate(),
-        )
-        .child(
-            action(s, "hk-branches", "Branches", false).on_press(|s: &mut State| s.open_branches()),
-        )
-        .child(action(s, "hk-close", "Fermer", false).on_press(|s: &mut State| s.close_hooks()));
+    let header = screen_head(s, "hk-head", "Hooks", context, Vec::new());
     let list: El = if let Some(error) = &s.hooks.error {
         col().w_full().grow(1.0).center().child(
             text(format!("Lecture impossible : {error}"))

@@ -108,7 +108,7 @@ fn github_issues_are_listed_filtered_searched_and_read_with_their_context() {
     rt.state.open_issues();
     listed(&mut rt);
     assert_eq!(numbers(&rt), [105, 102, 101]);
-    assert!(shows(&rt, "Issues · acme/proj · Octo@"));
+    assert!(super::head_context(&rt, "is-head").starts_with("acme/proj · Octo@"));
     click(&mut rt, "is-all");
     wait_for(&mut rt, "all issues", |s| {
         s.issues.filter == IssueFilter::All && !s.issues.loading && s.issues.items.len() == 4

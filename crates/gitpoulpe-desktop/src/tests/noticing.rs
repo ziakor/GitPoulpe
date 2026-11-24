@@ -144,7 +144,7 @@ fn both_providers_feed_the_inbox_and_each_notice_names_its_own_account() {
     assert!(shows(&rt, "PR 1") && shows(&rt, "Work in progress"));
     assert!(shows(&rt, &format!("Octo@127.0.0.1:{}", setup.github.port)));
     assert!(shows(&rt, &format!("Octo@127.0.0.1:{}", setup.gitlab.port)));
-    assert!(shows(&rt, "7 non lue(s)"));
+    assert_eq!(super::head_context(&rt, "nt-head"), "7 non lues");
 }
 
 #[test]

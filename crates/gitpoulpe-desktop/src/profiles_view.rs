@@ -300,32 +300,13 @@ pub fn profiles_screen(s: &State) -> El {
     if s.repo.is_some() {
         form = form.child(identity_box(s));
     }
-    col()
+    let body = col()
         .w_full()
         .grow(1.0)
         .min_h(0.0)
-        .px(28.0)
-        .py(20.0)
+        .px(20.0)
+        .py(16.0)
         .gap(16.0)
-        .child(
-            row()
-                .w_full()
-                .center_y()
-                .child(
-                    text("Profils Git".to_owned())
-                        .font(theme::TITLE)
-                        .color(p.text)
-                        .grow(1.0),
-                )
-                .child(
-                    button(s, "accounts".to_owned(), "Comptes fournisseurs".to_owned(), false)
-                        .on_press(|s: &mut State| s.open_accounts()),
-                )
-                .child(
-                    button(s, "pf-close".to_owned(), "Fermer".to_owned(), false)
-                        .on_press(|s: &mut State| s.close_profiles()),
-                ),
-        )
         .child(
             text("Un profil choisit le nom, l'e-mail et la signature utilisés par GitPoulpe pour un dépôt. Rien n'est écrit dans la configuration Git : le profil ne s'applique qu'aux commandes lancées par GitPoulpe."
                 .to_owned())
@@ -333,5 +314,20 @@ pub fn profiles_screen(s: &State) -> El {
             .color(p.muted)
             .wrap(),
         )
-        .child(row().w_full().gap(24.0).child(list).child(form))
+        .child(row().w_full().gap(24.0).child(list).child(form));
+    col()
+        .w_full()
+        .grow(1.0)
+        .min_h(0.0)
+        .child(crate::widgets::screen_head(
+            s,
+            "pf-head",
+            "Profils Git",
+            String::new(),
+            vec![
+                button(s, "pf-close".to_owned(), "Fermer".to_owned(), false)
+                    .on_press(|s: &mut State| s.close_profiles()),
+            ],
+        ))
+        .child(body)
 }

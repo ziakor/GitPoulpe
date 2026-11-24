@@ -4,44 +4,33 @@ use rune::{El, ScrollSpec, col, row, text};
 use crate::notices::kind_label;
 use crate::state::State;
 use crate::theme;
-use crate::widgets::action;
+use crate::widgets::{action, counted, screen_head};
 
 pub fn notices_screen(s: &State) -> El {
     let p = s.palette;
     let screen = &s.notices;
     let prefs = &screen.book.prefs;
     let visible: Vec<_> = screen.book.visible().collect();
-    let header = row()
-        .w_full()
-        .center_y()
-        .px(20.0)
-        .py(10.0)
-        .gap(12.0)
-        .child(
-            text(format!(
-                "Notifications · {} non lue(s){}",
-                screen.book.unread(),
-                if screen.fetching > 0 {
-                    " · lecture…"
-                } else {
-                    ""
-                }
-            ))
-            .key("nt-title")
-            .font(theme::BODY_STRONG)
-            .color(p.text)
-            .grow(1.0)
-            .truncate(),
-        )
-        .child(
+    let header = screen_head(
+        s,
+        "nt-head",
+        "Notifications",
+        format!(
+            "{}{}",
+            counted(screen.book.unread(), "non lue", "non lues"),
+            if screen.fetching > 0 {
+                " · lecture…"
+            } else {
+                ""
+            }
+        ),
+        vec![
             action(s, "nt-refresh", "Actualiser", true)
                 .on_press(|s: &mut State| s.notices_refresh()),
-        )
-        .child(
             action(s, "nt-read-all", "Tout marquer lu", false)
                 .on_press(|s: &mut State| s.notices_mark_all_read()),
-        )
-        .child(action(s, "nt-close", "Fermer", false).on_press(|s: &mut State| s.close_notices()));
+        ],
+    );
     let mut prefs_row = row().w_full().gap(6.0).center_y().child(
         action(
             s,

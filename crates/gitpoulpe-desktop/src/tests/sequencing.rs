@@ -174,7 +174,7 @@ fn a_conflict_in_the_sequence_opens_the_resolution_where_the_commit_can_be_skipp
     });
     click(&mut rt, "seq-run");
     settle(&mut rt, |s| s.conflicts.open && s.operation_kind.is_some());
-    assert!(shows(&rt, "Résolution · cherry-pick"));
+    assert!(super::head_context(&rt, "conflicts-head").starts_with("cherry-pick · "));
     assert!(shows(&rt, "le commit repris"));
     assert!(rect_of(&rt, "cf-skip").is_some());
     click(&mut rt, "cf-skip");

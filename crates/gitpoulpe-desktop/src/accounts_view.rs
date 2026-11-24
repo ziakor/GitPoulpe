@@ -6,7 +6,7 @@ use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text};
 use crate::accounts::Status;
 use crate::state::State;
 use crate::theme;
-use crate::widgets::{action, field, quiet, toggle};
+use crate::widgets::{action, counted, field, quiet, screen_head, toggle};
 
 const ROW_HEIGHT: f32 = 52.0;
 
@@ -324,20 +324,13 @@ pub fn accounts_screen(s: &State) -> El {
     }
     let p = s.palette;
     let count = s.accounts.book.connections.len();
-    let header = row()
-        .w_full()
-        .center_y()
-        .px(20.0)
-        .py(10.0)
-        .gap(12.0)
-        .child(
-            text(format!("Comptes fournisseurs · {count} connexion(s)"))
-                .font(theme::BODY_STRONG)
-                .color(p.text)
-                .grow(1.0)
-                .truncate(),
-        )
-        .child(action(s, "ac-close", "Fermer", false).on_press(|s: &mut State| s.close_accounts()));
+    let header = screen_head(
+        s,
+        "ac-head",
+        "Comptes fournisseurs",
+        counted(count, "connexion", "connexions"),
+        vec![action(s, "ac-close", "Fermer", false).on_press(|s: &mut State| s.close_accounts())],
+    );
     let list: El = if count == 0 {
         col().w_full().grow(1.0).center().child(
             text("Aucun compte connecté.".to_owned())

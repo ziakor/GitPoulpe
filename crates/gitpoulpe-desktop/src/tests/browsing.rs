@@ -103,7 +103,7 @@ fn screen(store: Arc<MemoryStore>) -> Runtime<State> {
     rt.on_key = Some(crate::keys::on_key);
     click(&mut rt, "profiles");
     settle(&mut rt, |s| s.profiles_open);
-    click(&mut rt, "accounts");
+    super::menu(&mut rt, "nav-accounts");
     settle(&mut rt, |s| s.accounts.open);
     click(&mut rt, "ac-enterprise");
     settle(&mut rt, |s| s.accounts.enterprise);

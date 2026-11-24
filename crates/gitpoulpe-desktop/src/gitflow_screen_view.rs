@@ -5,7 +5,7 @@ use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text};
 
 use crate::state::State;
 use crate::theme;
-use crate::widgets::{action, field};
+use crate::widgets::{action, counted, field, screen_head};
 
 const ROW_HEIGHT: f32 = 44.0;
 
@@ -323,28 +323,12 @@ fn panel(s: &State) -> El {
 pub fn gitflow_screen(s: &State) -> El {
     let p = s.palette;
     let count = s.gitflow.view.as_ref().map_or(0, |v| v.active.len());
-    let title = if s.gitflow.loading && s.gitflow.view.is_none() {
-        "Gitflow · lecture…".to_owned()
+    let context = if s.gitflow.loading && s.gitflow.view.is_none() {
+        "Lecture…".to_owned()
     } else {
-        format!("Gitflow · {count} branche(s) de flux")
+        counted(count, "branche de flux", "branches de flux")
     };
-    let header = row()
-        .w_full()
-        .center_y()
-        .px(20.0)
-        .py(10.0)
-        .gap(12.0)
-        .child(
-            text(title)
-                .font(theme::BODY_STRONG)
-                .color(p.text)
-                .grow(1.0)
-                .truncate(),
-        )
-        .child(
-            action(s, "gf-branches", "Branches", false).on_press(|s: &mut State| s.open_branches()),
-        )
-        .child(action(s, "gf-close", "Fermer", false).on_press(|s: &mut State| s.close_gitflow()));
+    let header = screen_head(s, "gf-head", "Gitflow", context, Vec::new());
     let list: El = if count == 0 {
         col().w_full().grow(1.0).center().child(
             text("Aucune branche feature, release ou hotfix en cours.".to_owned())

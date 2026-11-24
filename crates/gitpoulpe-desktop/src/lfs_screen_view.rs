@@ -5,7 +5,7 @@ use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text};
 
 use crate::state::State;
 use crate::theme;
-use crate::widgets::action;
+use crate::widgets::{action, counted, screen_head};
 
 const ROW_HEIGHT: f32 = 44.0;
 
@@ -171,29 +171,12 @@ fn panel(s: &State) -> El {
 
 pub fn lfs_screen(s: &State) -> El {
     let p = s.palette;
-    let title = if s.lfs.loading {
-        "Git LFS · lecture…".to_owned()
+    let context = if s.lfs.loading {
+        "Lecture…".to_owned()
     } else {
-        format!("Git LFS · {} fichier(s)", s.lfs.files.len())
+        counted(s.lfs.files.len(), "fichier", "fichiers")
     };
-    let header = row()
-        .w_full()
-        .center_y()
-        .px(20.0)
-        .py(10.0)
-        .gap(12.0)
-        .child(
-            text(title)
-                .font(theme::BODY_STRONG)
-                .color(p.text)
-                .grow(1.0)
-                .truncate(),
-        )
-        .child(
-            action(s, "lfs-branches", "Branches", false)
-                .on_press(|s: &mut State| s.open_branches()),
-        )
-        .child(action(s, "lfs-close", "Fermer", false).on_press(|s: &mut State| s.close_lfs()));
+    let header = screen_head(s, "lfs-head", "Git LFS", context, Vec::new());
     let list: El = if s.lfs.files.is_empty() && !s.lfs.loading {
         col().w_full().grow(1.0).center().child(
             text("Aucun fichier géré par LFS dans ce dépôt.".to_owned())
