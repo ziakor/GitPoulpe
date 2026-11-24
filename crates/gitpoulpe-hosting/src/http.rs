@@ -238,21 +238,30 @@ fn map_error(error: ureq::Error) -> HttpError {
     }
 }
 
-fn config() -> ureq::config::Config {
+type Builder = ureq::config::ConfigBuilder<ureq::typestate::AgentScope>;
+
+fn base() -> Builder {
     ureq::Agent::config_builder()
         .http_status_as_error(false)
         .max_redirects(0)
         .timeout_global(Some(TIMEOUT))
         .user_agent("GitPoulpe")
-        .build()
 }
 
 fn agent() -> ureq::Agent {
-    config().into()
+    base().build().into()
+}
+
+fn direct(builder: Builder) -> ureq::config::Config {
+    builder.proxy(None).build()
 }
 
 fn public_agent() -> ureq::Agent {
-    ureq::Agent::with_parts(config(), DefaultConnector::default(), PublicOnly::default())
+    ureq::Agent::with_parts(
+        direct(base()),
+        DefaultConnector::default(),
+        PublicOnly::default(),
+    )
 }
 
 struct Outgoing {
@@ -474,6 +483,14 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(reached, HttpError::Offline(_)), "{reached:?}");
+    }
+
+    #[test]
+    fn a_public_only_download_never_goes_through_a_proxy() {
+        let proxy = ureq::Proxy::new("http://127.0.0.1:3128").ok();
+        assert!(base().proxy(proxy.clone()).build().proxy().is_some());
+        assert!(direct(base().proxy(proxy)).proxy().is_none());
+        assert!(public_agent().config().proxy().is_none());
     }
 
     #[test]
