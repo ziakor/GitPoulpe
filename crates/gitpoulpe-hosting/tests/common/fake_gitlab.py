@@ -1,5 +1,7 @@
 import json
+import struct
 import sys
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 LOG = sys.argv[1]
@@ -7,6 +9,19 @@ IDS = {"acme/platform/api": 100, "octo/api": 200, "octo/notes": 300, "acme/platf
 BRANCHES = {"acme/platform/api": {"main", "feature/x", "feature/dup", "shared/br"}, "octo/api": {"main", "feature/y", "feature/z", "shared/br"},
             "octo/notes": {"main"}, "acme/platform/dev": {"main"}}
 SHA = lambda c: c * 40
+SECRET = "0123456789abcdef0123456789abcdef"
+
+
+def png(width, height):
+    raw = b"".join(b"\x00" + b"\x00\x80\xff\xff" * width for _ in range(height))
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
+    header = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+
+
+PNG = png(3, 3)
 
 
 def mr(iid, state, source, target, source_project=100, title=None, draft=False, sha="a", **extra):
@@ -43,13 +58,18 @@ RMRS = [rmr(20, "2"), rmr(21, "3", "not_approved"), rmr(22, "4", "conflict"),
         rmr(25, "8"), rmr(27, "1"), rmr(28, "a"), rmr(31, "b", "ci_must_pass", pipeline="failed"),
         rmr(32, "c", "ci_must_pass", pipeline=None), rmr(33, "d", "requested_changes"),
         rmr(34, "e", pipeline="success", source_project_id=200), rmr(40, "f", project=400, pipeline=None),
-        rmr(41, "9", "checking")]
+        rmr(41, "9", "checking"),
+        rmr(50, "9", description=f"Capture ![écran](/uploads/{SECRET}/screen%20shot.png) puis "
+                                 f"![déplacée](/uploads/{SECRET}/moved.png) et [journal](/uploads/{SECRET}/run.log)")]
 for item in RMRS:
     if item["iid"] == 34:
         item["source_project_id"] = 200
 APPROVALS = {21: (2, ["alice"]), 22: (0, ["alice"]), 20: (0, []), 41: (1, [])}
 NOTE_IDS = [1000]
-DISC = {20: [
+DISC = {50: [
+    {"id": "u1", "individual_note": True, "notes": [
+        {"id": 950, "type": None, "system": False, "body": f"Vue ![v](/uploads/{SECRET}/screen%20shot.png)",
+         "author": {"username": "octo"}, "created_at": "2026-11-12T09:00:00Z"}]}], 20: [
     {"id": "g1", "individual_note": True, "notes": [
         {"id": 501, "type": None, "system": False, "body": "General remark", "author": {"username": "octo2"},
          "created_at": "2026-11-12T09:00:00Z"}]},
@@ -81,6 +101,9 @@ def diff_entry(path, text, **flags):
 
 
 DIFFS = {
+    50: [[diff_entry("src/a.rs", "@@ -1 +1 @@\n-a\n+b\n"),
+          diff_entry("docs/shot.png", "Binary files a/docs/shot.png and b/docs/shot.png differ\n"),
+          diff_entry("bin/tool", "", deleted_file=True)]],
     7: [[diff_entry("src/a.rs", "@@ -1,2 +1,3 @@\n keep\n-old\n+new\n+more\n"),
          diff_entry("docs/new.md", "@@ -0,0 +1 @@\n+hello\n", new_file=True)],
         [diff_entry("img/logo.png", "", new_file=True),
@@ -120,6 +143,8 @@ class Handler(BaseHTTPRequestHandler):
         token = auth.removeprefix("Bearer ").strip() or (self.headers.get("PRIVATE-TOKEN") or "")
         with open(LOG, "a") as f:
             f.write(json.dumps({"path": self.path, "auth": auth}) + "\n")
+        if self.path == "/storage/moved.png":
+            return self.image(400 if auth else 200)
         if not self.path.startswith("/api/v4/"):
             return self.reply(404, {"message": "404 Not Found"})
         path = self.path[len("/api/v4"):]
@@ -243,6 +268,15 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, [])
         return self.reply(404, {"message": "404 Not Found"})
 
+    def image(self, status):
+        if status != 200:
+            return self.reply(status, {"message": "credentials sent to storage"})
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", str(len(PNG)))
+        self.end_headers()
+        self.wfile.write(PNG)
+
     def project_routes(self, route, params, token):
         from urllib.parse import unquote
         rest = route[len("/projects/"):]
@@ -253,6 +287,16 @@ class Handler(BaseHTTPRequestHandler):
         params = {k: unquote(v) for k, v in params.items()}
         if full not in IDS:
             return self.reply(404, {"message": "404 Project Not Found"})
+        if full == "acme/platform/api" and tail == "repository/files/docs%2Fshot.png/raw":
+            return self.image(200 if params.get("ref") in (SHA("b"), SHA("9")) else 404)
+        if full == "acme/platform/api" and tail == f"uploads/{SECRET}/screen%20shot.png":
+            return self.image(200)
+        if full == "acme/platform/api" and tail == f"uploads/{SECRET}/moved.png":
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.1:{self.server.server_address[1]}/storage/moved.png")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         if tail == "":
             extra = {"id": IDS[full]}
             if full == "octo/api":

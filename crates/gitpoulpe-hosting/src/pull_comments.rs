@@ -1,8 +1,11 @@
 use gitpoulpe_core::Connection;
 use serde_json::{Value, json};
 
+use crate::attachments::{Attachment, github_attachments};
 use crate::github::{GithubError, interpret_failure};
 use crate::repos::{client, pages, valid_org};
+
+pub(crate) const RICH: &str = "application/vnd.github.full+json";
 use crate::secrets::SecretStore;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,6 +38,7 @@ pub struct IssueComment {
     pub author: String,
     pub body: String,
     pub created_at: String,
+    pub attachments: Vec<Attachment>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -49,6 +53,7 @@ pub struct ReviewComment {
     pub in_reply_to: Option<u64>,
     pub outdated: bool,
     pub created_at: String,
+    pub attachments: Vec<Attachment>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -81,8 +86,17 @@ fn author(value: &Value) -> String {
         .unwrap_or_default()
 }
 
-fn parse_issue(value: &Value) -> Option<IssueComment> {
+fn attachments_of(value: &Value, web: &str) -> Vec<Attachment> {
+    github_attachments(
+        value.get("body").and_then(Value::as_str).unwrap_or(""),
+        value.get("body_html").and_then(Value::as_str),
+        web,
+    )
+}
+
+fn parse_issue(value: &Value, web: &str) -> Option<IssueComment> {
     Some(IssueComment {
+        attachments: attachments_of(value, web),
         id: value.get("id")?.as_u64()?,
         author: author(value),
         body: text(value, "body").unwrap_or_default(),
@@ -90,10 +104,11 @@ fn parse_issue(value: &Value) -> Option<IssueComment> {
     })
 }
 
-fn parse_review(value: &Value) -> Option<ReviewComment> {
+fn parse_review(value: &Value, web: &str) -> Option<ReviewComment> {
     let line = value.get("line").and_then(Value::as_u64);
     let original = value.get("original_line").and_then(Value::as_u64);
     Some(ReviewComment {
+        attachments: attachments_of(value, web),
         id: value.get("id")?.as_u64()?,
         author: author(value),
         body: text(value, "body").unwrap_or_default(),
@@ -142,7 +157,7 @@ pub async fn list_comments(
         return crate::gitlab_review::list_comments(&client, (owner, name), number).await;
     }
     checked(owner, name)?;
-    let client = client(store, connection)?;
+    let client = client(store, connection)?.with_accept(RICH);
     let issue = pages(
         &client,
         format!("repos/{owner}/{name}/issues/{number}/comments?per_page=100"),
@@ -154,8 +169,16 @@ pub async fn list_comments(
     )
     .await?;
     Ok(PullComments {
-        issue: issue.items.iter().filter_map(parse_issue).collect(),
-        review: review.items.iter().filter_map(parse_review).collect(),
+        issue: issue
+            .items
+            .iter()
+            .filter_map(|c| parse_issue(c, &connection.web))
+            .collect(),
+        review: review
+            .items
+            .iter()
+            .filter_map(|c| parse_review(c, &connection.web))
+            .collect(),
     })
 }
 
@@ -184,8 +207,11 @@ pub async fn post_comment(
     if !response.ok() {
         return Err(interpret_failure(&response));
     }
-    parse_issue(&response.json().map_err(|_| GithubError::Unreadable)?)
-        .ok_or(GithubError::Unreadable)
+    parse_issue(
+        &response.json().map_err(|_| GithubError::Unreadable)?,
+        &connection.web,
+    )
+    .ok_or(GithubError::Unreadable)
 }
 
 pub async fn current_head(
@@ -270,8 +296,11 @@ pub async fn post_line_comment(
     if !response.ok() {
         return Err(interpret_failure(&response));
     }
-    parse_review(&response.json().map_err(|_| GithubError::Unreadable)?)
-        .ok_or(GithubError::Unreadable)
+    parse_review(
+        &response.json().map_err(|_| GithubError::Unreadable)?,
+        &connection.web,
+    )
+    .ok_or(GithubError::Unreadable)
 }
 
 pub async fn reply_to_comment(
@@ -307,6 +336,9 @@ pub async fn reply_to_comment(
     if !response.ok() {
         return Err(interpret_failure(&response));
     }
-    parse_review(&response.json().map_err(|_| GithubError::Unreadable)?)
-        .ok_or(GithubError::Unreadable)
+    parse_review(
+        &response.json().map_err(|_| GithubError::Unreadable)?,
+        &connection.web,
+    )
+    .ok_or(GithubError::Unreadable)
 }

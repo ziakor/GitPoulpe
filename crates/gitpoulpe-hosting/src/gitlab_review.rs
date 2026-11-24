@@ -1,6 +1,7 @@
 use gitpoulpe_core::Connection;
 use serde_json::{Value, json};
 
+use crate::attachments::{gitlab_attachments, gitlab_web};
 use crate::github::{GithubError, interpret_failure};
 use crate::gitlab_pulls::{fetch_changes, flag, get_json, mr_base, text, valid_path};
 use crate::http::{ApiClient, Response};
@@ -48,8 +49,17 @@ fn nonempty(body: &str) -> Result<&str, GithubError> {
     }
 }
 
-fn parse_issue(note: &Value) -> Option<IssueComment> {
+fn attachments_of(note: &Value, client: &ApiClient, repo: Repo<'_>) -> Vec<crate::Attachment> {
+    gitlab_attachments(
+        note.get("body").and_then(Value::as_str).unwrap_or(""),
+        gitlab_web(client.base()),
+        repo,
+    )
+}
+
+fn parse_issue(note: &Value, client: &ApiClient, repo: Repo<'_>) -> Option<IssueComment> {
     Some(IssueComment {
+        attachments: attachments_of(note, client, repo),
         id: note.get("id")?.as_u64()?,
         author: author(note),
         body: text(note, "body").unwrap_or_default(),
@@ -62,6 +72,7 @@ fn parse_diff_note(
     root: Option<&Value>,
     reply_to: Option<u64>,
     head: &str,
+    place: (&ApiClient, Repo<'_>),
 ) -> Option<ReviewComment> {
     let position = note
         .get("position")
@@ -71,6 +82,7 @@ fn parse_diff_note(
     let old_line = position.get("old_line").and_then(Value::as_u64);
     let commit_sha = text(position, "head_sha").unwrap_or_default();
     Some(ReviewComment {
+        attachments: attachments_of(note, place.0, place.1),
         id: note.get("id")?.as_u64()?,
         author: author(note),
         body: text(note, "body").unwrap_or_default(),
@@ -152,9 +164,9 @@ pub(crate) async fn list_comments(
         let root_id = root.and_then(|n| n.get("id").and_then(Value::as_u64));
         for (index, note) in notes.iter().enumerate() {
             let reply_to = if index == 0 { None } else { root_id };
-            match parse_diff_note(note, root, reply_to, &head) {
+            match parse_diff_note(note, root, reply_to, &head, (client, repo)) {
                 Some(found) => comments.review.push(found),
-                None => comments.issue.extend(parse_issue(note)),
+                None => comments.issue.extend(parse_issue(note, client, repo)),
             }
         }
     }
@@ -179,8 +191,12 @@ pub(crate) async fn post_comment(
     if !response.ok() {
         return Err(failure(&response));
     }
-    parse_issue(&response.json().map_err(|_| GithubError::Unreadable)?)
-        .ok_or(GithubError::Unreadable)
+    parse_issue(
+        &response.json().map_err(|_| GithubError::Unreadable)?,
+        client,
+        repo,
+    )
+    .ok_or(GithubError::Unreadable)
 }
 
 fn find_line(diff: &str, side: Side, wanted: u64) -> Option<(Option<u64>, Option<u64>)> {
@@ -330,7 +346,7 @@ pub(crate) async fn post_line_comment(
     let discussion = response.json().map_err(|_| GithubError::Unreadable)?;
     notes_of(&discussion)
         .first()
-        .and_then(|n| parse_diff_note(n, None, None, &current.head))
+        .and_then(|n| parse_diff_note(n, None, None, &current.head, (client, repo)))
         .ok_or(GithubError::Unreadable)
 }
 
@@ -372,7 +388,8 @@ pub(crate) async fn reply_to_comment(
         return Err(failure(&response));
     }
     let note = response.json().map_err(|_| GithubError::Unreadable)?;
-    parse_diff_note(&note, root.as_ref(), root_id, &head).ok_or(GithubError::Unreadable)
+    parse_diff_note(&note, root.as_ref(), root_id, &head, (client, repo))
+        .ok_or(GithubError::Unreadable)
 }
 
 pub(crate) async fn list_reviews(

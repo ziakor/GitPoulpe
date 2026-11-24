@@ -1,6 +1,7 @@
 use gitpoulpe_core::Connection;
 use serde_json::{Value, json};
 
+use crate::attachments::{Change, gitlab_attachments, gitlab_file_media, gitlab_web};
 use crate::github::{GithubError, interpret_failure};
 use crate::gitlab_repos::{parse_project, project_id, valid_namespace};
 use crate::http::ApiClient;
@@ -128,6 +129,7 @@ fn parse_change(value: &Value) -> Option<PullFile> {
     };
     let diff = text(value, "diff").unwrap_or_default();
     let (additions, deletions) = count_lines(&diff);
+    let binary = diff.is_empty() || diff.starts_with("Binary files ");
     Some(PullFile {
         change: ChangedFile {
             path,
@@ -135,7 +137,8 @@ fn parse_change(value: &Value) -> Option<PullFile> {
             additions,
             deletions,
         },
-        patch: (!diff.is_empty()).then_some(diff),
+        patch: (!binary).then_some(diff),
+        media: None,
     })
 }
 
@@ -439,11 +442,34 @@ pub(crate) async fn load_mr(
         })
         .collect();
     let (changes, files_truncated) = fetch_changes(client, &base).await?;
-    let files: Vec<PullFile> = changes.iter().filter_map(parse_change).collect();
+    let web = gitlab_web(client.base());
+    let files: Vec<PullFile> = changes
+        .iter()
+        .filter_map(|value| {
+            let mut file = parse_change(value)?;
+            if file.patch.is_none() {
+                let previous = text(value, "old_path");
+                file.media = Some(gitlab_file_media(
+                    web,
+                    repo,
+                    Change {
+                        path: &file.change.path,
+                        previous: previous.as_deref(),
+                        status: &file.change.status,
+                    },
+                    Some(&summary.base_sha),
+                    &summary.head_sha,
+                ));
+            }
+            Some(file)
+        })
+        .collect();
     let after = get_json(client, &base).await?;
     let changed_during_load = text(&after, "sha") != text(&value, "sha");
+    let body = text(&value, "description").unwrap_or_default();
     Ok(PullDetail {
-        body: text(&value, "description").unwrap_or_default(),
+        attachments: gitlab_attachments(&body, web, repo),
+        body,
         files_truncated,
         summary,
         commits,

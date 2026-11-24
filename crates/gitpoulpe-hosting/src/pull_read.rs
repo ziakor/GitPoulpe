@@ -1,7 +1,12 @@
 use gitpoulpe_core::Connection;
 use serde_json::Value;
 
+use crate::attachments::{
+    Attachment, Change, FileMedia, github_attachments, github_file_media, is_image_path,
+};
 use crate::github::{GithubError, interpret_failure};
+use crate::http::ApiClient;
+use crate::pull_comments::RICH;
 use crate::pulls::ChangedFile;
 use crate::repos::{client, pages, valid_org};
 use crate::secrets::SecretStore;
@@ -56,12 +61,14 @@ pub struct PullCommit {
 pub struct PullFile {
     pub change: ChangedFile,
     pub patch: Option<String>,
+    pub media: Option<FileMedia>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PullDetail {
     pub summary: PullSummary,
     pub body: String,
+    pub attachments: Vec<Attachment>,
     pub commits: Vec<PullCommit>,
     pub files: Vec<PullFile>,
     pub files_truncated: bool,
@@ -100,6 +107,22 @@ fn parse_summary(value: &Value) -> Option<PullSummary> {
         url: text(value, "html_url").unwrap_or_default(),
         updated_at: text(value, "updated_at").unwrap_or_default(),
     })
+}
+
+async fn merge_base(client: &ApiClient, pull: &str, summary: &PullSummary) -> Option<String> {
+    let repo = pull.rsplit_once("/pulls/")?.0;
+    let response = client
+        .get(&format!(
+            "{repo}/compare/{}...{}?per_page=1",
+            summary.base_sha, summary.head_sha
+        ))
+        .await
+        .ok()?;
+    if !response.ok() {
+        return None;
+    }
+    let value = response.json().ok()?;
+    text(value.get("merge_base_commit")?, "sha")
 }
 
 pub async fn list_pulls(
@@ -147,7 +170,7 @@ pub async fn load_pull(
     }
     let client = client(store, connection)?;
     let base = format!("repos/{owner}/{name}/pulls/{number}");
-    let response = client.get(&base).await?;
+    let response = client.clone().with_accept(RICH).get(&base).await?;
     if !response.ok() {
         return Err(interpret_failure(&response));
     }
@@ -181,11 +204,11 @@ pub async fn load_pull(
         })
         .collect();
     let files_raw = pages(&client, format!("{base}/files?per_page=100")).await?;
-    let files: Vec<PullFile> = files_raw
+    let parsed: Vec<(PullFile, Option<String>)> = files_raw
         .items
         .iter()
         .filter_map(|f| {
-            Some(PullFile {
+            let file = PullFile {
                 change: ChangedFile {
                     path: text(f, "filename")?,
                     status: text(f, "status")?,
@@ -193,15 +216,50 @@ pub async fn load_pull(
                     deletions: f.get("deletions").and_then(Value::as_u64).unwrap_or(0),
                 },
                 patch: text(f, "patch"),
-            })
+                media: None,
+            };
+            Some((file, text(f, "previous_filename")))
+        })
+        .collect();
+    let needs_base = parsed.iter().any(|(f, _)| {
+        f.patch.is_none() && f.change.status != "added" && is_image_path(&f.change.path)
+    });
+    let merge_base = if needs_base {
+        merge_base(&client, &base, &summary).await
+    } else {
+        None
+    };
+    let files: Vec<PullFile> = parsed
+        .into_iter()
+        .map(|(mut file, previous)| {
+            if file.patch.is_none() {
+                file.media = Some(github_file_media(
+                    &connection.web,
+                    (owner, name),
+                    Change {
+                        path: &file.change.path,
+                        previous: previous.as_deref(),
+                        status: &file.change.status,
+                    },
+                    merge_base.as_deref(),
+                    &summary.head_sha,
+                ));
+            }
+            file
         })
         .collect();
     let changed_during_load = !commits_raw.truncated
         && commits
             .last()
             .is_some_and(|last| last.sha != summary.head_sha);
+    let body = text(&value, "body").unwrap_or_default();
     Ok(PullDetail {
-        body: text(&value, "body").unwrap_or_default(),
+        attachments: github_attachments(
+            &body,
+            value.get("body_html").and_then(Value::as_str),
+            &connection.web,
+        ),
+        body,
         files_truncated: files_raw.truncated,
         summary,
         commits,

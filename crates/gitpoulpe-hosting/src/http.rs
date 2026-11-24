@@ -149,26 +149,109 @@ fn map_error(error: ureq::Error) -> HttpError {
     }
 }
 
+fn agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .max_redirects(0)
+        .timeout_global(Some(TIMEOUT))
+        .user_agent("GitPoulpe")
+        .build()
+        .into()
+}
+
+struct Outgoing {
+    method: &'static str,
+    url: String,
+    accept: &'static str,
+    authorization: Option<String>,
+    body: Option<Value>,
+    limit: u64,
+}
+
+async fn run(agent: ureq::Agent, outgoing: Outgoing) -> Result<Response, HttpError> {
+    tokio::task::spawn_blocking(move || {
+        let mut request = ureq::http::Request::builder()
+            .method(outgoing.method)
+            .uri(&outgoing.url)
+            .header("Accept", outgoing.accept)
+            .header("X-GitHub-Api-Version", "2022-11-28");
+        if let Some(value) = outgoing.authorization {
+            request = request.header("Authorization", value);
+        }
+        let payload = match outgoing.body {
+            Some(value) => {
+                request = request.header("Content-Type", "application/json");
+                serde_json::to_vec(&value).unwrap_or_default()
+            }
+            None => Vec::new(),
+        };
+        let request = request.body(payload).map_err(|_| HttpError::InvalidUrl)?;
+        let mut response = agent.run(request).map_err(map_error)?;
+        let status = response.status().as_u16();
+        let headers = response
+            .headers()
+            .iter()
+            .filter_map(|(k, v)| Some((k.as_str().to_owned(), v.to_str().ok()?.to_owned())))
+            .collect();
+        let body = response
+            .body_mut()
+            .with_config()
+            .limit(outgoing.limit)
+            .read_to_vec()
+            .map_err(map_error)?;
+        Ok(Response {
+            status,
+            headers,
+            body,
+        })
+    })
+    .await
+    .map_err(|e| HttpError::Other(e.to_string()))?
+}
+
+pub(crate) fn origin(url: &str) -> Option<String> {
+    let (scheme, authority) = host_of(url)?;
+    Some(format!("{scheme}://{authority}"))
+}
+
+pub(crate) fn authority(url: &str) -> Option<&str> {
+    host_of(url).map(|(_, authority)| authority)
+}
+
+pub(crate) async fn get_anonymous(url: &str, limit: u64) -> Result<Response, HttpError> {
+    validate_base(url)?;
+    run(
+        agent(),
+        Outgoing {
+            method: "GET",
+            url: url.trim().to_owned(),
+            accept: "*/*",
+            authorization: None,
+            body: None,
+            limit,
+        },
+    )
+    .await
+}
+
 impl ApiClient {
     pub fn new(base: &str, token: Option<&Token>) -> Result<Self, HttpError> {
         let base = validate_base(base)?;
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .http_status_as_error(false)
-            .max_redirects(0)
-            .timeout_global(Some(TIMEOUT))
-            .user_agent("GitPoulpe")
-            .build()
-            .into();
         Ok(Self {
             base,
             authorization: token.map(|t| format!("Bearer {}", t.expose())),
             accept: "application/vnd.github+json",
-            agent,
+            agent: agent(),
         })
     }
 
     pub fn with_plain_json(mut self) -> Self {
         self.accept = "application/json";
+        self
+    }
+
+    pub(crate) fn with_accept(mut self, accept: &'static str) -> Self {
+        self.accept = accept;
         self
     }
 
@@ -180,63 +263,55 @@ impl ApiClient {
         host_of(url) == host_of(&self.base)
     }
 
+    fn resolve(&self, path_or_url: &str) -> Result<String, HttpError> {
+        if path_or_url.starts_with("http://") || path_or_url.starts_with("https://") {
+            if !self.same_origin(path_or_url) {
+                return Err(HttpError::Other(
+                    "adresse hors du serveur configuré refusée".to_owned(),
+                ));
+            }
+            Ok(path_or_url.to_owned())
+        } else {
+            Ok(format!(
+                "{}/{}",
+                self.base,
+                path_or_url.trim_start_matches('/')
+            ))
+        }
+    }
+
     pub async fn send(
         &self,
         method: &'static str,
         path_or_url: &str,
         body: Option<Value>,
     ) -> Result<Response, HttpError> {
-        let url = if path_or_url.starts_with("http://") || path_or_url.starts_with("https://") {
-            if !self.same_origin(path_or_url) {
-                return Err(HttpError::Other(
-                    "adresse hors du serveur configuré refusée".to_owned(),
-                ));
-            }
-            path_or_url.to_owned()
-        } else {
-            format!("{}/{}", self.base, path_or_url.trim_start_matches('/'))
+        let outgoing = Outgoing {
+            method,
+            url: self.resolve(path_or_url)?,
+            accept: self.accept,
+            authorization: self.authorization.clone(),
+            body,
+            limit: MAX_BODY,
         };
-        let agent = self.agent.clone();
-        let authorization = self.authorization.clone();
-        let accept = self.accept;
-        tokio::task::spawn_blocking(move || {
-            let mut request = ureq::http::Request::builder()
-                .method(method)
-                .uri(&url)
-                .header("Accept", accept)
-                .header("X-GitHub-Api-Version", "2022-11-28");
-            if let Some(value) = authorization {
-                request = request.header("Authorization", value);
-            }
-            let payload = match body {
-                Some(value) => {
-                    request = request.header("Content-Type", "application/json");
-                    serde_json::to_vec(&value).unwrap_or_default()
-                }
-                None => Vec::new(),
-            };
-            let request = request.body(payload).map_err(|_| HttpError::InvalidUrl)?;
-            let mut response = agent.run(request).map_err(map_error)?;
-            let status = response.status().as_u16();
-            let headers = response
-                .headers()
-                .iter()
-                .filter_map(|(k, v)| Some((k.as_str().to_owned(), v.to_str().ok()?.to_owned())))
-                .collect();
-            let body = response
-                .body_mut()
-                .with_config()
-                .limit(MAX_BODY)
-                .read_to_vec()
-                .map_err(map_error)?;
-            Ok(Response {
-                status,
-                headers,
-                body,
-            })
-        })
-        .await
-        .map_err(|e| HttpError::Other(e.to_string()))?
+        run(self.agent.clone(), outgoing).await
+    }
+
+    pub(crate) async fn get_bytes(
+        &self,
+        path_or_url: &str,
+        accept: &'static str,
+        limit: u64,
+    ) -> Result<Response, HttpError> {
+        let outgoing = Outgoing {
+            method: "GET",
+            url: self.resolve(path_or_url)?,
+            accept,
+            authorization: self.authorization.clone(),
+            body: None,
+            limit,
+        };
+        run(self.agent.clone(), outgoing).await
     }
 
     pub async fn get(&self, path: &str) -> Result<Response, HttpError> {

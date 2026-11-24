@@ -1,6 +1,8 @@
 import json
+import struct
 import sys
 import threading
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 LOG = sys.argv[1]
@@ -9,6 +11,24 @@ FORKS = {}
 SENT = []
 REVIEWS = []
 MERGED = set()
+U1 = "fd0fc972-c7df-42cc-b025-35deb408c0b6"
+U2 = "0a0fbb9c-3fe6-443d-9621-749ebd906115"
+U3 = "39be22d3-faa0-4641-b4a5-477dba83845c"
+U4 = "4a497955-6e6f-4237-a2c8-585ac871ea28"
+
+
+def png(width, height):
+    raw = b"".join(b"\x00" + b"\xff\x00\x00\xff" * width for _ in range(height))
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
+    header = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+
+
+PNG = png(4, 2)
+BEFORE = png(6, 3)
+AFTER = png(8, 4)
 USERS = {
     "good": {"login": "Octo", "name": "Octo Cat", "scopes": "repo, read:org"},
     "fine": {"login": "Octo", "name": "Octo Cat", "scopes": None},
@@ -33,6 +53,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header(k, v)
         self.end_headers()
         self.wfile.write(data)
+        return True
 
     def repo(self, owner, name, **extra):
         base = {"name": name, "owner": {"login": owner}, "description": None, "private": False,
@@ -88,6 +109,8 @@ class Handler(BaseHTTPRequestHandler):
         if "/compare/" in rest:
             spec = unquote(rest.split("/compare/", 1)[1])
             base, head = spec.split("...", 1)
+            if repo == "acme/proj" and base == "basesha" and head == "sha7":
+                return self.reply(200, {"merge_base_commit": {"sha": "mergebase7"}, "files": []})
             if repo == "acme/proj" and not head.startswith("octo:") or repo == "octo/proj" and ":" in head:
                 return self.reply(404, {"message": "Not Found"})
             return self.reply(200, {"ahead_by": 2, "behind_by": 1, "files": [
@@ -96,8 +119,12 @@ class Handler(BaseHTTPRequestHandler):
         if rest == "acme/proj/branches/main/protection":
             return self.reply(200, {"required_status_checks": {"contexts": ["build", "lint", "missing"]},
                                     "required_pull_request_reviews": {"required_approving_review_count": 2}})
+        if rest.startswith("acme/proj/contents/"):
+            return self.contents(rest, params)
         if rest.startswith("acme/proj/commits/"):
             return self.checks_route(rest, params)
+        if rest == "acme/proj/issues/7/comments":
+            return self.reply(200, [self.with_image({"id": 70, "user": {"login": "octo"}, "created_at": "t1"}, "Écran")])
         if rest.startswith("acme/proj/issues/") and rest.endswith("/comments"):
             return self.reply(200, [{"id": 1, "user": {"login": "octo"}, "body": "hello", "created_at": "t1"}]
                               + [c for c in SENT if c["kind"] == "issue"])
@@ -144,13 +171,75 @@ class Handler(BaseHTTPRequestHandler):
 
     def pr(self, n):
         spec = {1: ("open", None, "sha1"), 2: ("closed", None, "sha2"), 3: ("closed", "2026-01-01T00:00:00Z", "sha5"),
-                4: ("open", None, "newsha"), 5: ("open", None, "sha5"), 6: ("open", None, "sha6")}[n]
+                4: ("open", None, "newsha"), 5: ("open", None, "sha5"), 6: ("open", None, "sha6"),
+                7: ("open", None, "sha7")}[n]
         return {"number": n, "title": f"PR {n}", "state": spec[0], "merged_at": spec[1], "draft": n == 4,
                 "html_url": f"https://example.test/acme/proj/pull/{n}", "updated_at": "2026-02-02T00:00:00Z",
-                "user": {"login": f"author{n}"}, "body": f"body {n}",
+                "user": {"login": f"author{n}"}, "body": self.attached_body() if n == 7 else f"body {n}",
                 "head": {"ref": f"feature/{n}", "sha": spec[2]}, "base": {"ref": "main", "sha": "basesha"},
                 "mergeable_state": {1: "clean", 4: "blocked"}.get(n, "unknown")} | (
                 {"state": "closed", "merged_at": "2026-03-03T00:00:00Z"} if n in MERGED else {})
+
+    def site(self):
+        return f"http://127.0.0.1:{self.server.server_address[1]}"
+
+    def rich(self):
+        return "full+json" in (self.headers.get("Accept") or "")
+
+    def attached_body(self):
+        site = self.site()
+        return (f'Avant :\n<img width="10" alt="Capture" src="{site}/user-attachments/assets/{U1}" />\n\n'
+                f"{site}/user-attachments/assets/{U2}\n\n"
+                f"[trace.zip]({site}/user-attachments/files/7/trace.zip) ![ext](https://evil.test/e.png) "
+                f"![gone]({site}/user-attachments/assets/{U3})\nFin.")
+
+    def attached_html(self):
+        site = self.site()
+        return (f'<p>Avant :<br><img alt="Capture" src="{site}/media/{U1}.png?jwt=t&amp;v=1"></p>'
+                f'<details><summary><span class="m-1">demo.mp4</span></summary>'
+                f'<video src="{site}/media/{U2}.mp4?jwt=t"></video></details>'
+                f'<p><a href="x">trace.zip</a> <img src="{site}/camo/1" data-canonical-src="https://evil.test/e.png"> '
+                f'<img src="{site}/media/{U3}.png?jwt=t"></p>')
+
+    def with_image(self, item, text):
+        item["body"] = f"{text} ![écran]({self.site()}/user-attachments/assets/{U4})"
+        if self.rich():
+            item["body_html"] = f'<p>{text} <img alt="écran" src="{self.site()}/media/{U4}.png?jwt=t"></p>'
+        return item
+
+    def contents(self, rest, params):
+        if self.headers.get("Accept") != "application/vnd.github.raw+json":
+            return self.reply(415, {"message": "raw media type expected"})
+        path = rest.split("/contents/", 1)[1]
+        versions = {("docs/old%20shot.png", "mergebase7"): BEFORE, ("docs/shot.png", "sha7"): AFTER}
+        data = versions.get((path, params.get("ref")))
+        if data is None:
+            return self.reply(404, {"message": "Not Found"})
+        self.send_response(200)
+        self.send_header("Content-Type", "application/vnd.github.raw+json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+        return True
+
+    def media(self):
+        path = self.path.partition("?")[0]
+        if self.headers.get("Authorization"):
+            return self.reply(400, {"message": "credentials sent to a media address"})
+        if path == "/camo/1":
+            self.send_response(302)
+            self.send_header("Location", f"/media/{U1}.png?jwt=camo")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return True
+        if path in (f"/media/{U1}.png", f"/media/{U4}.png"):
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(PNG)))
+            self.end_headers()
+            self.wfile.write(PNG)
+            return True
+        return self.reply(404, {"message": "Not Found"})
 
     def pull_read(self, rest, params):
         import time
@@ -170,7 +259,10 @@ class Handler(BaseHTTPRequestHandler):
         if n == 5 and len(parts) == 4:
             time.sleep(4)
         if len(parts) == 4:
-            return self.reply(200, self.pr(n))
+            item = self.pr(n)
+            if n == 7 and self.rich():
+                item["body_html"] = self.attached_html()
+            return self.reply(200, item)
         if parts[4] == "commits":
             last = "oldsha" if n == 4 else self.pr(n)["head"]["sha"]
             return self.reply(200, [
@@ -187,11 +279,18 @@ class Handler(BaseHTTPRequestHandler):
                  "commit_id": "sha1", "in_reply_to_id": 10, "created_at": "t3"},
                 {"id": 12, "user": {"login": "reviewer"}, "body": "old", "path": "f2.rs", "line": None,
                  "original_line": 3, "side": "LEFT", "commit_id": "sha0", "created_at": "t0"}]
+            if n == 7:
+                base.append(self.with_image({"id": 71, "user": {"login": "reviewer"}, "path": "f1.rs", "line": 1,
+                                             "side": "RIGHT", "commit_id": "sha7", "created_at": "t4"}, "zoom"))
             return self.reply(200, base + [c for c in SENT if c["kind"] == "review"])
         if parts[4] == "files":
             page = int(params.get("page", "1"))
             files = [{"filename": f"f{i}.rs", "status": "modified", "additions": i, "deletions": 1,
                       "patch": f"@@ -1 +1 @@\n-old{i}\n+new{i}"} for i in range(1, 4)]
+            if n == 7:
+                files += [{"filename": "docs/shot.png", "previous_filename": "docs/old shot.png", "status": "renamed",
+                           "additions": 0, "deletions": 0},
+                          {"filename": "assets/demo.mp4", "status": "added", "additions": 0, "deletions": 0}]
             chunk = files[(page - 1) * 2: page * 2]
             headers = {}
             if page * 2 < len(files):
@@ -444,7 +543,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         with open(LOG, "a") as f:
-            f.write(json.dumps({"path": self.path, "auth": self.headers.get("Authorization")}) + "\n")
+            f.write(json.dumps({"path": self.path, "auth": self.headers.get("Authorization"),
+                                "accept": self.headers.get("Accept")}) + "\n")
+        if self.path.startswith(("/media/", "/camo/")):
+            return self.media()
         if self.path.startswith("/api/v3/"):
             self.path = self.path[len("/api/v3"):]
         auth = self.headers.get("Authorization", "")
