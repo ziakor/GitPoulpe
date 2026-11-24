@@ -14,7 +14,7 @@ use crate::state::{DiffMode, LIST_WIDTH_DEFAULT, Screen, State, ViewKind, WatchS
 use crate::sync::Link;
 use crate::theme::{self, Palette};
 
-const LIST_ROW_HEIGHT: f32 = 56.0;
+const LIST_ROW_HEIGHT: f32 = 48.0;
 pub const LINE_HEIGHT: f32 = 25.0;
 const GUTTER_WIDTH: f32 = 128.0;
 
@@ -173,27 +173,31 @@ fn footer(s: &State) -> El {
 }
 
 fn hints(s: &State) -> String {
+    let palette = format!("{} : palette de commandes", s.shortcut_for("palette"));
     if s.pulls.open && s.pulls.list.open {
-        return format!(
-            "Cliquez une ligne du diff pour la commenter · {} : palette de commandes",
-            s.shortcut_for("palette")
-        );
+        return format!("Cliquez une ligne du diff pour la commenter · {palette}");
     }
-    format!(
-        "{} filtrer · {} et {} : fichier suivant ou précédent · {} et {} : changer de vue · {} : unifié ou séparé · ↑ ↓ ← → PgUp PgDn : lire · {} : actualiser · {} : indexer · {} : désindexer · {} : sélectionner · {} : appliquer à la sélection · clic sur un numéro de ligne : sélectionner (Maj pour étendre) · {} : ouvrir un dépôt · {} : palette de commandes",
-        s.shortcut_for("filter"),
+    if s.place() != crate::nav::Place::Changes {
+        return format!("Échap : fermer l'écran · {palette}");
+    }
+    let reading = format!(
+        "{} et {} : fichier suivant ou précédent",
         s.shortcut_for("next-file"),
         s.shortcut_for("prev-file"),
-        s.shortcut_for("view-unstaged"),
-        s.shortcut_for("view-staged"),
-        s.shortcut_for("toggle-mode"),
-        s.shortcut_for("refresh-reading"),
+    );
+    let mode = format!("{} : unifié ou séparé", s.shortcut_for("toggle-mode"));
+    if s.view == ViewKind::Commit {
+        return format!("{reading} · {mode} · Échap : quitter l'inspection · {palette}");
+    }
+    format!(
+        "{} : filtrer · {reading} · {} : indexer · {} : désindexer · {} : sélectionner · {} et {} : changer de vue · {mode} · {} : actualiser · {palette}",
+        s.shortcut_for("filter"),
         s.shortcut_for("stage"),
         s.shortcut_for("unstage"),
         s.shortcut_for("mark"),
-        s.shortcut_for("apply-stage"),
-        s.shortcut_for("open-repository"),
-        s.shortcut_for("palette"),
+        s.shortcut_for("view-unstaged"),
+        s.shortcut_for("view-staged"),
+        s.shortcut_for("refresh-reading"),
     )
 }
 
@@ -679,7 +683,10 @@ fn tab(s: &State, kind: ViewKind, label: &'static str) -> El {
     el().key(label)
         .role("tab")
         .focus_selected(active)
-        .label(format!("{label}, {} fichiers", s.count(kind)))
+        .label(format!(
+            "{label}, {}",
+            crate::widgets::counted(s.count(kind), "fichier", "fichiers")
+        ))
         .focusable(true)
         .focus_ring(2.0, 2.0, p.accent)
         .grow(1.0)
@@ -705,12 +712,8 @@ fn tab(s: &State, kind: ViewKind, label: &'static str) -> El {
 
 fn view_hint(view: ViewKind) -> &'static str {
     match view {
-        ViewKind::Unstaged => {
-            "Modifications du répertoire de travail, pas encore ajoutées à l'index."
-        }
-        ViewKind::Staged => {
-            "Modifications ajoutées à l'index : elles feront partie du prochain commit."
-        }
+        ViewKind::Unstaged => "Pas encore dans le prochain commit.",
+        ViewKind::Staged => "Feront partie du prochain commit.",
         ViewKind::Commit => "Changements apportés par ce commit.",
     }
 }
@@ -730,7 +733,10 @@ fn left_pane(s: &State) -> El {
         .fill(p.raised)
         .border(1.0, p.line)
         .color(p.text)
-        .placeholder(format!("Nom ou chemin parmi {total} fichiers"), p.muted)
+        .placeholder(
+            format!("Filtrer par nom ou chemin ({})", s.shortcut_for("filter")),
+            p.muted,
+        )
         .focus_ring(2.0, 2.0, p.accent)
         .on_edit(|s: &mut State| &mut s.filter)
         .on_input_change(|s: &mut State, _| s.filter_changed())
@@ -753,11 +759,16 @@ fn left_pane(s: &State) -> El {
                 tx.blur();
             }
         });
-    let counter = if s.files.len() == total {
-        format!("{total} fichiers")
-    } else {
-        format!("{} sur {total} fichiers", s.files.len())
-    };
+    let counter = (s.files.len() != total).then(|| {
+        text(format!(
+            "{} sur {}",
+            s.files.len(),
+            crate::widgets::counted(total, "fichier", "fichiers")
+        ))
+        .key("filter-count")
+        .font(theme::SMALL)
+        .color(p.muted)
+    });
     let list = col()
         .key("list-rows")
         .role("listbox")
@@ -782,7 +793,7 @@ fn left_pane(s: &State) -> El {
                 .w_full()
                 .px(16.0)
                 .py(12.0)
-                .gap(10.0)
+                .gap(8.0)
                 .child(if s.view == ViewKind::Commit {
                     commit_card(s)
                 } else {
@@ -796,18 +807,14 @@ fn left_pane(s: &State) -> El {
                 })
                 .child(
                     text(view_hint(s.view))
+                        .key("view-hint")
                         .font(theme::SMALL)
                         .color(p.muted)
                         .wrap(),
                 )
-                .child(
-                    text("Rechercher un fichier")
-                        .font(theme::SMALL)
-                        .color(p.muted),
-                )
                 .child(filter)
-                .child(text(counter).font(theme::SMALL).color(p.muted))
-                .child(marked_bar(s)),
+                .children(counter)
+                .children(marked_bar(s)),
         )
         .child(
             col()
@@ -877,7 +884,7 @@ fn commit_card(s: &State) -> El {
         .font(theme::SMALL)
         .color(p.muted)
         .wrap(),
-        _ => text("Commit de fusion : choisis le parent de comparaison.".to_owned())
+        _ => text("Commit de fusion : choisissez le parent de comparaison.".to_owned())
             .font(theme::SMALL)
             .color(p.accent)
             .wrap(),
@@ -924,14 +931,12 @@ fn commit_box(s: &State) -> El {
         let origin = shown
             .profile
             .as_ref()
-            .map_or("configuration Git".to_owned(), |label| {
-                format!("profil {label}")
-            });
+            .map_or(String::new(), |label| format!(" (profil {label})"));
         match &shown.result {
             Ok(identity) => {
                 lines = lines.child(
                     text(format!(
-                        "Auteur : {} <{}> ({origin})",
+                        "Auteur : {} <{}>{origin}",
                         identity.name, identity.email
                     ))
                     .font(theme::SMALL)
@@ -941,10 +946,13 @@ fn commit_box(s: &State) -> El {
             }
             Err(_) => {
                 lines = lines.child(
-                    text("Identité inconnue : choisis un profil avec le bouton Profil.".to_owned())
-                        .font(theme::SMALL)
-                        .color(p.red)
-                        .wrap(),
+                    text(
+                        "Identité inconnue : choisissez un profil dans Réglages, Profils Git."
+                            .to_owned(),
+                    )
+                    .font(theme::SMALL)
+                    .color(p.red)
+                    .wrap(),
                 );
             }
         }
@@ -994,8 +1002,8 @@ fn commit_box(s: &State) -> El {
         .gap(8.0)
         .fill(p.panel)
         .border(1.0, p.line)
-        .child(amend_toggle(s))
         .child(input)
+        .child(amend_toggle(s))
         .child(lines);
     if let Some(warning) = amend_warning(s) {
         column = column.child(warning);
@@ -1121,9 +1129,9 @@ fn amend_warning(s: &State) -> Option<El> {
     Some(card)
 }
 
-fn marked_bar(s: &State) -> El {
+fn marked_bar(s: &State) -> Option<El> {
     if s.marked.is_empty() {
-        return el().h(0.0);
+        return None;
     }
     let p = s.palette;
     let count = s.marked.len();
@@ -1137,27 +1145,29 @@ fn marked_bar(s: &State) -> El {
     } else {
         format!("{count} fichiers sélectionnés")
     };
-    row()
-        .w_full()
-        .gap(8.0)
-        .center_y()
-        .child(
-            text(caption)
-                .font(theme::SMALL)
-                .color(p.muted)
-                .grow(1.0)
-                .truncate(),
-        )
-        .child(
-            stage_button(
-                s,
-                "stage-marked".to_owned(),
-                action.to_owned(),
-                action.to_owned(),
-                true,
+    Some(
+        row()
+            .w_full()
+            .gap(8.0)
+            .center_y()
+            .child(
+                text(caption)
+                    .font(theme::SMALL)
+                    .color(p.muted)
+                    .grow(1.0)
+                    .truncate(),
             )
-            .on_press(|s: &mut State| s.write_marked()),
-        )
+            .child(
+                stage_button(
+                    s,
+                    "stage-marked".to_owned(),
+                    action.to_owned(),
+                    action.to_owned(),
+                    true,
+                )
+                .on_press(|s: &mut State| s.write_marked()),
+            ),
+    )
 }
 
 fn status_of(entry: &ChangeEntry, view: ViewKind) -> (&'static str, &'static str) {
@@ -1179,6 +1189,14 @@ fn status_of(entry: &ChangeEntry, view: ViewKind) -> (&'static str, &'static str
         StatusCode::Copied => ("Copié", "C"),
         StatusCode::TypeChanged => ("Type modifié", "T"),
         _ => ("Modifié", "M"),
+    }
+}
+
+fn status_color(p: &Palette, letter: &str) -> rune::Color {
+    match letter {
+        "A" | "?" => p.green,
+        "D" | "!" => p.red,
+        _ => p.muted,
     }
 }
 
@@ -1219,9 +1237,9 @@ fn file_row(s: &State, position: usize) -> El {
                 .w_full()
                 .h_full()
                 .child(
-                    el().w(if selected { 3.0 } else { 0.0 })
+                    el().w(2.0)
                         .h_full()
-                        .fill(p.accent),
+                        .fill(if selected { p.accent } else { fill }),
                 )
                 .child(mark_box(s, position, index))
                 .child(
@@ -1229,16 +1247,16 @@ fn file_row(s: &State, position: usize) -> El {
                         .grow(1.0)
                         .min_w(0.0)
                         .pr(16.0)
-                        .py(8.0)
-                        .gap(2.0)
+                        .py(6.0)
+                        .gap(1.0)
                         .child(text(name).font(theme::BODY_MEDIUM).color(p.text).truncate())
                         .child(text(dir).font(theme::PATH_SMALL).color(p.muted).truncate()),
                 )
                 .child(
-                    el().w(34.0).h_full().py(8.0).child(
+                    el().w(34.0).h_full().py(6.0).child(
                         text(letter)
-                            .font(theme::SMALL)
-                            .color(p.muted)
+                            .font(theme::BODY_STRONG)
+                            .color(status_color(&p, letter))
                             .w(34.0)
                             .align(Align::Center),
                     ),
@@ -1507,7 +1525,7 @@ fn header_row(s: &State, index: usize, entry: &ChangeEntry) -> El {
                         )
                         .child(edit_action(s, index, entry, &path))
                         .child(history_action(s, index, entry, &path))
-                        .child(header_action(s, index, entry, &path)),
+                        .children(header_action(s, index, entry, &path)),
                 )
                 .child({
                     let mut line = row()
@@ -1556,9 +1574,9 @@ fn history_action(s: &State, index: usize, entry: &ChangeEntry, label: &str) -> 
     .on_press(move |s: &mut State| s.open_file_history(target.clone()))
 }
 
-fn header_action(s: &State, index: usize, entry: &ChangeEntry, label: &str) -> El {
+fn header_action(s: &State, index: usize, entry: &ChangeEntry, label: &str) -> Option<El> {
     if s.view == ViewKind::Commit {
-        return el().w(0.0);
+        return None;
     }
     let staging = s.view == ViewKind::Unstaged;
     let eligible = if staging {
@@ -1567,7 +1585,7 @@ fn header_action(s: &State, index: usize, entry: &ChangeEntry, label: &str) -> E
         entry.is_staged()
     };
     if !eligible || entry.is_conflict() {
-        return el().w(0.0);
+        return None;
     }
     let target = entry.path.clone();
     let lines_button = s
@@ -1610,12 +1628,11 @@ fn header_action(s: &State, index: usize, entry: &ChangeEntry, label: &str) -> E
                 s.unstage_paths(vec![target.clone()]);
             }
         });
-    row()
-        .gap(6.0)
-        .center_y()
-        .child(lines_button.unwrap_or_else(|| el().w(0.0)))
-        .child(ignore_button.unwrap_or_else(|| el().w(0.0)))
-        .child(file_button)
+    let mut actions = row().gap(6.0).center_y();
+    for button in [lines_button, ignore_button].into_iter().flatten() {
+        actions = actions.child(button);
+    }
+    Some(actions.child(file_button))
 }
 
 fn notice(s: &State, index: usize, key: String, message: String, tone: Tone) -> El {

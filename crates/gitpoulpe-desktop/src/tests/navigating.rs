@@ -86,3 +86,52 @@ fn the_menu_folds_away_in_a_small_window_and_comes_back_on_demand() {
     go(&mut rt, "nav-hide");
     assert!(rect_of(&rt, "nav").is_none());
 }
+
+fn footer(rt: &Runtime<State>) -> String {
+    rt.elements()
+        .into_iter()
+        .filter_map(|e| e.text)
+        .find(|t| t.ends_with(" : palette de commandes"))
+        .unwrap_or_default()
+}
+
+fn text_of(rt: &Runtime<State>, key: &str) -> Option<String> {
+    rt.elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some(key))
+        .and_then(|e| e.text)
+}
+
+#[test]
+fn the_footer_only_lists_the_keys_that_act_where_you_are() {
+    let (_repo, mut rt) = sized_runtime(6, 1440.0, 900.0);
+    let palette = format!(
+        "{} : palette de commandes",
+        rt.state.shortcut_for("palette")
+    );
+    let stage = format!("{} : indexer", rt.state.shortcut_for("stage"));
+    assert!(footer(&rt).contains(&stage), "{}", footer(&rt));
+    go(&mut rt, "nav-branches");
+    assert_eq!(footer(&rt), format!("Échap : fermer l'écran · {palette}"));
+    go(&mut rt, "nav-changes");
+    assert!(footer(&rt).contains(&stage));
+}
+
+#[test]
+fn the_file_count_appears_only_while_a_filter_hides_files() {
+    let (_repo, mut rt) = sized_runtime(6, 1440.0, 900.0);
+    assert_eq!(text_of(&rt, "filter-count"), None);
+    let total = rt.state.count(rt.state.view);
+    rt.update(|s, _| {
+        s.filter.text = "file_0001".to_owned();
+        s.filter_changed();
+    });
+    for _ in 0..3 {
+        step(&mut rt);
+    }
+    assert_eq!(rt.state.files.len(), 1);
+    assert_eq!(
+        text_of(&rt, "filter-count"),
+        Some(format!("1 sur {total} fichiers"))
+    );
+}

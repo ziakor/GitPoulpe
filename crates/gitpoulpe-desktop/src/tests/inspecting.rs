@@ -223,7 +223,7 @@ fn a_merge_names_its_parents_and_changes_the_file_list_with_the_chosen_one() {
         .parents
         .clone();
     assert_eq!(parents.len(), 2);
-    assert!(shows(&rt, "choisis le parent de comparaison"));
+    assert!(shows(&rt, "choisissez le parent de comparaison"));
     assert_eq!(rt.state.inspected.as_ref().unwrap().base_index, 0);
     let against_first = listed(&rt);
     assert_eq!(against_first, git_names(dir, &parents[0], &f.merge));
