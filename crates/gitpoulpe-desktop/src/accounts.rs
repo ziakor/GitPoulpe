@@ -11,6 +11,8 @@ use rune::TextEdit;
 use crate::engine::Event;
 use crate::state::State;
 
+const MEDIA_SLOTS: usize = 4;
+
 pub const CONNECTIONS_KEY: &str = "connections";
 
 #[derive(Clone, Debug)]
@@ -71,6 +73,7 @@ impl AccountsState {
 pub struct Hosting {
     pub runtime: tokio::runtime::Runtime,
     pub secrets: Arc<dyn SecretStore>,
+    pub media_slots: Arc<tokio::sync::Semaphore>,
 }
 
 impl Hosting {
@@ -81,7 +84,11 @@ impl Hosting {
             .enable_all()
             .build()
             .expect("hosting runtime");
-        Self { runtime, secrets }
+        Self {
+            runtime,
+            secrets,
+            media_slots: Arc::new(tokio::sync::Semaphore::new(MEDIA_SLOTS)),
+        }
     }
 }
 

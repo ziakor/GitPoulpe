@@ -1,6 +1,8 @@
 mod about;
 mod accounts;
 mod accounts_view;
+mod attachments;
+mod attachments_view;
 mod branches;
 mod branches_view;
 mod cloning;

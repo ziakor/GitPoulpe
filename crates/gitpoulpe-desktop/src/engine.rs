@@ -989,6 +989,11 @@ pub enum Event {
         number: u64,
         result: Result<PullComments, String>,
     },
+    PullMediaLoaded {
+        number: u64,
+        link: String,
+        result: Result<Vec<u8>, String>,
+    },
     PullCommentSent {
         request: u64,
         number: u64,

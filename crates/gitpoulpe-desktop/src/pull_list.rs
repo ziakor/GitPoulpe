@@ -9,6 +9,7 @@ use gitpoulpe_hosting::{
 };
 use rune::TextEdit;
 
+use crate::attachments::Media;
 use crate::engine::{Command, Event};
 use crate::state::State;
 
@@ -104,6 +105,7 @@ pub struct PullListState {
     pub list_request: u64,
     pub detail_request: u64,
     pub version: u32,
+    pub media: HashMap<String, Media>,
 }
 
 impl Default for PullListState {
@@ -160,6 +162,7 @@ impl Default for PullListState {
             list_request: 0,
             detail_request: 0,
             version: 0,
+            media: HashMap::new(),
         }
     }
 }
@@ -180,7 +183,7 @@ impl State {
         }
     }
 
-    fn pull_list_target(&self) -> Option<(gitpoulpe_core::Connection, String, String)> {
+    pub(crate) fn pull_list_target(&self) -> Option<(gitpoulpe_core::Connection, String, String)> {
         let candidate = self.pulls.candidates.get(self.pulls.choice)?;
         let (owner, name) = match &self.pulls.target {
             Some(target) => (
@@ -344,6 +347,7 @@ impl State {
             list.unverified = None;
             list.verifying = false;
             list.compose = TextEdit::new("");
+            list.media.clear();
             self.load_review_text();
         }
         self.load_pull_detail();
@@ -359,6 +363,7 @@ impl State {
         let list = &mut self.pulls.list;
         list.detail_request += 1;
         list.detail_loading = true;
+        list.media.retain(|_, m| !matches!(m, Media::Failed(_)));
         list.detail_error = None;
         list.version += 1;
         let request = list.detail_request;
@@ -439,6 +444,7 @@ impl State {
         if list.detail.is_some() {
             self.load_pull_checks();
             self.load_pull_merge_info();
+            self.fetch_pull_media();
         }
         true
     }
@@ -864,6 +870,7 @@ impl State {
             }
         }
         list.version += 1;
+        self.fetch_pull_media();
         true
     }
 

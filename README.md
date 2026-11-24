@@ -212,8 +212,16 @@ The **Comptes fournisseurs** button on the profiles screen connects GitHub.com o
 - The token is validated against the server before anything is saved, then stored in the system keyring (Secret Service on Linux). Preferences only hold the account name, server and granted scopes, never the token. The field is masked.
 - The account in use and the scopes the token grants are shown; fine-grained tokens, which carry no scope list, are labelled as such.
 - Each connection is re-checked when the screen opens or on demand. An expired or revoked token, an organisation that requires SSO authorisation (with the authorisation link), a rate limit and a refused permission are reported as distinct, recoverable states: pasting a new token reconnects the same account.
-- Servers must use HTTPS (plain HTTP is accepted for loopback only), redirects are never followed, and requests to another host are refused, so the token cannot leave the configured server.
+- Servers must use HTTPS (plain HTTP is accepted for loopback only), API requests never follow redirects, and requests to another host are refused, so the token cannot leave the configured server. Attached images are downloaded without the token (see [Attachments in pull and merge requests](#attachments-in-pull-and-merge-requests)).
 - Disconnecting removes only that connection's token. Local Git profiles are not touched.
+
+## Attachments in pull and merge requests
+
+In the pull request screen, images attached to the description, general comments and line comments are shown where they sit in the text: PNG, JPEG, GIF (animated), WebP, BMP, ICO and SVG, up to 20 MiB each. Videos and other attached files appear as a card with their name and an "Ouvrir dans le navigateur" button; there is no in-app video player on Linux. A binary file changed by the pull request also opens in the browser at the right revision, and a changed image shows its version at the merge base and its new version side by side.
+
+- GitHub: the app asks for the rendered description and comments, which carry short-lived image addresses, and downloads the images from GitHub's content servers without the token. External images come through GitHub's image proxy, never straight from the third-party site.
+- GitLab: uploads are read through the project's uploads API with the token (GitLab 17.4 or later), and a redirect to storage is followed without it. External images are not loaded; they are offered as a link.
+- Clicking an image opens the original in the browser. An image that cannot be loaded says why and keeps its link.
 
 ## File history
 

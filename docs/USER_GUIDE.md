@@ -42,7 +42,7 @@ The script refuses to install if shared libraries are missing and tells you whic
 2. **Commit**: write the message and commit with your Git profile ("Profils Git" in the palette sets name, email and signing). Hooks run as configured.
 3. **Branch**: click the branch name in the top bar to create, switch, rename or delete branches.
 4. **Share**: "Intégrer les changements distants…" brings in remote work with the strategy you choose; "Publier…" sends a branch after showing exactly what will happen.
-5. **Review**: "Pull requests et merge requests" in the palette lists them, shows the diff against the exact commits, and lets you comment, review and merge once an account is connected ("Comptes fournisseurs").
+5. **Review**: "Pull requests et merge requests" in the palette lists them, shows the diff against the exact commits, and lets you comment, review and merge once an account is connected ("Comptes fournisseurs"). Attached images are shown in place, and a changed image shows its old and new versions; videos and other files open in the browser.
 
 Other tools, each documented in the README: history and file history, blame, stash, tags, remotes, worktrees, hooks, Git LFS, submodules, Gitflow, interactive rebase, cherry-pick and revert, patches ("Importer un patch…", "Exporter en patch…"), links ("Ouvrir un lien…"), workspaces, favorites, multi-repository overview, notifications, issues, external tools and an embedded terminal.
 

@@ -5,6 +5,7 @@ use gitpoulpe_hosting::{
 };
 use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text};
 
+use crate::attachments_view::{Body, binary_file, rich_body};
 use crate::pull_list::{CommentKind, numbered_lines, review_state_label, short};
 use crate::state::State;
 use crate::theme;
@@ -172,13 +173,18 @@ fn detail(s: &State) -> El {
         );
     }
     if !detail.body.trim().is_empty() {
-        panel = panel.child(
-            text(detail.body.clone())
-                .key("prl-body")
-                .font(theme::SMALL)
-                .color(p.text)
-                .wrap(),
-        );
+        panel = panel.child(rich_body(
+            s,
+            Body {
+                key: "prl-body".to_owned(),
+                prefix: String::new(),
+                text: &detail.body,
+                suffix: String::new(),
+                attachments: &detail.attachments,
+                style: theme::SMALL,
+                color: p.text,
+            },
+        ));
     }
     {
         panel = panel
@@ -234,15 +240,7 @@ fn detail(s: &State) -> El {
         );
         match &file.patch {
             None => {
-                panel = panel.child(
-                    text(
-                        "Pas de diff texte fourni pour ce fichier (binaire ou trop volumineux)."
-                            .to_owned(),
-                    )
-                    .font(theme::SMALL)
-                    .color(p.muted)
-                    .wrap(),
-                );
+                panel = panel.child(binary_file(s, i, file));
             }
             Some(patch) => {
                 for (n, numbered) in numbered_lines(patch).into_iter().enumerate() {
@@ -293,13 +291,18 @@ fn detail(s: &State) -> El {
             .color(p.text),
         );
         for (i, comment) in s.pulls.list.comments.issue.iter().enumerate() {
-            panel = panel.child(
-                text(format!("{} : {}", comment.author, comment.body))
-                    .key(format!("prc-general{i}"))
-                    .font(theme::SMALL)
-                    .color(p.text)
-                    .wrap(),
-            );
+            panel = panel.child(rich_body(
+                s,
+                Body {
+                    key: format!("prc-general{i}"),
+                    prefix: format!("{} : ", comment.author),
+                    text: &comment.body,
+                    suffix: String::new(),
+                    attachments: &comment.attachments,
+                    style: theme::SMALL,
+                    color: p.text,
+                },
+            ));
         }
     }
     if budget == 0 {
@@ -928,33 +931,41 @@ fn threads(s: &State, path: &str, file_index: usize) -> El {
         .filter(|c| c.path == path && c.in_reply_to.is_none())
     {
         let id = root.id;
-        column = column.child(
-            text(format!(
-                "{} : {} (ligne {}{})",
-                root.author,
-                root.body,
-                root.line
-                    .map(|l| l.to_string())
-                    .unwrap_or_else(|| "?".to_owned()),
-                if root.outdated { ", périmé" } else { "" }
-            ))
-            .key(format!("prc-f{file_index}c{id}"))
-            .font(theme::SMALL)
-            .color(p.text)
-            .wrap(),
-        );
+        column = column.child(rich_body(
+            s,
+            Body {
+                key: format!("prc-f{file_index}c{id}"),
+                prefix: format!("{} : ", root.author),
+                text: &root.body,
+                suffix: format!(
+                    " (ligne {}{})",
+                    root.line
+                        .map(|l| l.to_string())
+                        .unwrap_or_else(|| "?".to_owned()),
+                    if root.outdated { ", périmé" } else { "" }
+                ),
+                attachments: &root.attachments,
+                style: theme::SMALL,
+                color: p.text,
+            },
+        ));
         for reply in comments
             .review
             .iter()
             .filter(|c| c.in_reply_to == Some(root.id))
         {
-            column = column.child(
-                text(format!("    ↳ {} : {}", reply.author, reply.body))
-                    .key(format!("prc-f{file_index}r{}", reply.id))
-                    .font(theme::SMALL)
-                    .color(p.muted)
-                    .wrap(),
-            );
+            column = column.child(rich_body(
+                s,
+                Body {
+                    key: format!("prc-f{file_index}r{}", reply.id),
+                    prefix: format!("    ↳ {} : ", reply.author),
+                    text: &reply.body,
+                    suffix: String::new(),
+                    attachments: &reply.attachments,
+                    style: theme::SMALL,
+                    color: p.muted,
+                },
+            ));
         }
         column = column.child(
             action(s, &format!("prc-reply{id}"), "Répondre", false)

@@ -197,6 +197,7 @@ pub struct State {
     pub gitflow: crate::gitflow_screen::GitflowState,
     pub accounts: crate::accounts::AccountsState,
     pub hosting: crate::accounts::Hosting,
+    pub images: Option<rune::ImageCache>,
     pub worktrees: crate::worktrees::WorktreesState,
     pub undo_screen: crate::undos::UndoScreen,
     pub resetting: crate::resetting::ResetSlot,
@@ -361,6 +362,7 @@ impl State {
             hosting: crate::accounts::Hosting::new(std::sync::Arc::new(
                 gitpoulpe_hosting::KeyringStore,
             )),
+            images: None,
             worktrees: crate::worktrees::WorktreesState::default(),
             undo_screen: crate::undos::UndoScreen::default(),
             resetting: crate::resetting::ResetSlot::default(),
@@ -451,6 +453,9 @@ impl State {
     }
 
     pub fn setup(&mut self, waker: Waker) {
+        if self.images.is_none() {
+            self.images = Some(rune::ImageCache::new(waker.clone()));
+        }
         *self.waker.lock().unwrap() = Some(waker);
         if self.engine.is_none() {
             self.engine = Engine::start(
@@ -668,6 +673,7 @@ impl State {
         while let Ok(event) = self.events.try_recv() {
             changed |= self.apply(event);
         }
+        changed |= self.settle_pull_media();
         if self.layout_dirty {
             self.relayout();
             changed = true;
@@ -1080,6 +1086,11 @@ impl State {
                 number,
                 result,
             } => self.apply_pull_comments(request, number, result),
+            Event::PullMediaLoaded {
+                number,
+                link,
+                result,
+            } => self.apply_pull_media(number, link, result),
             Event::PullCommentSent {
                 request,
                 number,

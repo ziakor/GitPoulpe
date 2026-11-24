@@ -10,6 +10,7 @@ use tempfile::TempDir;
 mod acceptance;
 mod accounting;
 mod amending;
+mod attaching;
 mod branching;
 mod browsing;
 mod cloning;
