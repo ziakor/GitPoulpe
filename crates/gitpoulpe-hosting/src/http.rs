@@ -1,6 +1,9 @@
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
 
 use serde_json::Value;
+use ureq::unversioned::resolver::{DefaultResolver, ResolvedSocketAddrs, Resolver};
+use ureq::unversioned::transport::{DefaultConnector, NextTimeout};
 
 const TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_BODY: u64 = 64 * 1024 * 1024;
@@ -132,9 +135,95 @@ pub fn validate_base(base: &str) -> Result<String, HttpError> {
     Ok(base.to_owned())
 }
 
+fn internal_v4(ip: Ipv4Addr) -> bool {
+    let [a, b, c, _] = ip.octets();
+    ip.is_loopback()
+        || ip.is_private()
+        || ip.is_link_local()
+        || ip.is_unspecified()
+        || ip.is_broadcast()
+        || ip.is_multicast()
+        || ip.is_documentation()
+        || a == 0
+        || a >= 240
+        || (a == 100 && (64..128).contains(&b))
+        || (a == 198 && (b == 18 || b == 19))
+        || (a == 192 && b == 0 && c == 0)
+}
+
+fn embedded_v4(high: u16, low: u16) -> Ipv4Addr {
+    let [a, b] = high.to_be_bytes();
+    let [c, d] = low.to_be_bytes();
+    Ipv4Addr::new(a, b, c, d)
+}
+
+fn internal_v6(ip: Ipv6Addr) -> bool {
+    if ip.is_loopback()
+        || ip.is_unspecified()
+        || ip.is_unique_local()
+        || ip.is_unicast_link_local()
+        || ip.is_multicast()
+    {
+        return true;
+    }
+    if let Some(v4) = ip.to_ipv4() {
+        return internal_v4(v4);
+    }
+    match ip.segments() {
+        [0x64, 0xff9b, 0, 0, 0, 0, high, low] => internal_v4(embedded_v4(high, low)),
+        [0x2002, high, low, ..] => internal_v4(embedded_v4(high, low)),
+        _ => false,
+    }
+}
+
+pub(crate) fn internal_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => internal_v4(ip),
+        IpAddr::V6(ip) => internal_v6(ip),
+    }
+}
+
+#[derive(Debug)]
+struct InternalAddress(String);
+
+impl std::fmt::Display for InternalAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} désigne une adresse interne : refusé", self.0)
+    }
+}
+
+impl std::error::Error for InternalAddress {}
+
+#[derive(Debug, Default)]
+struct PublicOnly(DefaultResolver);
+
+impl Resolver for PublicOnly {
+    fn resolve(
+        &self,
+        uri: &ureq::http::Uri,
+        config: &ureq::config::Config,
+        timeout: NextTimeout,
+    ) -> Result<ResolvedSocketAddrs, ureq::Error> {
+        let found = self.0.resolve(uri, config, timeout)?;
+        if found.iter().any(|addr| internal_ip(addr.ip())) {
+            let host = uri.host().unwrap_or_default().to_owned();
+            return Err(ureq::Error::Io(std::io::Error::other(InternalAddress(
+                host,
+            ))));
+        }
+        Ok(found)
+    }
+}
+
 fn map_error(error: ureq::Error) -> HttpError {
     match error {
         ureq::Error::Timeout(_) => HttpError::Timeout,
+        ureq::Error::Io(e)
+            if e.get_ref()
+                .is_some_and(|inner| inner.is::<InternalAddress>()) =>
+        {
+            HttpError::Other(e.to_string())
+        }
         ureq::Error::Io(e) if e.kind() == std::io::ErrorKind::InvalidData => {
             HttpError::Tls("certificat ou protocole invalide".to_owned())
         }
@@ -149,14 +238,21 @@ fn map_error(error: ureq::Error) -> HttpError {
     }
 }
 
-fn agent() -> ureq::Agent {
+fn config() -> ureq::config::Config {
     ureq::Agent::config_builder()
         .http_status_as_error(false)
         .max_redirects(0)
         .timeout_global(Some(TIMEOUT))
         .user_agent("GitPoulpe")
         .build()
-        .into()
+}
+
+fn agent() -> ureq::Agent {
+    config().into()
+}
+
+fn public_agent() -> ureq::Agent {
+    ureq::Agent::with_parts(config(), DefaultConnector::default(), PublicOnly::default())
 }
 
 struct Outgoing {
@@ -218,10 +314,14 @@ pub(crate) fn authority(url: &str) -> Option<&str> {
     host_of(url).map(|(_, authority)| authority)
 }
 
-pub(crate) async fn get_anonymous(url: &str, limit: u64) -> Result<Response, HttpError> {
+pub(crate) async fn get_anonymous(
+    url: &str,
+    limit: u64,
+    public_only: bool,
+) -> Result<Response, HttpError> {
     validate_base(url)?;
     run(
-        agent(),
+        if public_only { public_agent() } else { agent() },
         Outgoing {
             method: "GET",
             url: url.trim().to_owned(),
@@ -351,4 +451,53 @@ pub fn next_link(header: &str) -> Option<String> {
                 .to_owned()
         })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_public_only_fetch_refuses_names_and_addresses_that_resolve_inside() {
+        for url in [
+            "http://localhost:9/x",
+            "http://127.0.0.1:9/x",
+            "http://[::1]:9/x",
+        ] {
+            let refused = get_anonymous(url, 1024, true).await.unwrap_err();
+            assert!(
+                matches!(&refused, HttpError::Other(why) if why.contains("adresse interne")),
+                "{url}: {refused:?}"
+            );
+        }
+        let reached = get_anonymous("http://127.0.0.1:9/x", 1024, false)
+            .await
+            .unwrap_err();
+        assert!(matches!(reached, HttpError::Offline(_)), "{reached:?}");
+    }
+
+    #[test]
+    fn internal_addresses_cover_shared_reserved_and_embedded_forms() {
+        for ip in [
+            "127.0.0.1",
+            "10.1.2.3",
+            "100.64.0.1",
+            "169.254.169.254",
+            "192.168.1.1",
+            "0.1.2.3",
+            "224.0.0.1",
+            "255.255.255.255",
+            "::1",
+            "fd00::1",
+            "fe80::1",
+            "::ffff:10.0.0.1",
+            "64:ff9b::a00:1",
+            "2002:c0a8:101::",
+        ] {
+            assert!(internal_ip(ip.parse().unwrap()), "{ip}");
+        }
+        for ip in ["140.82.112.3", "52.216.0.1", "2606:50c0:8000::153"] {
+            assert!(!internal_ip(ip.parse().unwrap()), "{ip}");
+        }
+    }
 }

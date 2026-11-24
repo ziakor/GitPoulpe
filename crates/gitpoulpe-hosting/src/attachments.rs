@@ -1,4 +1,4 @@
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::IpAddr;
 use std::ops::Range;
 
 use gitpoulpe_core::Connection;
@@ -678,55 +678,12 @@ fn host_name(url: &str) -> Option<String> {
     Some(host.trim_end_matches('.').to_owned())
 }
 
-fn internal_v4(ip: Ipv4Addr) -> bool {
-    let [a, b, c, _] = ip.octets();
-    ip.is_loopback()
-        || ip.is_private()
-        || ip.is_link_local()
-        || ip.is_unspecified()
-        || ip.is_broadcast()
-        || ip.is_multicast()
-        || ip.is_documentation()
-        || a == 0
-        || a >= 240
-        || (a == 100 && (64..128).contains(&b))
-        || (a == 198 && (b == 18 || b == 19))
-        || (a == 192 && b == 0 && c == 0)
-}
-
-fn embedded_v4(high: u16, low: u16) -> Ipv4Addr {
-    let [a, b] = high.to_be_bytes();
-    let [c, d] = low.to_be_bytes();
-    Ipv4Addr::new(a, b, c, d)
-}
-
-fn internal_v6(ip: Ipv6Addr) -> bool {
-    let s = ip.segments();
-    if ip.is_loopback()
-        || ip.is_unspecified()
-        || ip.is_unique_local()
-        || ip.is_unicast_link_local()
-        || ip.is_multicast()
-    {
-        return true;
-    }
-    if let Some(v4) = ip.to_ipv4() {
-        return internal_v4(v4);
-    }
-    match s {
-        [0x64, 0xff9b, 0, 0, 0, 0, high, low] => internal_v4(embedded_v4(high, low)),
-        [0x2002, high, low, ..] => internal_v4(embedded_v4(high, low)),
-        _ => false,
-    }
-}
-
 fn internal(host: &str) -> bool {
     if host.is_empty() || host == "localhost" || host.ends_with(".localhost") {
         return true;
     }
     match host.parse::<IpAddr>() {
-        Ok(IpAddr::V4(ip)) => internal_v4(ip),
-        Ok(IpAddr::V6(ip)) => internal_v6(ip),
+        Ok(ip) => http::internal_ip(ip),
         Err(_) => {
             let last = host.rsplit('.').next().unwrap_or(host);
             last.bytes().all(|b| b.is_ascii_digit()) || last.starts_with("0x")
@@ -763,6 +720,8 @@ pub async fn fetch_preview(
     connection: &Connection,
     preview: &Preview,
 ) -> Result<Vec<u8>, GithubError> {
+    let public_only =
+        |url: &str| !(same_host(url, &connection.web) || same_host(url, &connection.api));
     let (mut url, mut response): (String, Response) = match preview {
         Preview::Api(path) | Preview::Contents(path) => {
             let accept = if matches!(preview, Preview::Contents(_)) {
@@ -781,7 +740,10 @@ pub async fn fetch_preview(
             {
                 return Err(refused("adresse hors des serveurs du fournisseur refusée"));
             }
-            (url.clone(), http::get_anonymous(url, MEDIA_LIMIT).await?)
+            (
+                url.clone(),
+                http::get_anonymous(url, MEDIA_LIMIT, public_only(url)).await?,
+            )
         }
     };
     let mut hops = 0;
@@ -799,7 +761,7 @@ pub async fn fetch_preview(
                 "redirection vers une adresse non autorisée refusée",
             ));
         }
-        response = http::get_anonymous(&url, MEDIA_LIMIT).await?;
+        response = http::get_anonymous(&url, MEDIA_LIMIT, public_only(&url)).await?;
     }
     if !response.ok() {
         return Err(interpret_failure(&response));
