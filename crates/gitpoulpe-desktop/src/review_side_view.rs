@@ -49,10 +49,7 @@ fn check_word(state: CheckState) -> &'static str {
 }
 
 fn needs_attention(check: &Check) -> bool {
-    matches!(
-        check.state,
-        CheckState::Failure | CheckState::Pending | CheckState::Cancelled
-    )
+    check.state == CheckState::Failure
 }
 
 fn check_row(s: &State, index: usize, check: &Check) -> El {
@@ -177,26 +174,28 @@ fn checks_section(s: &State) -> El {
         }
     }
     if attention == 0 && !list.checks_expanded {
+        let pending = checks.count(CheckState::Pending) > 0;
         block = block.child(note(
             s,
             "chk-clear",
-            "Rien d'échoué ni d'en attente.".to_owned(),
+            if pending {
+                "Aucun échec pour l'instant.".to_owned()
+            } else {
+                "Aucun échec.".to_owned()
+            },
             false,
         ));
     }
     if others > 0 {
-        block = block.child(
-            quiet(
-                s,
-                "chk-more",
-                &if list.checks_expanded {
-                    "Masquer les vérifications réussies et ignorées".to_owned()
-                } else {
-                    format!("Afficher les {others} autres")
-                },
-            )
-            .on_press(|s: &mut State| s.toggle_all_checks()),
-        );
+        let caption = if list.checks_expanded {
+            "Ne montrer que les échecs".to_owned()
+        } else if attention == 0 {
+            format!("Afficher les {others} vérifications")
+        } else {
+            format!("Afficher les {others} autres")
+        };
+        block = block
+            .child(quiet(s, "chk-more", &caption).on_press(|s: &mut State| s.toggle_all_checks()));
     }
     if checks.truncated {
         block = block.child(note(
@@ -529,6 +528,7 @@ fn review_section(s: &State) -> El {
     }
     block = block.child(
         row()
+            .flex_wrap()
             .gap(8.0)
             .center_y()
             .pt(4.0)

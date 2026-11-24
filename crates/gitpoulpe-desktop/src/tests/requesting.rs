@@ -340,6 +340,9 @@ fn pull_requests_are_listed_by_state_and_one_shows_its_revisions_commits_and_dif
     step(&mut rt);
     assert!(rect_of(&rt, "prl-commit0").is_some() && rect_of(&rt, "prl-commit1").is_some());
     assert!(shows(&rt, "first") && shows(&rt, "authorx"));
+    assert!(rt.state.pull_list_compact() && rect_of(&rt, "prl-all").is_none());
+    click(&mut rt, "prl-list-toggle");
+    step(&mut rt);
     click(&mut rt, "prl-all");
     settle(&mut rt, |s| {
         s.pulls.list.filter == gitpoulpe_hosting::PullFilter::All
@@ -349,6 +352,43 @@ fn pull_requests_are_listed_by_state_and_one_shows_its_revisions_commits_and_dif
     assert!(shows(&rt, "fusionnée · author3"));
     assert!(shows(&rt, "fermée · author2"));
     assert!(shows(&rt, "brouillon · author4"));
+}
+
+#[test]
+fn a_long_diff_is_read_to_its_last_line_and_the_side_panel_gives_way_to_a_tab() {
+    let fake = Fake::start();
+    let (_dir, mut rt) = list_screen(&fake);
+    click(&mut rt, "prlk0");
+    loaded(&mut rt, 1);
+    let patch = std::iter::once("@@ -0,0 +1,4000 @@".to_owned())
+        .chain((1..=4000).map(|n| format!("+line {n}")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    rt.state.pulls.list.detail.as_mut().unwrap().files[0].patch = Some(patch);
+    rt.state.pulls.list.version += 1;
+    click(&mut rt, "prl-tab-files");
+    step(&mut rt);
+    assert!(!shows(&rt, "Affichage limité"));
+    rt.update(|_, tx| tx.scroll_into_view_in("prl-panel", "prl-f0l4000".to_owned()));
+    for _ in 0..12 {
+        step(&mut rt);
+    }
+    assert_eq!(text_of(&rt, "prl-f0l4000").as_deref(), None);
+    assert!(rect_of(&rt, "prl-f0l4000").is_some());
+    assert!(shows(&rt, "line 4000"));
+    assert!(rect_of(&rt, "prl-side").is_some());
+    assert!(rect_of(&rt, "prl-tab-decision").is_none());
+    click(&mut rt, "prl-side-toggle");
+    for _ in 0..40 {
+        if rect_of(&rt, "prl-side").is_none() {
+            break;
+        }
+        step(&mut rt);
+    }
+    assert!(rect_of(&rt, "prl-side").is_none());
+    click(&mut rt, "prl-tab-decision");
+    step(&mut rt);
+    assert!(rect_of(&rt, "prv-submit").is_some());
 }
 
 #[test]
@@ -823,18 +863,19 @@ fn checks_are_shown_per_state_for_the_current_revision_and_absence_is_not_succes
     ] {
         assert!(shows(&rt, count), "{count}");
     }
-    assert!(shows(&rt, "lint") && shows(&rt, "deploy") && shows(&rt, "e2e"));
-    assert!(
-        !shows(&rt, "legacy/ok (statut)"),
-        "successes wait behind the toggle"
-    );
+    assert!(shows(&rt, "lint"));
+    for hidden in ["deploy", "e2e", "legacy/ok (statut)"] {
+        assert!(!shows(&rt, hidden), "only failures are listed: {hidden}");
+    }
     rt.take_url_requests();
     click(&mut rt, "chk-item1");
     step(&mut rt);
     assert_eq!(rt.take_url_requests(), ["https://ci.test/2"]);
     click(&mut rt, "chk-more");
     step(&mut rt);
-    assert!(shows(&rt, "legacy/ok (statut)") && shows(&rt, "docs"));
+    for listed in ["deploy", "e2e", "legacy/ok (statut)", "docs"] {
+        assert!(shows(&rt, listed), "{listed}");
+    }
     rt.state.select_pull(4);
     checks_ready(&mut rt, 4);
     assert!(shows(&rt, "Aucune vérification pour cette révision."));
@@ -842,6 +883,9 @@ fn checks_are_shown_per_state_for_the_current_revision_and_absence_is_not_succes
     assert!(rect_of(&rt, "chk-summary").is_none());
     rt.state.select_pull(2);
     checks_ready(&mut rt, 2);
+    assert!(shows(&rt, "Aucun échec pour l'instant."));
+    click(&mut rt, "chk-more");
+    step(&mut rt);
     assert!(shows(&rt, "legacy/ci (statut)"));
 }
 

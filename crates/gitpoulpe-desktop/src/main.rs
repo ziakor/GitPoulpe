@@ -124,6 +124,25 @@ fn demo_review_files(state: &mut State) {
     review_demo::review_files_scene(state);
 }
 
+fn demo_history(state: &mut State) {
+    demo(state);
+    state.open_history();
+    state.settle(40, Duration::from_secs(20));
+    state.drain();
+}
+
+fn demo_branches(state: &mut State) {
+    demo(state);
+    state.open_branches();
+    state.settle(40, Duration::from_secs(20));
+    state.drain();
+}
+
+fn demo_review_focus(state: &mut State) {
+    demo_review_files(state);
+    state.toggle_review_side();
+}
+
 fn demo_device(state: &mut State) {
     demo(state);
     state.accounts.open = true;
@@ -175,6 +194,9 @@ fn main() {
             ("demo-review-light", demo_review_light),
             ("demo-review-files", demo_review_files),
             ("demo-device", demo_device),
+            ("demo-review-focus", demo_review_focus),
+            ("demo-history", demo_history),
+            ("demo-branches", demo_branches),
         ],
         ..AppSpec::new("GitPoulpe", (1280.0, 800.0), State::default, view::view)
     })

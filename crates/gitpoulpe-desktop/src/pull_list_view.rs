@@ -12,9 +12,11 @@ use crate::theme;
 use crate::widgets::{action, area, quiet, text_tab};
 
 const ROW_HEIGHT: f32 = 88.0;
+const RAIL_ROW_HEIGHT: f32 = 50.0;
+const RAIL_WIDTH: f32 = 84.0;
 const LIST_WIDTH: f32 = 300.0;
 const LIST_WIDTH_NARROW: f32 = 252.0;
-const SIDE_WIDTH: f32 = 320.0;
+const SIDE_WIDTH: f32 = 280.0;
 const WIDE: f32 = 1180.0;
 const NARROW: f32 = 960.0;
 const MEASURE: f32 = 780.0;
@@ -112,6 +114,100 @@ fn pull_row(s: &State, index: usize) -> El {
     )
 }
 
+fn rail_row(s: &State, index: usize) -> El {
+    let p = s.palette;
+    let Some(pull) = s.pulls.list.items.get(index) else {
+        return el().h(RAIL_ROW_HEIGHT);
+    };
+    let number = pull.number;
+    let selected = s.pulls.list.selected == Some(number);
+    let rule = if selected {
+        el().w(2.0).h_full().fill(p.accent)
+    } else {
+        el().w(2.0).h_full()
+    };
+    let mut item = row()
+        .key(format!("prl-row{index}"))
+        .role("option")
+        .label(format!("#{} {}", pull.number, pull.title))
+        .focus_selected(selected)
+        .w_full()
+        .h(RAIL_ROW_HEIGHT)
+        .border_sides([0.0, 0.0, 1.0, 0.0], p.line)
+        .hover(p.hover)
+        .on_press(move |s: &mut State| s.select_pull(number));
+    if selected {
+        item = item.fill(p.selected);
+    }
+    item.child(rule).child(
+        col()
+            .grow(1.0)
+            .min_w(0.0)
+            .px(10.0)
+            .py(8.0)
+            .gap(2.0)
+            .child(
+                text(format!("#{}", pull.number))
+                    .font(theme::BODY_MEDIUM)
+                    .color(p.text)
+                    .w_full()
+                    .truncate(),
+            )
+            .child(
+                text(state_word(pull).to_owned())
+                    .font(theme::TINY)
+                    .color(p.muted)
+                    .w_full()
+                    .truncate(),
+            ),
+    )
+}
+
+fn rail(s: &State) -> El {
+    let p = s.palette;
+    let list = &s.pulls.list;
+    col()
+        .w(RAIL_WIDTH)
+        .h_full()
+        .fill(p.panel)
+        .border_sides([0.0, 1.0, 0.0, 0.0], p.line)
+        .child(
+            row()
+                .w_full()
+                .px(6.0)
+                .py(9.0)
+                .border_sides([0.0, 0.0, 1.0, 0.0], p.line)
+                .child(
+                    quiet(s, "prl-list-toggle", "Liste")
+                        .label("Afficher la liste des pull requests".to_owned())
+                        .on_press(|s: &mut State| s.toggle_pull_list_width()),
+                ),
+        )
+        .child(
+            col()
+                .key("prl-viewport")
+                .grow(1.0)
+                .min_w(0.0)
+                .scroll(ScrollSpec {
+                    stick_bottom: false,
+                })
+                .child(
+                    col()
+                        .key("prl-rows")
+                        .role("listbox")
+                        .w_full()
+                        .growth(GrowthSpec::default())
+                        .virtual_rows_version((list.version, s.dark, true))
+                        .virtual_rows(
+                            list.items.len(),
+                            RAIL_ROW_HEIGHT,
+                            |_: &State, i| Cow::Owned(format!("prlk{i}")),
+                            rail_row,
+                        ),
+                ),
+        )
+}
+
 fn filter_tab(s: &State, key: &str, caption: &str, filter: PullFilter) -> El {
     text_tab(s, key, caption.to_owned(), s.pulls.list.filter == filter)
         .on_press(move |s: &mut State| s.set_pull_filter(filter))
@@ -183,6 +279,11 @@ fn list_column(s: &State, width: f32) -> El {
                 .key("prl-count")
                 .font(theme::SMALL)
                 .color(p.muted),
+        )
+        .child(
+            quiet(s, "prl-list-toggle", "Réduire")
+                .label("Réduire la liste des pull requests".to_owned())
+                .on_press(|s: &mut State| s.toggle_pull_list_width()),
         );
     let message = |key: &str, words: String, red: bool| {
         text(words)
@@ -235,7 +336,7 @@ fn list_column(s: &State, width: f32) -> El {
                     .role("listbox")
                     .w_full()
                     .growth(GrowthSpec::default())
-                    .virtual_rows_version((list.version, s.dark))
+                    .virtual_rows_version((list.version, s.dark, false))
                     .virtual_rows(
                         list.items.len(),
                         ROW_HEIGHT,
@@ -345,7 +446,7 @@ fn notes(s: &State, detail: &PullDetail) -> Option<El> {
     Some(column)
 }
 
-fn tabs(s: &State, detail: &PullDetail, wide: bool, current: ReviewTab) -> El {
+fn tabs(s: &State, detail: &PullDetail, wide: bool, side: bool, current: ReviewTab) -> El {
     let p = s.palette;
     let tab = |key: &str, caption: String, which: ReviewTab| {
         text_tab(s, key, caption, current == which)
@@ -373,14 +474,28 @@ fn tabs(s: &State, detail: &PullDetail, wide: bool, current: ReviewTab) -> El {
             format!("Commits {}", detail.commits.len()),
             ReviewTab::Commits,
         ));
-    if !wide {
+    if !side {
         bar = bar.child(tab(
             "prl-tab-decision",
             "Revue et fusion".to_owned(),
             ReviewTab::Decision,
         ));
     }
-    bar
+    if wide {
+        bar = bar.child(el().grow(1.0)).child(
+            quiet(
+                s,
+                "prl-side-toggle",
+                if side {
+                    "Masquer le panneau"
+                } else {
+                    "Afficher le panneau"
+                },
+            )
+            .on_press(|s: &mut State| s.toggle_review_side()),
+        );
+    }
+    bar.center_y()
 }
 
 fn entry_head(s: &State, author: &str, verb: &str, stamp: &str) -> El {
@@ -668,14 +783,14 @@ fn empty_detail(s: &State) -> El {
     panel
 }
 
-fn main_column(s: &State, wide: bool) -> El {
+fn main_column(s: &State, wide: bool, side: bool) -> El {
     let list = &s.pulls.list;
     let column = col().grow(1.0).min_w(0.0).h_full();
     let Some(detail) = &list.detail else {
         return column.child(empty_detail(s));
     };
     let current = match list.tab {
-        ReviewTab::Decision if wide => ReviewTab::Conversation,
+        ReviewTab::Decision if side => ReviewTab::Conversation,
         other => other,
     };
     let content = match current {
@@ -688,7 +803,7 @@ fn main_column(s: &State, wide: bool) -> El {
     if let Some(notes) = notes(s, detail) {
         column = column.child(notes);
     }
-    column.child(tabs(s, detail, wide, current)).child(
+    column.child(tabs(s, detail, wide, side, current)).child(
         col()
             .key("prl-panel")
             .w_full()
@@ -721,21 +836,27 @@ fn side_column(s: &State) -> El {
 
 pub fn pull_list_screen(s: &State) -> El {
     let wide = wide(s);
+    let side = wide && !s.pulls.list.side_hidden;
     let narrow = s.window_width > 0.0 && s.window_width < NARROW;
-    let mut body = row()
-        .w_full()
-        .grow(1.0)
-        .min_h(0.0)
-        .child(list_column(
+    let list = if s.pull_list_compact() {
+        rail(s)
+    } else {
+        list_column(
             s,
             if narrow {
                 LIST_WIDTH_NARROW
             } else {
                 LIST_WIDTH
             },
-        ))
-        .child(main_column(s, wide));
-    if wide && s.pulls.list.detail.is_some() {
+        )
+    };
+    let mut body = row()
+        .w_full()
+        .grow(1.0)
+        .min_h(0.0)
+        .child(list)
+        .child(main_column(s, wide, side));
+    if side && s.pulls.list.detail.is_some() {
         body = body.child(side_column(s));
     }
     col()

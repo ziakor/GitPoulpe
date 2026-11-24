@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
+use std::rc::Rc;
 
 use gitpoulpe_hosting::{
     Checks, DraftLine, HostedMerge, LineAnchor, MergeMethod, MergeReadiness, MergeRequest,
@@ -117,6 +118,34 @@ pub struct PullListState {
     pub media: HashMap<String, Media>,
     pub tab: ReviewTab,
     pub checks_expanded: bool,
+    pub list_compact: Option<bool>,
+    pub side_hidden: bool,
+    pub numbered: Option<Numbered>,
+}
+
+pub struct Numbered {
+    pub number: u64,
+    pub head: String,
+    pub size: usize,
+    pub files: Rc<Vec<Vec<NumberedLine>>>,
+}
+
+pub fn patch_size(detail: &PullDetail) -> usize {
+    detail
+        .files
+        .iter()
+        .map(|f| f.patch.as_ref().map_or(0, String::len) + 1)
+        .sum()
+}
+
+pub fn number_files(detail: &PullDetail) -> Rc<Vec<Vec<NumberedLine>>> {
+    Rc::new(
+        detail
+            .files
+            .iter()
+            .map(|f| f.patch.as_deref().map(numbered_lines).unwrap_or_default())
+            .collect(),
+    )
 }
 
 impl Default for PullListState {
@@ -176,6 +205,9 @@ impl Default for PullListState {
             media: HashMap::new(),
             tab: ReviewTab::default(),
             checks_expanded: false,
+            list_compact: None,
+            side_hidden: false,
+            numbered: None,
         }
     }
 }
@@ -447,6 +479,12 @@ impl State {
                         }
                     }
                 }
+                list.numbered = Some(Numbered {
+                    number: fresh.summary.number,
+                    head: fresh.summary.head_sha.clone(),
+                    size: patch_size(&fresh),
+                    files: number_files(&fresh),
+                });
                 list.detail = Some(fresh);
             }
             Err(message) => {
@@ -1538,6 +1576,25 @@ impl State {
     pub fn set_review_tab(&mut self, tab: ReviewTab) {
         self.pulls.list.tab = tab;
         self.pulls.list.version += 1;
+    }
+
+    pub fn pull_list_compact(&self) -> bool {
+        let list = &self.pulls.list;
+        list.list_compact.unwrap_or(list.selected.is_some())
+    }
+
+    pub fn toggle_pull_list_width(&mut self) {
+        self.pulls.list.list_compact = Some(!self.pull_list_compact());
+        self.pulls.list.version += 1;
+    }
+
+    pub fn toggle_review_side(&mut self) {
+        let list = &mut self.pulls.list;
+        list.side_hidden = !list.side_hidden;
+        if !list.side_hidden && list.tab == ReviewTab::Decision {
+            list.tab = ReviewTab::Conversation;
+        }
+        list.version += 1;
     }
 
     pub fn toggle_all_checks(&mut self) {

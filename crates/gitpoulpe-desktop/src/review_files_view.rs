@@ -1,13 +1,15 @@
+use std::borrow::Cow;
+use std::rc::Rc;
+
 use gitpoulpe_hosting::{PullDetail, PullFile, ReviewComment, Side};
-use rune::{Align, El, col, el, row, text};
+use rune::{Align, El, GrowthSpec, col, el, row, text};
 
 use crate::attachments_view::{Body, binary_file, rich_body};
-use crate::pull_list::{CommentKind, NumberedLine, numbered_lines, when};
+use crate::pull_list::{CommentKind, NumberedLine, number_files, patch_size, when};
 use crate::state::State;
 use crate::theme;
 use crate::widgets::{action, area, quiet, toggle};
 
-const MAX_PATCH_LINES: usize = 3000;
 const LINE: f32 = 22.0;
 const NUMBER: f32 = 44.0;
 
@@ -306,24 +308,102 @@ fn diff_line(s: &State, path: &str, file_index: usize, n: usize, line: &Numbered
     el_line
 }
 
-fn file_block(
-    s: &State,
-    index: usize,
-    file: &PullFile,
-    budget: &mut usize,
-    placed: &mut bool,
-) -> El {
-    let p = s.palette;
+#[derive(Clone, Copy)]
+enum FileRow {
+    Summary,
+    Header(usize),
+    Line(usize, usize),
+    Thread(usize, u64),
+    Composer,
+    Binary(usize),
+    Others(usize),
+    Gap(usize),
+}
+
+fn row_key(row: FileRow) -> String {
+    match row {
+        FileRow::Summary => "prl-files-title".to_owned(),
+        FileRow::Header(i) => format!("prl-fh{i}"),
+        FileRow::Line(i, n) => format!("prl-f{i}l{n}"),
+        FileRow::Thread(_, id) => format!("prc-thread{id}"),
+        FileRow::Composer => "prc-box".to_owned(),
+        FileRow::Binary(i) => format!("prl-fb{i}"),
+        FileRow::Others(i) => format!("prl-fo{i}"),
+        FileRow::Gap(i) => format!("prl-fg{i}"),
+    }
+}
+
+fn plan(s: &State, detail: &PullDetail, numbered: &[Vec<NumberedLine>]) -> Vec<FileRow> {
     let list = &s.pulls.list;
+    let mut rows = vec![FileRow::Summary];
+    let mut placed = false;
+    for (i, file) in detail.files.iter().enumerate() {
+        rows.push(FileRow::Header(i));
+        let roots: Vec<&ReviewComment> = list
+            .comments
+            .review
+            .iter()
+            .filter(|c| c.path == file.change.path && c.in_reply_to.is_none())
+            .collect();
+        let mut shown: Vec<u64> = Vec::new();
+        match (&file.patch, numbered.get(i)) {
+            (Some(_), Some(lines)) => {
+                for (n, line) in lines.iter().enumerate() {
+                    rows.push(FileRow::Line(i, n));
+                    let Some((number, side)) = line.anchor else {
+                        continue;
+                    };
+                    for root in roots
+                        .iter()
+                        .filter(|r| !r.outdated && r.line == Some(number) && r.side == side)
+                    {
+                        shown.push(root.id);
+                        placed |= list.reply_to == Some(root.id);
+                        rows.push(FileRow::Thread(i, root.id));
+                    }
+                    let here = list.pick.as_ref().is_some_and(|k| {
+                        k.path == file.change.path && k.line == number && k.side == side
+                    });
+                    if here && list.reply_to.is_none() && !placed {
+                        placed = true;
+                        rows.push(FileRow::Composer);
+                    }
+                }
+            }
+            _ => rows.push(FileRow::Binary(i)),
+        }
+        let rest: Vec<u64> = roots
+            .iter()
+            .filter(|r| !shown.contains(&r.id))
+            .map(|r| r.id)
+            .collect();
+        if !rest.is_empty() {
+            rows.push(FileRow::Others(i));
+            for id in rest {
+                placed |= list.reply_to == Some(id);
+                rows.push(FileRow::Thread(i, id));
+            }
+        }
+        rows.push(FileRow::Gap(i));
+    }
+    if !placed && (list.pick.is_some() || list.reply_to.is_some()) {
+        rows.push(FileRow::Composer);
+    }
+    rows
+}
+
+fn file_header(s: &State, index: usize, file: &PullFile) -> El {
+    let p = s.palette;
     let change = &file.change;
-    let header = row()
+    row()
         .w_full()
         .px(12.0)
         .py(8.0)
         .gap(10.0)
         .center_y()
         .fill(p.raised)
-        .border_sides([0.0, 0.0, 1.0, 0.0], p.line)
+        .radius(3.0)
+        .border(1.0, p.line)
         .child(
             text(change.path.clone())
                 .key(format!("prl-file{index}"))
@@ -347,85 +427,16 @@ fn file_block(
             text(format!("−{}", change.deletions))
                 .font(theme::TINY)
                 .color(p.red),
-        );
-    let mut block = col()
-        .key(format!("prl-fileblock{index}"))
-        .w_full()
-        .radius(3.0)
-        .border(1.0, p.line)
-        .child(header);
-    let roots: Vec<&ReviewComment> = list
-        .comments
-        .review
-        .iter()
-        .filter(|c| c.path == change.path && c.in_reply_to.is_none())
-        .collect();
-    let mut shown: Vec<u64> = Vec::new();
-    match &file.patch {
-        None => {
-            block = block.child(
-                col()
-                    .w_full()
-                    .padding(12.0)
-                    .child(binary_file(s, index, file)),
-            );
-        }
-        Some(patch) => {
-            let mut lines = col().w_full();
-            for (n, numbered) in numbered_lines(patch).into_iter().enumerate() {
-                if *budget == 0 {
-                    break;
-                }
-                *budget -= 1;
-                lines = lines.child(diff_line(s, &change.path, index, n, &numbered));
-                if let Some((number, side)) = numbered.anchor {
-                    for root in roots
-                        .iter()
-                        .filter(|r| !r.outdated && r.line == Some(number) && r.side == side)
-                    {
-                        shown.push(root.id);
-                        lines = lines.child(thread(s, index, root));
-                    }
-                    let here = list.pick.as_ref().is_some_and(|k| {
-                        k.path == change.path && k.line == number && k.side == side
-                    });
-                    if here && list.reply_to.is_none() && !*placed {
-                        *placed = true;
-                        lines = lines.child(line_composer(s));
-                    }
-                }
-            }
-            block = block.child(lines);
-        }
-    }
-    let rest: Vec<&&ReviewComment> = roots.iter().filter(|r| !shown.contains(&r.id)).collect();
-    if !rest.is_empty() {
-        let mut others = col().w_full().padding(12.0).gap(8.0).child(
-            text("Commentaires hors des lignes affichées".to_owned())
-                .font(theme::SMALL)
-                .color(p.muted),
-        );
-        for root in rest {
-            others = others.child(thread(s, index, root));
-        }
-        block = block.child(others);
-    }
-    if list
-        .reply_to
-        .is_some_and(|id| roots.iter().any(|r| r.id == id))
-    {
-        *placed = true;
-    }
-    block
+        )
 }
 
-pub fn files_tab(s: &State, detail: &PullDetail) -> El {
+fn summary(s: &State, detail: &PullDetail) -> El {
     let p = s.palette;
     let list = &s.pulls.list;
     let (added, removed) = detail.files.iter().fold((0, 0), |(a, r), f| {
         (a + f.change.additions, r + f.change.deletions)
     });
-    let mut column = col().w_full().gap(14.0).pt(8.0).pb(24.0).child(
+    let mut block = col().w_full().gap(6.0).pt(8.0).pb(12.0).child(
         text(format!(
             "{} fichier{}{} · +{added} −{removed}",
             detail.files.len(),
@@ -436,32 +447,73 @@ pub fn files_tab(s: &State, detail: &PullDetail) -> El {
                 ""
             }
         ))
-        .key("prl-files-title")
         .font(theme::SMALL)
         .color(p.muted),
     );
     if list.pick.is_none() && list.reply_to.is_none() {
-        column = column.child(send_status(s));
+        block = block.child(send_status(s));
     }
-    let mut budget = MAX_PATCH_LINES;
-    let mut placed = false;
-    for (i, file) in detail.files.iter().enumerate() {
-        column = column.child(file_block(s, i, file, &mut budget, &mut placed));
+    block
+}
+
+fn build_row(s: &State, row: FileRow, numbered: &[Vec<NumberedLine>]) -> El {
+    let p = s.palette;
+    let Some(detail) = s.pulls.list.detail.as_ref() else {
+        return el();
+    };
+    let file = |i: usize| detail.files.get(i);
+    match row {
+        FileRow::Summary => summary(s, detail),
+        FileRow::Header(i) => file(i).map_or_else(el, |f| file_header(s, i, f)),
+        FileRow::Line(i, n) => match (file(i), numbered.get(i).and_then(|l| l.get(n))) {
+            (Some(f), Some(line)) => diff_line(s, &f.change.path, i, n, line),
+            _ => el(),
+        },
+        FileRow::Thread(i, id) => s
+            .pulls
+            .list
+            .comments
+            .review
+            .iter()
+            .find(|c| c.id == id)
+            .map_or_else(el, |root| thread(s, i, root)),
+        FileRow::Composer => line_composer(s),
+        FileRow::Binary(i) => {
+            file(i).map_or_else(el, |f| col().w_full().py(8.0).child(binary_file(s, i, f)))
+        }
+        FileRow::Others(_) => col().w_full().pt(10.0).pb(4.0).child(
+            text("Commentaires hors des lignes du diff".to_owned())
+                .font(theme::SMALL)
+                .color(p.muted),
+        ),
+        FileRow::Gap(_) => el().h(16.0),
     }
-    if budget == 0 {
-        column = column.child(
-            text(format!(
-                "Affichage limité à {MAX_PATCH_LINES} lignes de diff : « Lire depuis Git » montre tout."
-            ))
-            .key("prl-patch-limit")
-            .font(theme::SMALL)
-            .color(p.red)
-            .w_full()
-            .wrap(),
-        );
-    }
-    if !placed && (list.pick.is_some() || list.reply_to.is_some()) {
-        column = column.child(line_composer(s));
-    }
-    column
+}
+
+pub fn files_tab(s: &State, detail: &PullDetail) -> El {
+    let list = &s.pulls.list;
+    let numbered = match &list.numbered {
+        Some(cached)
+            if cached.number == detail.summary.number
+                && cached.head == detail.summary.head_sha
+                && cached.files.len() == detail.files.len()
+                && cached.size == patch_size(detail) =>
+        {
+            cached.files.clone()
+        }
+        _ => number_files(detail),
+    };
+    let rows = Rc::new(plan(s, detail, &numbered));
+    let keys = rows.clone();
+    col()
+        .key("prl-files")
+        .w_full()
+        .growth(GrowthSpec::default())
+        .virtual_rows_version((list.version, s.dark, rows.len()))
+        .virtual_rows(
+            rows.len(),
+            LINE,
+            move |_: &State, i| Cow::Owned(row_key(keys[i])),
+            move |s: &State, i| build_row(s, rows[i], &numbered),
+        )
 }
