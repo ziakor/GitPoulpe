@@ -6,7 +6,7 @@ use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text};
 use crate::accounts::Status;
 use crate::state::State;
 use crate::theme;
-use crate::widgets::{action, field, toggle};
+use crate::widgets::{action, field, quiet, toggle};
 
 const ROW_HEIGHT: f32 = 52.0;
 
@@ -173,34 +173,74 @@ fn panel(s: &State) -> El {
                 ),
         );
     if let Some(code) = &s.accounts.device {
-        panel = panel
-            .child(
-                text(format!(
-                    "Ouvrez {} et saisissez le code :",
-                    code.verification_uri
-                ))
-                .key("ac-device-uri")
-                .font(theme::SMALL)
-                .color(p.text)
-                .wrap(),
-            )
-            .child(
-                text(code.user_code.clone())
-                    .key("ac-device-code")
-                    .font(theme::BODY_STRONG)
-                    .color(p.text),
-            )
-            .child(
-                text("En attente de votre autorisation dans le navigateur…".to_owned())
+        let page = code
+            .verification_uri
+            .trim_start_matches("https://")
+            .trim_end_matches('/');
+        let minutes = code.expires_in.div_ceil(60);
+        let copied = s.accounts.device_copied;
+        panel = panel.child(
+            col()
+                .key("ac-device-box")
+                .w_full()
+                .gap(10.0)
+                .padding(14.0)
+                .radius(3.0)
+                .fill(p.panel)
+                .border(1.0, p.line)
+                .child(
+                    text(format!("Saisissez ce code sur {page} :"))
+                        .key("ac-device-uri")
+                        .font(theme::SMALL)
+                        .color(p.text)
+                        .w_full()
+                        .wrap(),
+                )
+                .child(
+                    row()
+                        .gap(14.0)
+                        .center_y()
+                        .child(
+                            text(code.user_code.clone())
+                                .key("ac-device-code")
+                                .font(theme::CODE_LARGE)
+                                .color(p.text)
+                                .selectable(true),
+                        )
+                        .child(
+                            action(
+                                s,
+                                "ac-device-copy",
+                                if copied { "Code copié" } else { "Copier le code" },
+                                false,
+                            )
+                            .on_press_tx(|s: &mut State, tx| s.copy_device_code(tx, false)),
+                        ),
+                )
+                .child(
+                    row()
+                        .gap(10.0)
+                        .center_y()
+                        .child(
+                            action(s, "ac-device-open", "Copier le code et ouvrir GitHub", true)
+                                .on_press_tx(|s: &mut State, tx| s.copy_device_code(tx, true)),
+                        )
+                        .child(
+                            quiet(s, "ac-device-cancel", "Annuler")
+                                .on_press(|s: &mut State| s.cancel_device()),
+                        ),
+                )
+                .child(
+                    text(format!(
+                        "En attente de votre autorisation dans le navigateur… Le code reste valable {minutes} min."
+                    ))
                     .key("ac-device-wait")
                     .font(theme::SMALL)
                     .color(p.muted)
+                    .w_full()
                     .wrap(),
-            )
-            .child(
-                action(s, "ac-device-cancel", "Annuler", false)
-                    .on_press(|s: &mut State| s.cancel_device()),
-            );
+                ),
+        );
     } else if !s.accounts.enterprise && provider == Provider::Github {
         panel = panel.child(
             action(

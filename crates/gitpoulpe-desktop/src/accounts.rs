@@ -37,6 +37,7 @@ pub struct AccountsState {
     pub token: TextEdit,
     pub version: u32,
     pub device: Option<DeviceCode>,
+    pub device_copied: bool,
     pub device_task: Option<tokio::task::AbortHandle>,
     pub oauth_client_id: String,
     pub oauth_host: GithubHost,
@@ -61,6 +62,7 @@ impl AccountsState {
             token: TextEdit::new(""),
             version: 0,
             device: None,
+            device_copied: false,
             device_task: None,
             oauth_client_id: GITHUB_CLIENT_ID.to_owned(),
             oauth_host: GithubHost::dotcom(),
@@ -283,6 +285,22 @@ impl State {
             self.accounts.request += 1;
             self.accounts.busy = false;
         }
+        self.accounts.device_copied = false;
+        self.accounts.version += 1;
+    }
+
+    pub fn copy_device_code(&mut self, tx: &mut rune::Tx, open: bool) {
+        let Some(code) = &self.accounts.device else {
+            return;
+        };
+        tx.copy(code.user_code.clone());
+        self.accounts.device_copied = true;
+        if open {
+            let uri = code.verification_uri.clone();
+            if let Err(why) = tx.open_url(&uri) {
+                self.accounts.error = Some(format!("Impossible d'ouvrir {uri} : {why}"));
+            }
+        }
         self.accounts.version += 1;
     }
 
@@ -291,6 +309,7 @@ impl State {
             return false;
         }
         self.accounts.device = Some(code);
+        self.accounts.device_copied = false;
         self.accounts.version += 1;
         true
     }

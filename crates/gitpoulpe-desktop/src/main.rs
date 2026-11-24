@@ -124,6 +124,18 @@ fn demo_review_files(state: &mut State) {
     review_demo::review_files_scene(state);
 }
 
+fn demo_device(state: &mut State) {
+    demo(state);
+    state.accounts.open = true;
+    state.accounts.device = Some(gitpoulpe_hosting::DeviceCode {
+        device_code: String::new(),
+        user_code: "18E5-6DE7".to_owned(),
+        verification_uri: "https://github.com/login/device".to_owned(),
+        expires_in: 900,
+        interval: 5,
+    });
+}
+
 fn demo_review_light(state: &mut State) {
     state.set_dark(false);
     demo_review(state);
@@ -162,6 +174,7 @@ fn main() {
             ("demo-review", demo_review),
             ("demo-review-light", demo_review_light),
             ("demo-review-files", demo_review_files),
+            ("demo-device", demo_device),
         ],
         ..AppSpec::new("GitPoulpe", (1280.0, 800.0), State::default, view::view)
     })

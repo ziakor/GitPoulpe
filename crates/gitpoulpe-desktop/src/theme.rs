@@ -102,3 +102,4 @@ pub const CODE: TextStyle = mono(12.0, 400.0, 25.0);
 pub const TERMINAL: TextStyle = mono(12.0, 400.0, 16.0);
 pub const PATH: TextStyle = mono(12.0, 500.0, 18.0);
 pub const PATH_SMALL: TextStyle = mono(11.0, 400.0, 16.0);
+pub const CODE_LARGE: TextStyle = mono(22.0, 500.0, 30.0);

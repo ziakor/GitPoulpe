@@ -260,6 +260,21 @@ fn the_code_is_shown_while_waiting_and_cancelling_stops_everything_and_stores_no
     assert!(shows(&rt, "/login/device"));
     assert!(shows(&rt, "En attente de votre autorisation"));
     assert!(rect_of(&rt, "ac-device").is_none());
+    let clipboard = rune::clipboard::memory();
+    rt.use_clipboard(&clipboard);
+    rt.take_url_requests();
+    assert!(shows(&rt, "Copier le code"));
+    click(&mut rt, "ac-device-open");
+    step(&mut rt);
+    assert_eq!(
+        clipboard.text().map(|t| t.to_string()).as_deref(),
+        Some("ABCD-1234")
+    );
+    assert_eq!(
+        rt.take_url_requests(),
+        std::slice::from_ref(&issued.verification_uri)
+    );
+    assert!(shows(&rt, "Code copié"));
     click(&mut rt, "ac-device-cancel");
     settle(&mut rt, |s| s.accounts.device.is_none() && !s.accounts.busy);
     assert!(!shows(&rt, "ABCD-1234"));
