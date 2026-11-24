@@ -221,7 +221,7 @@ In the pull request screen, images attached to the description, general comments
 
 - GitHub: the app asks for the rendered description and comments, which carry short-lived image addresses, and downloads the images from GitHub's content servers without the token. External images come through GitHub's image proxy, never straight from the third-party site.
 - GitLab: uploads are read through the project's uploads API with the token (GitLab 17.4 or later), and a redirect to storage is followed without it. External images are not loaded; they are offered as a link.
-- Every redirect while downloading an image is checked: it must stay on the configured server, on GitHub's content and storage hosts for GitHub images, or on a public HTTPS host for storage chosen by the API. Plain HTTP, `localhost` and private or link-local addresses are refused.
+- Every redirect while downloading an image is checked: it must stay on the configured server, on GitHub's content and storage hosts for GitHub images, or on a public HTTPS host for storage chosen by the API. Plain HTTP, `localhost` and private, link-local, shared, multicast or reserved addresses (also when written in shortened or IPv6-embedded form) are refused. A public host name that resolves to a private address is not detected.
 - Clicking an image opens the original in the browser. An image that cannot be loaded says why and keeps its link.
 
 ## File history

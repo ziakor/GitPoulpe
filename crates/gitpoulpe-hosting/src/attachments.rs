@@ -1,4 +1,4 @@
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::ops::Range;
 
 use gitpoulpe_core::Connection;
@@ -675,27 +675,62 @@ fn host_name(url: &str) -> Option<String> {
             .map_or(authority.as_str(), |(h, _)| h)
             .to_owned(),
     };
-    Some(host)
+    Some(host.trim_end_matches('.').to_owned())
+}
+
+fn internal_v4(ip: Ipv4Addr) -> bool {
+    let [a, b, c, _] = ip.octets();
+    ip.is_loopback()
+        || ip.is_private()
+        || ip.is_link_local()
+        || ip.is_unspecified()
+        || ip.is_broadcast()
+        || ip.is_multicast()
+        || ip.is_documentation()
+        || a == 0
+        || a >= 240
+        || (a == 100 && (64..128).contains(&b))
+        || (a == 198 && (b == 18 || b == 19))
+        || (a == 192 && b == 0 && c == 0)
+}
+
+fn embedded_v4(high: u16, low: u16) -> Ipv4Addr {
+    let [a, b] = high.to_be_bytes();
+    let [c, d] = low.to_be_bytes();
+    Ipv4Addr::new(a, b, c, d)
+}
+
+fn internal_v6(ip: Ipv6Addr) -> bool {
+    let s = ip.segments();
+    if ip.is_loopback()
+        || ip.is_unspecified()
+        || ip.is_unique_local()
+        || ip.is_unicast_link_local()
+        || ip.is_multicast()
+    {
+        return true;
+    }
+    if let Some(v4) = ip.to_ipv4() {
+        return internal_v4(v4);
+    }
+    match s {
+        [0x64, 0xff9b, 0, 0, 0, 0, high, low] => internal_v4(embedded_v4(high, low)),
+        [0x2002, high, low, ..] => internal_v4(embedded_v4(high, low)),
+        _ => false,
+    }
 }
 
 fn internal(host: &str) -> bool {
-    if host == "localhost" || host.ends_with(".localhost") {
+    if host.is_empty() || host == "localhost" || host.ends_with(".localhost") {
         return true;
     }
     match host.parse::<IpAddr>() {
-        Ok(IpAddr::V4(ip)) => {
-            ip.is_loopback() || ip.is_private() || ip.is_link_local() || ip.is_unspecified()
+        Ok(IpAddr::V4(ip)) => internal_v4(ip),
+        Ok(IpAddr::V6(ip)) => internal_v6(ip),
+        Err(_) => {
+            let last = host.rsplit('.').next().unwrap_or(host);
+            last.bytes().all(|b| b.is_ascii_digit()) || last.starts_with("0x")
         }
-        Ok(IpAddr::V6(ip)) => {
-            ip.is_loopback()
-                || ip.is_unspecified()
-                || ip.is_unique_local()
-                || ip.is_unicast_link_local()
-                || ip
-                    .to_ipv4_mapped()
-                    .is_some_and(|v4| v4.is_loopback() || v4.is_private() || v4.is_link_local())
-        }
-        Err(_) => false,
     }
 }
 
@@ -983,6 +1018,17 @@ mod tests {
             "https://[::1]/x",
             "https://[fd00::1]/x",
             "https://[::ffff:127.0.0.1]/x",
+            "https://localhost./x",
+            "https://127.1/x",
+            "https://2130706433/x",
+            "https://0x7f000001/x",
+            "https://100.64.0.1/x",
+            "https://224.0.0.1/x",
+            "https://0.1.2.3/x",
+            "https://[::127.0.0.1]/x",
+            "https://[64:ff9b::7f00:1]/x",
+            "https://[2002:c0a8:101::]/x",
+            "https://[ff02::1]/x",
         ] {
             assert!(!allowed(internal, &api), "{internal}");
             assert!(!allowed(internal, &image), "{internal}");
