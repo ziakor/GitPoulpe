@@ -75,6 +75,7 @@ mod stashes_view;
 mod state;
 mod submodule_screen;
 mod submodule_screen_view;
+mod sync;
 mod tags;
 mod tags_view;
 mod terminal;

@@ -50,6 +50,7 @@ mod shortcut_settings;
 mod staging;
 mod stashing;
 mod submoduling;
+mod syncing;
 mod tagging;
 mod terminalling;
 mod undoing;
@@ -1468,9 +1469,9 @@ fn every_control_stays_inside_the_window_at_the_smallest_supported_size() {
     for key in [
         "nav-show",
         "branch-name",
-        "refresh",
+        "sync-tracking",
+        "sync-publish",
         "palette-open",
-        "theme",
         "commit-message",
         "commit",
         "Non indexés",

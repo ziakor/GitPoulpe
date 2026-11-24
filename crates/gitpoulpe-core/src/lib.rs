@@ -73,7 +73,9 @@ pub use sequence::{EmptyPolicy, SequenceCommit, SequenceKind, SequenceOutcome, S
 pub use session::{RepoKind, SessionInfo, SessionState, StaleSnapshot};
 pub use split::{SplitCells, SplitIndex, SplitIndexBuilder, SplitRow, SplitUnit, split_rows};
 pub use stash::{Stash, StashApplied, StashDetail, StashFile, StashScope};
-pub use status::{BranchInfo, ChangeEntry, EntryKind, StatusCode, StatusSnapshot, display_label};
+pub use status::{
+    BranchInfo, ChangeEntry, EntryKind, StatusCode, StatusSnapshot, Tracking, display_label,
+};
 pub use submodule::{Submodule, SubmoduleState, SubmoduleUpdated};
 pub use tag::Tag;
 pub use tools::{ToolBook, ToolConfig, ToolKind};

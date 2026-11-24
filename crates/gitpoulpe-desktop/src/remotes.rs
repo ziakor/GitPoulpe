@@ -1,5 +1,5 @@
 use gitpoulpe_core::{Remote, RemoteImpact};
-use gitpoulpe_git::{FetchOutcome, HostKey, NetError, RemoteCheck};
+use gitpoulpe_git::{FetchOutcome, FetchTarget, HostKey, NetError, RemoteCheck};
 use rune::TextEdit;
 
 use crate::engine::{BranchDone, Command, RemoteOp};
@@ -500,14 +500,18 @@ impl State {
         let Some(remote) = self.remotes.selected_remote() else {
             return;
         };
+        let name = remote.name.clone();
+        self.start_fetch(name.clone(), FetchTarget::Remote(name));
+    }
+
+    pub(crate) fn start_fetch(&mut self, remote: String, target: FetchTarget) {
         if self.remotes.net_busy() {
             return;
         }
-        let name = remote.name.clone();
         self.remotes.fetch_request += 1;
         self.remotes.check = None;
         self.remotes.fetch = Some(FetchState {
-            remote: name.clone(),
+            remote,
             status: FetchStatus::Running {
                 phase: "Connexion".to_owned(),
                 percent: 0,
@@ -517,7 +521,7 @@ impl State {
         if let Some(engine) = &self.engine {
             engine.send(Command::Fetch {
                 request: self.remotes.fetch_request,
-                remote: name,
+                target,
             });
         }
     }
@@ -557,10 +561,27 @@ impl State {
         };
         match result {
             Ok(outcome) => {
+                self.notice = Some(if outcome.updates.is_empty() {
+                    format!("{} récupéré : rien de nouveau.", outcome.remote)
+                } else {
+                    format!(
+                        "{} récupéré : {}.",
+                        outcome.remote,
+                        crate::widgets::counted(
+                            outcome.updates.len(),
+                            "référence mise à jour",
+                            "références mises à jour"
+                        )
+                    )
+                });
+                state.remote = outcome.remote.clone();
                 state.status = FetchStatus::Done(outcome);
                 self.request_refresh(false);
             }
-            Err(error) => state.status = FetchStatus::Failed(error),
+            Err(error) => {
+                self.notice = Some(format!("Récupération impossible : {error}"));
+                state.status = FetchStatus::Failed(error);
+            }
         }
         self.remotes.version += 1;
         true

@@ -19,10 +19,11 @@ use gitpoulpe_core::{
 };
 use gitpoulpe_git::{
     BranchChoice, BranchError, CacheConfig, Cancel, CloneError, ConflictError, ConflictSide,
-    DeleteMode, DiffCache, DiffError, DiffReader, FetchOutcome, Git, HistoryError, HistoryStream,
-    HookError, HostKey, Identity, IdentityError, IgnoreError, IgnoredList, InspectError, MAX_WAIT,
-    NetError, PullRequest, PushRequest, QUIET_PERIOD, RemoteCheck, RepoWatcher, SequenceRequest,
-    Signal, SigningCheck, StashError, SubmoduleError, WorktreeError, check_signing, coalesce,
+    DeleteMode, DiffCache, DiffError, DiffReader, FetchOutcome, FetchTarget, Git, HistoryError,
+    HistoryStream, HookError, HostKey, Identity, IdentityError, IgnoreError, IgnoredList,
+    InspectError, MAX_WAIT, NetError, PullRequest, PushRequest, QUIET_PERIOD, RemoteCheck,
+    RepoWatcher, SequenceRequest, Signal, SigningCheck, StashError, SubmoduleError, WorktreeError,
+    check_signing, coalesce,
 };
 use gitpoulpe_hosting::{
     Checks, DeviceCode, ForkOutcome, HostedMerge, HostedPull, Listing, MergeReadiness,
@@ -292,7 +293,7 @@ pub enum Command {
     },
     Fetch {
         request: u64,
-        remote: String,
+        target: FetchTarget,
     },
     Clone {
         request: u64,
@@ -1472,7 +1473,7 @@ async fn run(
                             shared.emit(Event::SshTrusted { request, result });
                         });
                     }
-                    Command::Fetch { request, remote } => {
+                    Command::Fetch { request, target } => {
                         let Some(current) = session.clone() else {
                             continue;
                         };
@@ -1483,7 +1484,7 @@ async fn run(
                             let mut last = (String::new(), 101u8);
                             let result = shared
                                 .git
-                                .fetch_remote(&current.info, &remote, &cancel, |progress| {
+                                .fetch(&current.info, &target, &cancel, |progress| {
                                     let key = (progress.phase.clone(), progress.percent);
                                     if key != last {
                                         shared.emit(Event::FetchProgress {

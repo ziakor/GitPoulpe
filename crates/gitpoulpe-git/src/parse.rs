@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use gitpoulpe_core::{
     BranchInfo, ChangeEntry, EntryKind, Generation, RepoId, SessionId, StatusCode, StatusSnapshot,
+    Tracking,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -98,6 +99,10 @@ impl StatusParser {
             self.branch.oid = Some(value.to_owned());
         } else if let Some(value) = text.strip_prefix("# branch.head ") {
             self.branch.head = Some(value.to_owned());
+        } else if let Some(value) = text.strip_prefix("# branch.upstream ") {
+            self.branch.upstream = Some(value.to_owned());
+        } else if let Some(value) = text.strip_prefix("# branch.ab ") {
+            self.branch.tracking = tracking(value);
         }
         Ok(())
     }
@@ -205,6 +210,14 @@ impl StatusParser {
     }
 }
 
+fn tracking(value: &str) -> Option<Tracking> {
+    match value {
+        "+0 -0" => Some(Tracking::Same),
+        _ if value.starts_with('+') => Some(Tracking::Differs),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;
@@ -221,6 +234,25 @@ mod tests {
             SessionId::next(),
             Generation::default(),
         )
+    }
+
+    #[test]
+    fn the_upstream_and_its_distance_are_read_from_the_branch_headers() {
+        let read = |ab: &str| {
+            let text = format!(
+                "# branch.oid abc\0# branch.head main\0# branch.upstream origin/main\0# branch.ab {ab}\0"
+            );
+            parse(text.as_bytes(), 3).unwrap().branch
+        };
+        let same = read("+0 -0");
+        assert_eq!(same.upstream.as_deref(), Some("origin/main"));
+        assert_eq!(same.tracking, Some(Tracking::Same));
+        assert_eq!(read("+? -?").tracking, Some(Tracking::Differs));
+        assert_eq!(read("+2 -1").tracking, Some(Tracking::Differs));
+        let none = parse(b"# branch.oid abc\0# branch.head main\0", 4)
+            .unwrap()
+            .branch;
+        assert_eq!((none.upstream, none.tracking), (None, None));
     }
 
     const SAMPLE: &[u8] = b"# branch.oid abc\0# branch.head main\0\

@@ -25,7 +25,14 @@ impl RefUpdate {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FetchOutcome {
+    pub remote: String,
     pub updates: Vec<RefUpdate>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FetchTarget {
+    Remote(String),
+    Upstream(String),
 }
 
 fn parse_porcelain(text: &str) -> Vec<RefUpdate> {
@@ -60,14 +67,45 @@ impl Git {
         cancel: &Cancel,
         on_progress: impl FnMut(NetProgress),
     ) -> Result<FetchOutcome, NetError> {
+        self.fetch(
+            info,
+            &FetchTarget::Remote(remote.to_owned()),
+            cancel,
+            on_progress,
+        )
+        .await
+    }
+
+    pub async fn fetch(
+        &self,
+        info: &SessionInfo,
+        target: &FetchTarget,
+        cancel: &Cancel,
+        on_progress: impl FnMut(NetProgress),
+    ) -> Result<FetchOutcome, NetError> {
         let remotes = self
             .list_remotes(info)
             .await
             .map_err(|e| NetError::Refused(e.to_string()))?;
-        let found = remotes
-            .into_iter()
-            .find(|r| r.name == remote && !r.name.starts_with('-'))
-            .ok_or_else(|| NetError::Refused("ce remote n'existe pas".to_owned()))?;
+        let mut usable = remotes.into_iter().filter(|r| !r.name.starts_with('-'));
+        let found = match target {
+            FetchTarget::Remote(name) => usable
+                .find(|r| &r.name == name)
+                .ok_or_else(|| NetError::Refused("ce remote n'existe pas".to_owned()))?,
+            FetchTarget::Upstream(upstream) => usable
+                .filter(|r| {
+                    upstream
+                        .strip_prefix(r.name.as_str())
+                        .is_some_and(|rest| rest.starts_with('/'))
+                })
+                .max_by_key(|r| r.name.len())
+                .ok_or_else(|| {
+                    NetError::Refused(
+                        "la branche suivie n'appartient à aucun dépôt distant".to_owned(),
+                    )
+                })?,
+        };
+        let remote = found.name.as_str();
         let dir = info.worktree.as_deref().unwrap_or(&info.git_dir);
         let run = self
             .network_ok(
@@ -87,6 +125,7 @@ impl Git {
             )
             .await?;
         Ok(FetchOutcome {
+            remote: found.name.clone(),
             updates: parse_porcelain(&String::from_utf8_lossy(&run.stdout)),
         })
     }

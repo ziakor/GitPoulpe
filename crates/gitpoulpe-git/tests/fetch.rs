@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use common::{commit_all, git as run_git, init_repo, write};
 use gitpoulpe_core::SessionInfo;
-use gitpoulpe_git::{Cancel, Git, NetError};
+use gitpoulpe_git::{Cancel, FetchTarget, Git, NetError};
 
 struct Env {
     dir: tempfile::TempDir,
@@ -223,4 +223,41 @@ async fn progress_is_reported_for_a_real_transfer() {
         .await
         .unwrap();
     assert!(!seen.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn the_upstream_names_its_remote_even_when_the_remote_name_has_a_slash() {
+    let e = env(false).await;
+    let url = format!("file://{}", e.source.path().display());
+    run_git(e.repo.path(), &["remote", "add", "team/mirror", &url]);
+    let outcome = e
+        .git
+        .fetch(
+            &e.info,
+            &FetchTarget::Upstream("team/mirror/main".to_owned()),
+            &Cancel::new(),
+            |_| {},
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome.remote, "team/mirror");
+    let main = e.out(e.source.path(), &["rev-parse", "main"]);
+    assert_eq!(
+        e.local(&["rev-parse", "refs/remotes/team/mirror/main"]),
+        main
+    );
+    assert!(
+        e.local(&["for-each-ref", "refs/remotes/origin/main"])
+            .is_empty()
+    );
+    let lost = e
+        .git
+        .fetch(
+            &e.info,
+            &FetchTarget::Upstream("elsewhere/main".to_owned()),
+            &Cancel::new(),
+            |_| {},
+        )
+        .await;
+    assert!(matches!(lost, Err(NetError::Refused(_))));
 }

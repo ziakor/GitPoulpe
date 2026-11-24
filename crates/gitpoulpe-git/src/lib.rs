@@ -58,7 +58,7 @@ pub use diff::{DiffDocument, DiffError, DiffReader};
 pub use diff_parse::{DiffParseError, DiffParser, DiffSummary};
 pub use exec::ExecError;
 pub use external_tool::{ToolError, ToolFiles, expand_args, run_tool, split_args};
-pub use fetch::{FetchOutcome, RefUpdate};
+pub use fetch::{FetchOutcome, FetchTarget, RefUpdate};
 pub use file_history::{FileChange, FileHistory, FileRevision, FileRevisionView};
 pub use gitflow::GitflowError;
 pub use history::{HistoryError, HistoryStream};

@@ -178,6 +178,31 @@ pub const COMMANDS: &[PaletteCommand] = &[
         run: |s, _| s.refresh(),
     },
     PaletteCommand {
+        id: "sync-fetch",
+        label: "Récupérer les nouveautés du distant",
+        keywords: "fetch synchroniser distant origin",
+        available: |s| {
+            s.repo
+                .as_ref()
+                .is_some_and(|r| r.snapshot.branch.upstream.is_some())
+        },
+        run: |s, _| s.sync_fetch(),
+    },
+    PaletteCommand {
+        id: "sync-pull",
+        label: "Intégrer les changements distants…",
+        keywords: "pull tirer synchroniser",
+        available: |s| matches!(s.link(), Some(crate::sync::Link::Tracked(..))),
+        run: |s, _| s.sync_integrate(),
+    },
+    PaletteCommand {
+        id: "sync-publish",
+        label: "Publier la branche…",
+        keywords: "push pousser envoyer synchroniser",
+        available: |s| s.current_branch().is_some(),
+        run: |s, _| s.sync_publish(),
+    },
+    PaletteCommand {
         id: "history",
         label: "Historique des commits",
         keywords: "log graphe commits",

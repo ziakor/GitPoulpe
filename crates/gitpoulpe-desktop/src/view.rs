@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::path::Path;
 
 use gitpoulpe_core::{
-    ChangeEntry, DiffLine, DiffLineKind, DocumentKind, EntryKind, SplitIndex, StatusCode,
+    ChangeEntry, DiffLine, DiffLineKind, DocumentKind, EntryKind, SplitIndex, StatusCode, Tracking,
     display_label,
 };
 use rune::{
@@ -11,6 +11,7 @@ use rune::{
 };
 
 use crate::state::{DiffMode, LIST_WIDTH_DEFAULT, Screen, State, ViewKind, WatchStatus};
+use crate::sync::Link;
 use crate::theme::{self, Palette};
 
 const LIST_ROW_HEIGHT: f32 = 56.0;
@@ -220,9 +221,60 @@ fn open_button(p: &Palette, primary: bool) -> El {
 
 fn top_bar(s: &State) -> El {
     let p = s.palette;
+    let narrow = s.window_width > 0.0 && s.window_width < 900.0;
     let mut context = col().gap(2.0).grow(1.0).min_w(0.0);
+    let mut sync = None;
     if let Some(repo) = &s.repo {
-        let branch = repo.snapshot.branch.head.clone().unwrap_or_default();
+        let link = s.link();
+        let branch = match link {
+            Some(Link::Detached) => "HEAD détachée".to_owned(),
+            _ => repo.snapshot.branch.head.clone().unwrap_or_default(),
+        };
+        let mut line = row().w_full().gap(8.0).center_y().child(
+            el().key("branch-name")
+                .role("button")
+                .label("Gérer les branches")
+                .focusable(true)
+                .focus_ring(2.0, 2.0, p.accent)
+                .hover(p.hover)
+                .radius(3.0)
+                .shrink()
+                .on_press(|s: &mut State| {
+                    if s.branches.open {
+                        s.close_branches();
+                    } else {
+                        s.open_branches();
+                    }
+                })
+                .child(
+                    text(branch.clone())
+                        .font(theme::SMALL)
+                        .color(p.accent)
+                        .truncate(),
+                ),
+        );
+        if let Some(tracking) = link.as_ref().and_then(|l| tracking_caption(l, &branch)) {
+            let mut words = row()
+                .key("sync-tracking")
+                .gap(4.0)
+                .center_y()
+                .shrink()
+                .child(
+                    text(tracking.state)
+                        .font(theme::SMALL)
+                        .color(if tracking.strong { p.text } else { p.muted }),
+                );
+            if let Some(detail) = tracking.detail {
+                words = words.child(
+                    text(detail)
+                        .font(theme::SMALL)
+                        .color(p.muted)
+                        .shrink()
+                        .truncate(),
+                );
+            }
+            line = line.child(words);
+        }
         context = context
             .child(
                 text(repo.name.clone())
@@ -230,50 +282,14 @@ fn top_bar(s: &State) -> El {
                     .color(p.text)
                     .truncate(),
             )
-            .child(
-                el().key("branch-name")
-                    .role("button")
-                    .label("Gérer les branches")
-                    .focusable(true)
-                    .focus_ring(2.0, 2.0, p.accent)
-                    .hover(p.hover)
-                    .radius(3.0)
-                    .on_press(|s: &mut State| {
-                        if s.branches.open {
-                            s.close_branches();
-                        } else {
-                            s.open_branches();
-                        }
-                    })
-                    .child(text(branch).font(theme::SMALL).color(p.accent).truncate()),
-            );
+            .child(line);
+        sync = link.as_ref().and_then(|link| sync_group(s, link));
     }
-    let theme_toggle = el()
-        .key("theme")
-        .role("button")
-        .label("Changer de thème")
-        .focusable(true)
-        .focus_ring(2.0, 2.0, p.accent)
-        .h(32.0)
-        .px(10.0)
-        .center()
-        .radius(3.0)
-        .hover(p.hover)
-        .on_press(|s: &mut State| s.set_dark(!s.dark))
-        .child(
-            text(if s.dark {
-                "Thème clair"
-            } else {
-                "Thème sombre"
-            })
-            .font(theme::BODY)
-            .color(p.muted),
-        );
-    row()
+    let mut bar = row()
         .w_full()
         .h(60.0)
-        .px(if s.window_width < 900.0 { 12.0 } else { 20.0 })
-        .gap(if s.window_width < 900.0 { 8.0 } else { 20.0 })
+        .px(if narrow { 12.0 } else { 20.0 })
+        .gap(if narrow { 8.0 } else { 20.0 })
         .center_y()
         .fill(p.panel)
         .border(1.0, p.line)
@@ -286,7 +302,7 @@ fn top_bar(s: &State) -> El {
             row()
                 .w(if s.nav_shown() {
                     crate::nav_view::NAV_WIDTH - 20.0
-                } else if s.window_width < 900.0 {
+                } else if narrow {
                     124.0
                 } else {
                     172.0
@@ -294,14 +310,132 @@ fn top_bar(s: &State) -> El {
                 .child(text("git").font(theme::WORDMARK).color(p.text))
                 .child(text("poulpe").font(theme::WORDMARK_BOLD).color(p.text)),
         )
-        .child(context)
-        .child(refresh_button(s))
-        .child(palette_button(s))
-        .child(theme_toggle)
+        .child(context);
+    if let Some(group) = sync {
+        bar = bar.child(group);
+    }
+    if !narrow {
+        bar = bar.child(refresh_button(s));
+    }
+    bar.child(palette_button(s, narrow))
 }
 
-fn palette_button(s: &State) -> El {
+struct TrackingCaption {
+    state: &'static str,
+    detail: Option<String>,
+    strong: bool,
+}
+
+fn tracking_caption(link: &Link, branch: &str) -> Option<TrackingCaption> {
+    let short = |upstream: &str| {
+        upstream
+            .strip_suffix(branch)
+            .and_then(|rest| rest.strip_suffix('/'))
+            .filter(|remote| !remote.is_empty())
+            .unwrap_or(upstream)
+            .to_owned()
+    };
+    let (state, detail, strong) = match link {
+        Link::Detached => return None,
+        Link::Local => ("pas de branche distante", None, false),
+        Link::Missing(upstream) => ("branche suivie introuvable", Some(upstream.clone()), true),
+        Link::Tracked(upstream, Tracking::Same) => {
+            ("à jour", Some(format!("avec {}", short(upstream))), false)
+        }
+        Link::Tracked(upstream, Tracking::Differs) => (
+            "à synchroniser",
+            Some(format!("avec {}", short(upstream))),
+            true,
+        ),
+    };
+    Some(TrackingCaption {
+        state,
+        detail,
+        strong,
+    })
+}
+
+fn sync_button(s: &State, key: &'static str, caption: String, label: String, first: bool) -> El {
     let p = s.palette;
+    el().key(key)
+        .role("button")
+        .label(label)
+        .focusable(true)
+        .focus_ring(2.0, 0.0, p.accent)
+        .h(30.0)
+        .px(10.0)
+        .center()
+        .hover(p.hover)
+        .border_sides([0.0, 0.0, 0.0, if first { 0.0 } else { 1.0 }], p.line)
+        .child(text(caption).font(theme::BODY).color(p.text))
+}
+
+fn sync_group(s: &State, link: &Link) -> Option<El> {
+    let p = s.palette;
+    let (fetch, integrate) = match link {
+        Link::Detached => return None,
+        Link::Local => (false, false),
+        Link::Missing(_) => (true, false),
+        Link::Tracked(..) => (true, true),
+    };
+    let mut group = row()
+        .key("sync")
+        .role("group")
+        .label("Synchronisation")
+        .center_y()
+        .radius(3.0)
+        .border(1.0, p.line);
+    let mut first = true;
+    if fetch {
+        let (caption, label) = match s.sync_progress() {
+            Some((_, percent)) => (
+                format!("Récupération… {percent} %"),
+                "Récupération en cours".to_owned(),
+            ),
+            None => (
+                "Récupérer".to_owned(),
+                "Récupérer les nouveautés du distant".to_owned(),
+            ),
+        };
+        group = group.child(
+            sync_button(s, "sync-fetch", caption, label, first)
+                .on_press(|s: &mut State| s.sync_fetch()),
+        );
+        first = false;
+    }
+    if integrate {
+        group = group.child(
+            sync_button(
+                s,
+                "sync-pull",
+                "Intégrer…".to_owned(),
+                "Intégrer les changements distants".to_owned(),
+                first,
+            )
+            .on_press(|s: &mut State| s.sync_integrate()),
+        );
+        first = false;
+    }
+    Some(
+        group.child(
+            sync_button(
+                s,
+                "sync-publish",
+                "Publier…".to_owned(),
+                "Publier la branche".to_owned(),
+                first,
+            )
+            .on_press(|s: &mut State| s.sync_publish()),
+        ),
+    )
+}
+
+fn palette_button(s: &State, narrow: bool) -> El {
+    let p = s.palette;
+    let mut words = row().gap(6.0).center_y();
+    if !narrow {
+        words = words.child(text("Commandes").font(theme::BODY).color(p.muted));
+    }
     el().key("palette-open")
         .role("button")
         .label("Palette de commandes")
@@ -314,15 +448,11 @@ fn palette_button(s: &State) -> El {
         .hover(p.hover)
         .on_press_tx(|s: &mut State, tx: &mut Tx| s.open_palette(tx))
         .child(
-            row()
-                .gap(6.0)
-                .center_y()
-                .child(text("Commandes").font(theme::BODY).color(p.muted))
-                .child(
-                    text(s.shortcut_for("palette"))
-                        .font(theme::PATH_SMALL)
-                        .color(p.muted),
-                ),
+            words.child(
+                text(s.shortcut_for("palette"))
+                    .font(theme::PATH_SMALL)
+                    .color(p.muted),
+            ),
         )
 }
 

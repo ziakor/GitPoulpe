@@ -76,10 +76,18 @@ impl ChangeEntry {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tracking {
+    Same,
+    Differs,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BranchInfo {
     pub oid: Option<String>,
     pub head: Option<String>,
+    pub upstream: Option<String>,
+    pub tracking: Option<Tracking>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -371,29 +371,43 @@ pub fn sidebar(s: &State) -> El {
     if let Some(block) = section(s, "Réglages", SETTINGS, here) {
         column = column.child(block.border_sides([1.0, 0.0, 0.0, 0.0], p.line));
     }
-    column = column.child(
+    column.child(
         row()
             .w_full()
             .px(8.0)
             .py(6.0)
+            .gap(4.0)
             .border_sides([1.0, 0.0, 0.0, 0.0], p.line)
             .child(
-                el().key("nav-hide")
-                    .role("button")
-                    .label("Masquer le menu")
-                    .focusable(true)
-                    .focus_ring(2.0, 2.0, p.accent)
-                    .px(6.0)
-                    .py(4.0)
-                    .radius(3.0)
-                    .hover(p.hover)
-                    .on_press(|s: &mut State| s.toggle_nav())
-                    .child(
-                        text("Masquer le menu".to_owned())
-                            .font(theme::SMALL)
-                            .color(p.muted),
-                    ),
+                footer_button(s, "nav-hide", "Masquer le menu")
+                    .on_press(|s: &mut State| s.toggle_nav()),
+            )
+            .child(el().grow(1.0))
+            .child(
+                footer_button(
+                    s,
+                    "theme",
+                    if s.dark {
+                        "Thème clair"
+                    } else {
+                        "Thème sombre"
+                    },
+                )
+                .on_press(|s: &mut State| s.set_dark(!s.dark)),
             ),
-    );
-    column
+    )
+}
+
+fn footer_button(s: &State, key: &'static str, caption: &'static str) -> El {
+    let p = s.palette;
+    el().key(key)
+        .role("button")
+        .label(caption)
+        .focusable(true)
+        .focus_ring(2.0, 2.0, p.accent)
+        .px(6.0)
+        .py(4.0)
+        .radius(3.0)
+        .hover(p.hover)
+        .child(text(caption).font(theme::SMALL).color(p.muted))
 }
