@@ -175,3 +175,42 @@ pub fn quiet(s: &State, key: &str, caption: &str) -> El {
         .hover(p.hover)
         .child(text(caption.to_owned()).font(theme::SMALL).color(p.accent))
 }
+
+pub fn counted(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n > 1 { many } else { one })
+}
+
+pub fn screen_head(s: &State, key: &str, title: &str, context: String, actions: Vec<El>) -> El {
+    let p = s.palette;
+    let mut words = col().grow(1.0).min_w(0.0).gap(2.0).child(
+        text(title.to_owned())
+            .key(format!("{key}-title"))
+            .font(theme::HEADING)
+            .color(p.text)
+            .w_full()
+            .truncate(),
+    );
+    if !context.is_empty() {
+        words = words.child(
+            text(context)
+                .key(format!("{key}-context"))
+                .font(theme::SMALL)
+                .color(p.muted)
+                .w_full()
+                .truncate(),
+        );
+    }
+    let mut head = row()
+        .key(key.to_owned())
+        .w_full()
+        .center_y()
+        .px(20.0)
+        .py(12.0)
+        .gap(8.0)
+        .border_sides([0.0, 0.0, 1.0, 0.0], p.line)
+        .child(words);
+    for action in actions {
+        head = head.child(action);
+    }
+    head
+}

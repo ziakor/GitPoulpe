@@ -981,7 +981,7 @@ fn amend_warning(s: &State) -> Option<El> {
             );
         if s.amend_confirming {
             card = card.child(
-                text("Clique sur « Amender le commit » pour confirmer.".to_owned())
+                text("Cliquez sur « Amender le commit » pour confirmer.".to_owned())
                     .font(theme::SMALL)
                     .color(p.red)
                     .wrap(),

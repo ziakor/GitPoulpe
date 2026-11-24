@@ -95,7 +95,7 @@ fn detail(s: &State) -> El {
     else {
         return panel.child(
             text(
-                "Choisis un fichier ignoré, ou « Ignorer… » depuis un fichier non suivi."
+                "Choisissez un fichier ignoré, ou « Ignorer… » depuis un fichier non suivi."
                     .to_owned(),
             )
             .font(theme::SMALL)

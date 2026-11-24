@@ -88,7 +88,7 @@ fn screen(dir: &Path) -> Runtime<State> {
     rt.on_key = Some(crate::keys::on_key);
     click(&mut rt, "branch-name");
     settle(&mut rt, |s| s.branches.open && !s.branches.loading);
-    click(&mut rt, "branches-remotes");
+    super::menu(&mut rt, "nav-remotes");
     settle(&mut rt, |s| s.remotes.open && idle(s));
     rt
 }
@@ -416,7 +416,7 @@ mod access {
         rt.on_key = Some(crate::keys::on_key);
         click(&mut rt, "branch-name");
         settle(&mut rt, |s| s.branches.open && !s.branches.loading);
-        click(&mut rt, "branches-remotes");
+        super::super::menu(&mut rt, "nav-remotes");
         settle(&mut rt, |s| s.remotes.open && idle(s));
         pick(&mut rt, "origin");
         (

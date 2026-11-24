@@ -114,7 +114,7 @@ fn screen(dir: &Path) -> Runtime<State> {
     rt.on_key = Some(crate::keys::on_key);
     click(&mut rt, "branch-name");
     settle(&mut rt, |s| s.branches.open && !s.branches.loading);
-    click(&mut rt, "branches-submodules");
+    super::menu(&mut rt, "nav-submodules");
     settle(&mut rt, |s| s.submodules.open && !s.submodules.loading);
     click(&mut rt, "smk0");
     settle(&mut rt, |s| s.submodules.selected.is_some());

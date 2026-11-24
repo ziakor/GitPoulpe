@@ -4,6 +4,7 @@ use rune::{El, GrowthSpec, Key, ScrollSpec, col, el, row, text, text_input};
 
 use crate::state::State;
 use crate::theme;
+use crate::widgets::counted;
 use crate::widgets::toggle;
 
 const ROW_HEIGHT: f32 = 44.0;
@@ -67,25 +68,41 @@ fn branch_row(s: &State, index: usize) -> El {
     if let Some(upstream) = &branch.upstream {
         detail = format!("{detail} · suit {upstream}");
     }
-    el().key(format!("bk-row{index}"))
+    let rule = if selected {
+        el().w(2.0).h_full().fill(p.accent)
+    } else {
+        el().w(2.0).h_full()
+    };
+    row()
+        .key(format!("bk-row{index}"))
         .role("option")
         .label(branch.name.clone())
+        .focus_selected(selected)
         .focusable(true)
         .focus_ring(2.0, -2.0, p.accent)
         .w_full()
         .h(ROW_HEIGHT)
-        .px(16.0)
         .fill(if selected { p.selected } else { p.bg })
+        .border_sides([0.0, 0.0, 1.0, 0.0], p.line)
         .hover(p.hover)
         .on_press(move |s: &mut State| s.select_branch(&name))
+        .child(rule)
         .child(
             col()
-                .w_full()
+                .grow(1.0)
+                .min_w(0.0)
                 .h(ROW_HEIGHT)
-                .center_y()
+                .px(14.0)
+                .justify_center()
                 .gap(2.0)
-                .child(title)
-                .child(text(detail).font(theme::SMALL).color(p.muted).truncate()),
+                .child(title.w_full())
+                .child(
+                    text(detail)
+                        .font(theme::SMALL)
+                        .color(p.muted)
+                        .w_full()
+                        .truncate(),
+                ),
         )
 }
 
@@ -693,7 +710,7 @@ fn detail(s: &State) -> El {
     let Some(branch) = s.branches.selected_branch() else {
         return panel.child(
             text(
-                "Sélectionne une branche pour la changer, la renommer ou la supprimer.".to_owned(),
+                "Sélectionnez une branche pour la changer, la renommer ou la supprimer.".to_owned(),
             )
             .font(theme::SMALL)
             .color(p.muted)
@@ -793,64 +810,29 @@ fn detail(s: &State) -> El {
 
 pub fn branches_screen(s: &State) -> El {
     let p = s.palette;
-    let title = if s.branches.loading {
-        "Branches · lecture…".to_owned()
+    let context = if s.branches.loading {
+        "Lecture…".to_owned()
     } else {
-        format!("Branches · {}", s.branches.branches.len())
-    };
-    let header = row()
-        .w_full()
-        .center_y()
-        .px(20.0)
-        .py(10.0)
-        .gap(12.0)
-        .child(
-            text(title)
-                .font(theme::BODY_STRONG)
-                .color(p.text)
-                .grow(1.0)
-                .truncate(),
-        )
-        .child(
-            action(s, "branches-pulls", "Pull request", false)
-                .on_press(|s: &mut State| s.open_pulls()),
-        )
-        .child(
-            action(s, "branches-gitflow", "Gitflow", false)
-                .on_press(|s: &mut State| s.open_gitflow()),
-        )
-        .child(
-            action(s, "branches-submodules", "Submodules", false)
-                .on_press(|s: &mut State| s.open_submodules()),
-        )
-        .child(action(s, "branches-lfs", "LFS", false).on_press(|s: &mut State| s.open_lfs()))
-        .child(action(s, "branches-hooks", "Hooks", false).on_press(|s: &mut State| s.open_hooks()))
-        .child(
-            action(s, "branches-worktrees", "Worktrees", false)
-                .on_press(|s: &mut State| s.open_worktrees()),
-        )
-        .child(
-            action(s, "branches-undo", "Annuler/refaire", false)
-                .on_press(|s: &mut State| s.open_undo()),
-        )
-        .child(
-            action(s, "branches-reflog", "Reflog", false).on_press(|s: &mut State| s.open_reflog()),
-        )
-        .child(
-            action(s, "branches-stashes", "Réserve", false)
-                .on_press(|s: &mut State| s.open_stashes()),
-        )
-        .child(
-            action(s, "branches-remotes", "Remotes", false)
-                .on_press(|s: &mut State| s.open_remotes()),
-        )
-        .child(
-            action(s, "branches-tags", "Tags", false).on_press(|s: &mut State| s.open_tags(None)),
-        )
-        .child(
-            action(s, "branches-close", "Fermer", false)
-                .on_press(|s: &mut State| s.close_branches()),
+        let count = counted(
+            s.branches.branches.len(),
+            "branche locale",
+            "branches locales",
         );
+        match s.branches.branches.iter().find(|b| b.current) {
+            Some(current) => format!("{count} · courante : {}", current.name),
+            None => count,
+        }
+    };
+    let header = crate::widgets::screen_head(
+        s,
+        "branches-head",
+        "Branches",
+        context,
+        vec![
+            action(s, "branches-pulls", "Nouvelle pull request…", false)
+                .on_press(|s: &mut State| s.open_pulls()),
+        ],
+    );
     let list: El = if let Some(error) = &s.branches.error {
         col().w_full().grow(1.0).center().child(
             text(format!("Lecture impossible : {error}"))

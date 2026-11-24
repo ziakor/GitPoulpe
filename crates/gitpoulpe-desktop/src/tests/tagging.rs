@@ -90,7 +90,7 @@ fn screen(dir: &Path) -> Runtime<State> {
     rt.on_key = Some(crate::keys::on_key);
     click(&mut rt, "branch-name");
     settle(&mut rt, |s| s.branches.open && !s.branches.loading);
-    click(&mut rt, "branches-tags");
+    super::menu(&mut rt, "nav-tags");
     settle(&mut rt, |s| s.tags.open && idle(s));
     rt
 }

@@ -91,7 +91,7 @@ fn screen(e: &Env) -> Runtime<State> {
     rt.on_key = Some(crate::keys::on_key);
     click(&mut rt, "branch-name");
     settle(&mut rt, |s| s.branches.open && !s.branches.loading);
-    click(&mut rt, "branches-worktrees");
+    super::menu(&mut rt, "nav-worktrees");
     settle(&mut rt, |s| s.worktrees.open && idle(s));
     rt
 }

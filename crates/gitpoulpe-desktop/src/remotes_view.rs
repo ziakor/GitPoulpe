@@ -7,7 +7,7 @@ use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text};
 use crate::remotes::{CheckState, CheckStatus, FetchStatus, ScanStatus};
 use crate::state::State;
 use crate::theme;
-use crate::widgets::{action, field};
+use crate::widgets::{action, counted, field, screen_head};
 
 const ROW_HEIGHT: f32 = 48.0;
 
@@ -247,7 +247,7 @@ fn selected_detail(s: &State, mut panel: El) -> El {
     let p = s.palette;
     let Some(remote) = s.remotes.selected_remote() else {
         return panel.child(
-            text("Sélectionne un remote pour le modifier.".to_owned())
+            text("Sélectionnez un dépôt distant pour le modifier.".to_owned())
                 .font(theme::SMALL)
                 .color(p.muted)
                 .wrap(),
@@ -446,31 +446,12 @@ fn detail(s: &State) -> El {
 
 pub fn remotes_screen(s: &State) -> El {
     let p = s.palette;
-    let title = if s.remotes.loading {
-        "Remotes · lecture…".to_owned()
+    let context = if s.remotes.loading {
+        "Lecture…".to_owned()
     } else {
-        format!("Remotes · {}", s.remotes.remotes.len())
+        counted(s.remotes.remotes.len(), "dépôt distant", "dépôts distants")
     };
-    let header = row()
-        .w_full()
-        .center_y()
-        .px(20.0)
-        .py(10.0)
-        .gap(12.0)
-        .child(
-            text(title)
-                .font(theme::BODY_STRONG)
-                .color(p.text)
-                .grow(1.0)
-                .truncate(),
-        )
-        .child(
-            action(s, "remotes-branches", "Branches", false)
-                .on_press(|s: &mut State| s.open_branches()),
-        )
-        .child(
-            action(s, "remotes-close", "Fermer", false).on_press(|s: &mut State| s.close_remotes()),
-        );
+    let header = screen_head(s, "remotes-head", "Dépôts distants", context, Vec::new());
     let list: El = if let Some(error) = &s.remotes.error {
         col().w_full().grow(1.0).center().child(
             text(format!("Lecture impossible : {error}"))

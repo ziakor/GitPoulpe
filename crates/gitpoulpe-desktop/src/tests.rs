@@ -422,6 +422,24 @@ fn a_chosen_file_is_released_once_it_is_no_longer_the_first_on_screen() {
     assert_eq!(state.pinned, None);
 }
 
+fn menu(rt: &mut Runtime<State>, key: &str) {
+    for fold in ["nav-more", "nav-repositories"] {
+        if rect_of(rt, key).is_some() {
+            break;
+        }
+        if let Some(r) = rect_of(rt, fold) {
+            click_at(rt, r[0] + 10.0, r[1] + r[3] / 2.0, false);
+            step(rt);
+        }
+    }
+    let target = key.to_owned();
+    rt.update(move |_, tx| tx.scroll_into_view_in("nav-list", target));
+    step(rt);
+    let rect = rect_of(rt, key).unwrap_or_else(|| panic!("{key} is not in the menu"));
+    click_at(rt, rect[0] + 10.0, rect[1] + rect[3] / 2.0, false);
+    step(rt);
+}
+
 fn rect_of(rt: &Runtime<State>, key: &str) -> Option<[f32; 4]> {
     rt.elements()
         .into_iter()

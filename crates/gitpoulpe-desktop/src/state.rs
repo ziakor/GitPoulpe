@@ -2500,7 +2500,7 @@ impl State {
             Ok(CommitOutcome::Failed { kind, output }) => {
                 let lead = match kind {
                     CommitFailureKind::IdentityUnknown => {
-                        "Git ne connaît pas ton identité. Choisis un profil (bouton Profil) ou configure user.name et user.email."
+                        "Git ne connaît pas votre identité. Choisissez un profil (Profils Git dans le menu) ou configurez user.name et user.email."
                     }
                     CommitFailureKind::SigningUnavailable => {
                         "La signature a échoué : le commit n'a pas été créé."

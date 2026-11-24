@@ -5,6 +5,7 @@ use rune::{El, GrowthSpec, Key, ScrollSpec, col, el, row, text, text_input};
 use crate::history_state::format_date;
 use crate::state::State;
 use crate::theme;
+use crate::widgets::{counted, screen_head};
 
 const ROW_HEIGHT: f32 = 44.0;
 
@@ -108,7 +109,7 @@ fn selected_detail(s: &State, mut panel: El) -> El {
     let p = s.palette;
     let Some(tag) = s.tags.selected_tag() else {
         return panel.child(
-            text("Sélectionne un tag pour voir ses détails.".to_owned())
+            text("Sélectionnez un tag pour voir ses détails.".to_owned())
                 .font(theme::SMALL)
                 .color(p.muted)
                 .wrap(),
@@ -269,29 +270,12 @@ fn detail(s: &State) -> El {
 
 pub fn tags_screen(s: &State) -> El {
     let p = s.palette;
-    let title = if s.tags.loading {
-        "Tags · lecture…".to_owned()
+    let context = if s.tags.loading {
+        "Lecture…".to_owned()
     } else {
-        format!("Tags · {}", s.tags.tags.len())
+        counted(s.tags.tags.len(), "tag", "tags")
     };
-    let header = row()
-        .w_full()
-        .center_y()
-        .px(20.0)
-        .py(10.0)
-        .gap(12.0)
-        .child(
-            text(title)
-                .font(theme::BODY_STRONG)
-                .color(p.text)
-                .grow(1.0)
-                .truncate(),
-        )
-        .child(
-            action(s, "tags-branches", "Branches", false)
-                .on_press(|s: &mut State| s.open_branches()),
-        )
-        .child(action(s, "tags-close", "Fermer", false).on_press(|s: &mut State| s.close_tags()));
+    let header = screen_head(s, "tags-head", "Tags", context, Vec::new());
     let list: El = if let Some(error) = &s.tags.error {
         col().w_full().grow(1.0).center().child(
             text(format!("Lecture impossible : {error}"))

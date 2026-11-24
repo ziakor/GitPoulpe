@@ -51,7 +51,7 @@ Git runs as an external program, without a shell, with the repository's filters,
 
 ## Tags
 
-- The "Tags" button of the branch screen (or "Créer un tag ici" on a commit in the history) opens the tag screen. It lists local tags, light or annotated, with their commit; an annotated tag also shows its tagger, date and full message, and "Inspecter le commit" opens the tagged commit.
+- "Tags" in the menu (or "Créer un tag ici" on a commit in the history) opens the tag screen. It lists local tags, light or annotated, with their commit; an annotated tag also shows its tagger, date and full message, and "Inspecter le commit" opens the tagged commit.
 - A light tag or an annotated tag (message required) is created on `HEAD` or on the commit chosen in the history. The name is validated with `git check-ref-format` first; an existing name is refused and a tag is never replaced or moved. An annotated tag is signed with the active profile's identity, or the configured one, and creation stops when no identity is known.
 - Deleting a tag is explicit and asks first. It names the tag, states that no branch is touched, and gives the `git update-ref` command that restores it, annotation included. It only goes through if the tag still points at the object that was displayed. Deletions and creations are written to the per-repository journal.
 - Remote tags are not read or pushed.
@@ -64,7 +64,7 @@ Git runs as an external program, without a shell, with the repository's filters,
 
 ## Remotes
 
-- The "Remotes" button of the branch screen opens the remote screen: each remote with its read (fetch) and write (push) URLs, as Git resolves them. A separate push URL is flagged.
+- "Dépôts distants" in the menu opens the remote screen: each remote with its read (fetch) and write (push) URLs, as Git resolves them. A separate push URL is flagged.
 - Adding a remote validates the name (`git check-ref-format`) and the URL; an existing name is refused and its configuration is never replaced. Accepted URLs are `https`, `http`, `ssh`, `git`, `file`, `host:path` and local paths. Transport helpers (`ext::`, `fd::`), options disguised as hosts (a leading `-`), blanks and control characters are refused, since they can run commands.
 - Changing the read URL, the push URL or the name only goes through if the remote still has the URLs that were displayed, and never rewrites a remote that has several URLs (edit those with `git config`). Renaming moves the remote-tracking branches and the branches' upstream setting with it. Everything applies to the open repository only.
 - Removing a remote first states its impact: how many remote-tracking branches go away and which local branches lose their upstream. Local branches and commits are kept. The `git remote add` command that restores it is shown.
@@ -115,7 +115,7 @@ Git runs as an external program, without a shell, with the repository's filters,
 
 ## Stash
 
-- "Réserve" on the branch screen lists the stashes (message, branch, date) and, for the selected one, its files: modified ones, whether they were staged, and the untracked files it holds.
+- "Remisages" in the menu lists the stashes (message, branch, date) and, for the selected one, its files: modified ones, whether they were staged, and the untracked files it holds.
 - "Mettre de côté" creates a stash with a message and a scope you choose: tracked changes (default), plus untracked files, keeping the index in place, or only the staged changes (which excludes the other options). It refuses when there is nothing to stash for that scope, and during a merge, rebase, cherry-pick, revert or unresolved conflicts. The stash is created with your profile identity.
 - A stash is always addressed by its identity, never by its position in the list, so a list that changed behind the screen cannot make an action hit another stash. "Appliquer" keeps the stash, "Appliquer et retirer" removes it only once the application succeeded, and "Restaurer l'index" re-stages what was staged.
 - An application that conflicts keeps the stash and opens the resolution screen ("application du stash"), where the files can be resolved; nothing is aborted or deleted for you.
@@ -130,7 +130,7 @@ Git runs as an external program, without a shell, with the repository's filters,
 
 ## Reflog
 
-- "Reflog" on the branch screen lists the entries of the `HEAD` reflog or of the current branch's reflog, newest first, with the selector (`HEAD@{n}`), the operation and its message, the commit and the date. The file is read directly, so an entry whose object has been pruned is still listed and marked "objet absent".
+- "Reflog" (menu, "Outils avancés") lists the entries of the `HEAD` reflog or of the current branch's reflog, newest first, with the selector (`HEAD@{n}`), the operation and its message, the commit and the date. The file is read directly, so an entry whose object has been pruned is still listed and marked "objet absent".
 - Selecting an entry inspects its commit (subject, author, parents) and says which branches or tags still reach it; a commit that only the reflog keeps is called out.
 - "Créer une branche de récupération" gives a name to an old commit without moving or touching the current branch, the index or the working tree (an existing name is refused). An object that is no longer in the repository can be neither inspected nor recovered, and the screen says so instead of reporting a recovery. Recoveries are recorded in the per-repository journal.
 - Reflogs are local and temporary: Git eventually expires them, which is why the recovery branch is the durable mark.
@@ -150,7 +150,7 @@ Git runs as an external program, without a shell, with the repository's filters,
 
 ## Undo and redo
 
-- "Annuler/refaire" on the branch screen lists the operations GitPoulpe performed on this repository (kept in its preferences, outside the repository). Only the ones whose inverse is defined offer "Annuler": a commit, an amend, a merge, a cherry-pick, a revert or a reset (the branch goes back to where it was), the creation, deletion or renaming of a branch, and the creation or deletion of a tag. A push, a stash operation or a change to the remotes are listed as not reversible, with the reason.
+- "Annuler ou rétablir" (menu, "Outils avancés") lists the operations GitPoulpe performed on this repository (kept in its preferences, outside the repository). Only the ones whose inverse is defined offer "Annuler": a commit, an amend, a merge, a cherry-pick, a revert or a reset (the branch goes back to where it was), the creation, deletion or renaming of a branch, and the creation or deletion of a tag. A push, a stash operation or a change to the remotes are listed as not reversible, with the reason.
 - The state is read again before every undo or redo: the branch or reference must still be exactly where the operation left it (or, for redo, where it started), the name must be free, and no merge, rebase or conflict may be in progress. If another tool changed anything, nothing is touched and the message says what was expected and what was found.
 - Moving the current branch back uses `git reset --keep`, so unrelated local changes survive and an undo that would overwrite local work is refused; a branch that is not checked out is moved with a compare-and-swap `update-ref`; a branch checked out in another worktree is left alone. The undo of a hard reset cannot bring back unsaved changes (they are in `refs/gitpoulpe/recovery`), and the screen says so.
 - An operation is recorded only once it succeeded, so an interruption between the operation and its record leaves the repository consistent: the operation is simply not offered for undo (the reflog still has it). Operations finished after resolving conflicts are not recorded.
@@ -169,19 +169,19 @@ Git runs as an external program, without a shell, with the repository's filters,
 
 ## Worktrees
 
-- "Worktrees" on the branch screen lists the repository's worktrees: path, branch, and each one's own state (staged, modified and untracked counts, locked, or "dossier disparu" when the directory vanished). "Ouvrir ce worktree" switches GitPoulpe to it; the other worktrees' files are never touched.
+- "Worktrees et terminal" in the menu lists the repository's worktrees: path, branch, and each one's own state (staged, modified and untracked counts, locked, or "dossier disparu" when the directory vanished). "Ouvrir ce worktree" switches GitPoulpe to it; the other worktrees' files are never touched.
 - A new worktree is created at an absolute path that does not exist yet (not inside the open worktree), on a new branch or on an existing one. A branch that is already checked out in another worktree is refused with that worktree's path, as are an invalid branch name, a missing parent folder or a relative path.
 - Locking (with an optional reason) protects a worktree from removal until it is unlocked. Removing one is controlled: the main and the open worktrees cannot be removed, a locked one needs unlocking first, and a modified one lists its modified and untracked files and needs a second explicit decision. The tracked changes are then saved under `refs/gitpoulpe/recovery/…-worktree-…`; untracked files cannot be saved and the screen says how many are lost. The branch is always kept. "Nettoyer les orphelins" prunes entries whose directory is gone.
 
 ## Hooks
 
-- "Hooks" on the branch screen shows the effective hooks directory (resolved by Git, so a custom `core.hooksPath` is honoured, with the value and the scope it comes from: local, global or system), whether that directory belongs to the project or sits outside the repository, and every file in it: active hooks, disabled ones (a known hook that is not executable, which Git ignores) and files that are not Git hooks. `*.sample` files are left out.
+- "Hooks" (menu, "Outils avancés") shows the effective hooks directory (resolved by Git, so a custom `core.hooksPath` is honoured, with the value and the scope it comes from: local, global or system), whether that directory belongs to the project or sits outside the repository, and every file in it: active hooks, disabled ones (a known hook that is not executable, which Git ignores) and files that are not Git hooks. `*.sample` files are left out.
 - Activation is the standard Git mechanism, the execute bit: "Désactiver" / "Activer" changes it on that hook only. A directory outside the repository may serve several repositories, so changing a hook there first asks for an explicit confirmation of that scope; a hook that is a symbolic link is never changed from here (its target could be shared), and only known hook names are accepted.
 - Hooks run as configured on every operation and are never bypassed (no `--no-verify`). When a hook fails, its cause stays visible and its output is filtered: password, token, secret, API key and authorization values, well-known token formats (GitHub, GitLab, Slack, AWS, `sk-`) and private-key blocks are masked, on top of the credentials already masked in URLs. The same filter applies to every Git diagnostic GitPoulpe shows.
 
 ## Git LFS
 
-- "LFS" on the branch screen detects whether Git LFS is installed (`git lfs version`) and lists the files that the attributes send to LFS. Reading them needs no tool: the pointer committed in the repository is parsed strictly (version line, a 64-hex SHA-256 `oid`, a `size`), and each file is classified: real content present (its size and SHA-256 match the pointer), pointer in the working tree with the object available locally, object absent (to be fetched), content modified (it no longer matches the versioned object), or committed as real content despite the LFS attribute.
+- "Git LFS" (menu, "Outils avancés") detects whether Git LFS is installed (`git lfs version`) and lists the files that the attributes send to LFS. Reading them needs no tool: the pointer committed in the repository is parsed strictly (version line, a 64-hex SHA-256 `oid`, a `size`), and each file is classified: real content present (its size and SHA-256 match the pointer), pointer in the working tree with the object available locally, object absent (to be fetched), content modified (it no longer matches the versioned object), or committed as real content despite the LFS attribute.
 - Without Git LFS on the machine, the screen says so, lists the pointers and explains how to enable the support: install the `git-lfs` package with your system's package manager and run `git lfs install` once. GitPoulpe never installs or downloads anything by itself, and no transfer is attempted.
 - With the tool, "Récupérer", "Télécharger" and "Envoyer" run `git lfs fetch`, `pull` and `push` through the same network layer as the other remote operations (your SSH and credential setup, repository-supplied helpers ignored), with progress, a cancel button that stops the tool and its children, and distinct messages for access refused, repository or object not found, server error and network failure, with secrets masked in the output.
 - Limit: the transfers are tested against a stand-in `git-lfs` program (the real tool is not available on the development machine), so the exact progress lines of a real server remain to be confirmed.

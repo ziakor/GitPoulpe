@@ -82,7 +82,7 @@ fn branches(dir: &Path) -> Runtime<State> {
 }
 
 fn open_undo(rt: &mut Runtime<State>) {
-    click(rt, "branches-undo");
+    super::menu(rt, "nav-undo");
     settle(rt, |s| s.undo_screen.open);
 }
 

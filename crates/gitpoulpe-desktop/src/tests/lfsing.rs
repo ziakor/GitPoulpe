@@ -111,7 +111,7 @@ fn screen(dir: &Path, engine_git: Git) -> Runtime<State> {
     rt.on_key = Some(crate::keys::on_key);
     click(&mut rt, "branch-name");
     settle(&mut rt, |s| s.branches.open && !s.branches.loading);
-    click(&mut rt, "branches-lfs");
+    super::menu(&mut rt, "nav-lfs");
     settle(&mut rt, |s| s.lfs.open && !s.lfs.loading);
     rt
 }

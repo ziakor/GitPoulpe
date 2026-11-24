@@ -4,7 +4,7 @@ use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text};
 
 use crate::state::State;
 use crate::theme;
-use crate::widgets::{action, field, toggle};
+use crate::widgets::{action, counted, field, screen_head, toggle};
 
 const ROW_HEIGHT: f32 = 52.0;
 
@@ -301,38 +301,23 @@ fn detail(s: &State) -> El {
 
 pub fn worktrees_screen(s: &State) -> El {
     let p = s.palette;
-    let title = if s.worktrees.loading {
-        "Worktrees · lecture…".to_owned()
+    let context = if s.worktrees.loading {
+        "Lecture…".to_owned()
     } else {
-        format!("Worktrees · {}", s.worktrees.list.len())
+        counted(s.worktrees.list.len(), "worktree", "worktrees")
     };
-    let header = row()
-        .w_full()
-        .center_y()
-        .px(20.0)
-        .py(10.0)
-        .gap(12.0)
-        .child(
-            text(title)
-                .font(theme::BODY_STRONG)
-                .color(p.text)
-                .grow(1.0)
-                .truncate(),
-        )
-        .child(
+    let header = screen_head(
+        s,
+        "wt-head",
+        "Worktrees",
+        context,
+        vec![
             action(s, "wt-prune", "Nettoyer les orphelins", false)
                 .on_press(|s: &mut State| s.worktree_prune()),
-        )
-        .child(
             action(s, "wt-terminal", "Terminal ici", false)
                 .on_press(|s: &mut State| s.worktree_open_terminal()),
-        )
-        .child(
-            action(s, "wt-branches", "Branches", false).on_press(|s: &mut State| s.open_branches()),
-        )
-        .child(
-            action(s, "wt-close", "Fermer", false).on_press(|s: &mut State| s.close_worktrees()),
-        );
+        ],
+    );
     let list: El = if let Some(error) = &s.worktrees.error {
         col().w_full().grow(1.0).center().child(
             text(format!("Lecture impossible : {error}"))

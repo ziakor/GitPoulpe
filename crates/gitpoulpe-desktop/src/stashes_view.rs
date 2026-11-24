@@ -5,7 +5,7 @@ use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text};
 use crate::history_state::format_date;
 use crate::state::State;
 use crate::theme;
-use crate::widgets::{action, field, toggle};
+use crate::widgets::{action, counted, field, screen_head, toggle};
 
 const ROW_HEIGHT: f32 = 48.0;
 
@@ -242,31 +242,12 @@ fn detail(s: &State) -> El {
 
 pub fn stashes_screen(s: &State) -> El {
     let p = s.palette;
-    let title = if s.stashes.loading {
-        "Réserve · lecture…".to_owned()
+    let context = if s.stashes.loading {
+        "Lecture…".to_owned()
     } else {
-        format!("Réserve · {} stash(s)", s.stashes.stashes.len())
+        counted(s.stashes.stashes.len(), "remisage", "remisages")
     };
-    let header = row()
-        .w_full()
-        .center_y()
-        .px(20.0)
-        .py(10.0)
-        .gap(12.0)
-        .child(
-            text(title)
-                .font(theme::BODY_STRONG)
-                .color(p.text)
-                .grow(1.0)
-                .truncate(),
-        )
-        .child(
-            action(s, "stashes-branches", "Branches", false)
-                .on_press(|s: &mut State| s.open_branches()),
-        )
-        .child(
-            action(s, "stashes-close", "Fermer", false).on_press(|s: &mut State| s.close_stashes()),
-        );
+    let header = screen_head(s, "stashes-head", "Remisages", context, Vec::new());
     let list: El = if let Some(error) = &s.stashes.error {
         col().w_full().grow(1.0).center().child(
             text(format!("Lecture impossible : {error}"))

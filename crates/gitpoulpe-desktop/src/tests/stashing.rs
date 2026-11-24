@@ -83,7 +83,7 @@ fn screen(dir: &Path) -> Runtime<State> {
     rt.on_key = Some(crate::keys::on_key);
     click(&mut rt, "branch-name");
     settle(&mut rt, |s| s.branches.open && !s.branches.loading);
-    click(&mut rt, "branches-stashes");
+    super::menu(&mut rt, "nav-stashes");
     settle(&mut rt, |s| s.stashes.open && idle(s));
     rt
 }

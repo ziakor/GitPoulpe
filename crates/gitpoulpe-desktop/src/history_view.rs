@@ -703,7 +703,7 @@ fn detail(s: &State) -> El {
         });
     let Some(commit) = s.history.selected.and_then(|i| s.history.commits.get(i)) else {
         return panel.child(
-            text("Sélectionne un commit pour voir ses détails.".to_owned())
+            text("Sélectionnez un commit pour voir ses détails.".to_owned())
                 .font(theme::SMALL)
                 .color(p.muted)
                 .wrap(),
@@ -854,68 +854,43 @@ fn message(s: &State, title: &str, detail: &str) -> El {
 
 pub fn history_screen(s: &State) -> El {
     let p = s.palette;
-    let header = row()
-        .w_full()
-        .center_y()
-        .px(20.0)
-        .py(10.0)
-        .gap(12.0)
-        .child(
-            text(format!(
-                "Historique · {} commits chargés",
-                s.history.commits.len()
-            ))
-            .font(theme::BODY_STRONG)
+    let header = crate::widgets::screen_head(
+        s,
+        "history-head",
+        "Historique",
+        crate::widgets::counted(s.history.commits.len(), "commit chargé", "commits chargés"),
+        Vec::new(),
+    )
+    .child(
+        text_input(&s.search_text, theme::BODY)
+            .key("history-search")
+            .label("Rechercher un commit")
+            .single_line()
+            .w(320.0)
+            .h(34.0)
+            .px(10.0)
+            .py(8.0)
+            .radius(3.0)
+            .fill(p.raised)
+            .border(1.0, p.line)
             .color(p.text)
-            .grow(1.0)
-            .truncate(),
-        )
-        .child(
-            text_input(&s.search_text, theme::BODY)
-                .key("history-search")
-                .label("Rechercher un commit")
-                .single_line()
-                .w(320.0)
-                .h(34.0)
-                .px(10.0)
-                .py(8.0)
-                .radius(3.0)
-                .fill(p.raised)
-                .border(1.0, p.line)
-                .color(p.text)
-                .placeholder("Message, auteur ou identifiant".to_owned(), p.muted)
-                .focus_ring(2.0, 2.0, p.accent)
-                .on_edit(|s: &mut State| &mut s.search_text)
-                .on_input_change(|s: &mut State, _| s.search_changed())
-                .on_input_key(|s: &mut State, event, tx| {
-                    if event.key != Key::Escape {
-                        return false;
-                    }
-                    if s.search_text.text.is_empty() {
-                        tx.blur();
-                    } else {
-                        s.search_text = rune::TextEdit::new("");
-                        s.search_changed();
-                    }
-                    true
-                }),
-        )
-        .child(
-            el().key("history-close")
-                .role("button")
-                .label("Fermer l'historique")
-                .focusable(true)
-                .focus_ring(2.0, 2.0, p.accent)
-                .h(32.0)
-                .px(12.0)
-                .center()
-                .radius(3.0)
-                .fill(p.raised)
-                .border(1.0, p.line)
-                .hover(p.hover)
-                .on_press(|s: &mut State| s.close_history())
-                .child(text("Fermer".to_owned()).font(theme::BODY).color(p.text)),
-        );
+            .placeholder("Message, auteur ou identifiant".to_owned(), p.muted)
+            .focus_ring(2.0, 2.0, p.accent)
+            .on_edit(|s: &mut State| &mut s.search_text)
+            .on_input_change(|s: &mut State, _| s.search_changed())
+            .on_input_key(|s: &mut State, event, tx| {
+                if event.key != Key::Escape {
+                    return false;
+                }
+                if s.search_text.text.is_empty() {
+                    tx.blur();
+                } else {
+                    s.search_text = rune::TextEdit::new("");
+                    s.search_changed();
+                }
+                true
+            }),
+    );
     let list_body = match &s.history.status {
         HistoryStatus::Idle | HistoryStatus::Loading if s.history.commits.is_empty() => message(
             s,
