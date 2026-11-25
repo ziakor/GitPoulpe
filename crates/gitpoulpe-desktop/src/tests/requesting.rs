@@ -588,6 +588,52 @@ fn a_viewed_file_folds_until_its_patch_changes_and_its_header_unfolds_it() {
     assert!(shows(&rt, "0 sur 3 vu"));
 }
 
+#[test]
+fn side_by_side_puts_each_side_in_its_column_and_comments_and_drags_as_unified_does() {
+    use gitpoulpe_hosting::Side::Right;
+    let fake = Fake::start();
+    let (_dir, mut rt) = list_screen(&fake);
+    click(&mut rt, "prlk0");
+    loaded(&mut rt, 1);
+    comments_ready(&mut rt);
+    click(&mut rt, "prl-tab-files");
+    step(&mut rt);
+    click(&mut rt, "prl-mode-split");
+    step(&mut rt);
+    assert_eq!(rt.state.mode, crate::state::DiffMode::Split);
+    let old = rect_of(&rt, "prl-f0l1").expect("the removed line");
+    let new = rect_of(&rt, "prl-f0l2").expect("the added line");
+    assert!(
+        (old[1] - new[1]).abs() < 0.5 && old[0] + old[2] <= new[0],
+        "old on the left, new on the right, on one row: {old:?} {new:?}"
+    );
+    let thread = rect_of(&rt, "prc-thread10").expect("the thread on new line 1");
+    assert!(
+        thread[1] >= new[1] + new[3] - 0.5,
+        "the thread sits under its row"
+    );
+    click(&mut rt, "prl-f0l2");
+    step(&mut rt);
+    assert!(shows(&rt, "la ligne 1 (nouveau côté) de f1.rs"));
+    click(&mut rt, "prl-f0l1");
+    step(&mut rt);
+    assert!(shows(&rt, "la ligne 1 (ancien côté) de f1.rs"));
+    click(&mut rt, "prc-cancel");
+    longer_first_file(&mut rt);
+    let (x, from) = line_point(&mut rt, 3);
+    let to = rect_of(&rt, "prl-f0l5").unwrap();
+    rt.pointer_move(x, from);
+    rt.pointer_down(x, from);
+    rt.pointer_move(to[0] + 60.0, to[1] + to[3] / 2.0);
+    rt.pointer_up(to[0] + 60.0, to[1] + to[3] / 2.0);
+    step(&mut rt);
+    assert_eq!(picked(&rt), (Some(2), 4, Right));
+    click(&mut rt, "prl-mode-unified");
+    step(&mut rt);
+    assert_eq!(rt.state.mode, crate::state::DiffMode::Unified);
+    assert!(rect_of(&rt, "prl-f0c2").is_none());
+}
+
 fn longer_first_file(rt: &mut Runtime<State>) {
     let list = &mut rt.state.pulls.list;
     list.detail.as_mut().unwrap().files[0].patch =

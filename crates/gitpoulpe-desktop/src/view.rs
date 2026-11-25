@@ -1393,7 +1393,7 @@ fn right_pane(s: &State) -> El {
         .child(viewport)
 }
 
-fn mode_button(s: &State, mode: DiffMode, key: &'static str, label: &'static str) -> El {
+pub(crate) fn mode_button(s: &State, mode: DiffMode, key: &'static str, label: &'static str) -> El {
     let p = s.palette;
     let active = s.mode == mode;
     let (fill, ink, edge) = if active {

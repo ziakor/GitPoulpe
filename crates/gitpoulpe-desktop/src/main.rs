@@ -125,6 +125,11 @@ fn demo_review(state: &mut State) {
     review_demo::review_scene(state);
 }
 
+fn demo_review_files_split(state: &mut State) {
+    state.set_mode(state::DiffMode::Split);
+    demo_review_files(state);
+}
+
 fn demo_review_files_light(state: &mut State) {
     state.set_dark(false);
     demo_review_files(state);
@@ -240,6 +245,7 @@ fn main() {
             ("demo-review-light", demo_review_light),
             ("demo-review-files", demo_review_files),
             ("demo-review-files-light", demo_review_files_light),
+            ("demo-review-files-split", demo_review_files_split),
             ("demo-review-list", demo_review_list),
             ("demo-device", demo_device),
             ("demo-review-focus", demo_review_focus),

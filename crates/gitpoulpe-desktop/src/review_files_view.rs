@@ -6,8 +6,9 @@ use rune::{Align, El, GrowthSpec, Span, col, el, row, text};
 
 use crate::attachments_view::{Body, binary_file, rich_body};
 use crate::pull_list::{CommentKind, NumberedLine, current_numbered, when};
-use crate::state::State;
-use crate::theme;
+use crate::state::{DiffMode, State};
+use crate::theme::{self, Palette};
+use crate::view::mode_button;
 use crate::widgets::{action, area, chevron_icon, quiet, toggle};
 
 const LINE: f32 = 22.0;
@@ -243,9 +244,14 @@ fn number(value: Option<u64>, ink: rune::Color) -> El {
         .align(Align::End)
 }
 
-fn diff_line(s: &State, path: &str, file_index: usize, n: usize, line: &NumberedLine) -> El {
-    let p = s.palette;
-    let list = &s.pulls.list;
+struct Look<'a> {
+    fill: Option<rune::Color>,
+    sign: &'static str,
+    ink: rune::Color,
+    content: &'a str,
+}
+
+fn look<'a>(p: &Palette, line: &'a NumberedLine) -> Look<'a> {
     let mut chars = line.text.chars();
     let first = chars.next();
     let rest = chars.as_str();
@@ -257,6 +263,54 @@ fn diff_line(s: &State, path: &str, file_index: usize, n: usize, line: &Numbered
         Some(_) => (None, " ", p.muted, rest),
         None => (None, " ", p.muted, ""),
     };
+    Look {
+        fill,
+        sign,
+        ink,
+        content,
+    }
+}
+
+fn is_context(line: &NumberedLine) -> bool {
+    !matches!(
+        line.text.as_bytes().first(),
+        Some(b'@' | b'+' | b'-' | b'\\')
+    )
+}
+
+fn code(p: &Palette, line: &NumberedLine, content: &str) -> El {
+    text(content.to_owned())
+        .font(theme::PATH_SMALL)
+        .color(if line.text.starts_with('@') {
+            p.muted
+        } else {
+            p.text
+        })
+        .spans(
+            line.marks
+                .iter()
+                .filter_map(|(range, paint)| {
+                    let mut span = Span::new(range.start, range.end);
+                    span.color = Some(p.syntax(*paint)?);
+                    Some(span)
+                })
+                .collect::<Vec<_>>(),
+        )
+        .grow(1.0)
+        .min_w(0.0)
+        .truncate()
+}
+
+fn sign(look: &Look) -> El {
+    text(look.sign.to_owned())
+        .font(theme::PATH_SMALL)
+        .color(look.ink)
+        .w(22.0)
+        .align(Align::Center)
+}
+
+fn picked(s: &State, path: &str, line: &NumberedLine) -> bool {
+    let list = &s.pulls.list;
     let chosen = match (&list.line_drag, &list.pick) {
         (Some(d), _) => Some((
             d.path.as_str(),
@@ -267,74 +321,168 @@ fn diff_line(s: &State, path: &str, file_index: usize, n: usize, line: &Numbered
         (None, Some(k)) => Some((k.path.as_str(), k.side, k.start.unwrap_or(k.line), k.line)),
         (None, None) => None,
     };
-    let picked = chosen.is_some_and(|(at, chosen_side, first, last)| {
+    chosen.is_some_and(|(at, chosen_side, first, last)| {
         at == path
             && line
                 .anchor
                 .is_some_and(|(l, side)| side == chosen_side && (first..=last).contains(&l))
-    });
-    let rule = if picked {
-        el().w(2.0).h_full().fill(p.accent)
-    } else {
-        el().w(2.0).h_full()
+    })
+}
+
+fn rule(p: &Palette, picked: bool) -> El {
+    let rule = el().w(2.0).h_full();
+    if picked { rule.fill(p.accent) } else { rule }
+}
+
+fn shade(row: El, p: &Palette, fill: Option<rune::Color>, picked: bool) -> El {
+    match (picked, fill) {
+        (true, _) => row.fill(p.selected),
+        (false, Some(fill)) => row.fill(fill),
+        (false, None) => row,
+    }
+}
+
+fn commentable(row: El, s: &State, path: &str, line: &NumberedLine) -> El {
+    let Some((number, side)) = line.anchor else {
+        return row;
     };
-    let mut el_line = row()
+    let (pressed, dragged) = (path.to_owned(), path.to_owned());
+    row.role("button")
+        .label(format!("Commenter la ligne {number}"))
+        .hover(s.palette.hover)
+        .on_press_tx(move |s: &mut State, tx| {
+            s.pull_line_pressed(pressed.clone(), number, side, tx.mods().shift)
+        })
+        .on_drag(move |s: &mut State, drag, tx| s.pull_line_drag(&dragged, number, side, drag, tx))
+}
+
+fn diff_line(s: &State, path: &str, file_index: usize, n: usize, line: &NumberedLine) -> El {
+    let p = s.palette;
+    let look = look(&p, line);
+    let picked = picked(s, path, line);
+    let row = row()
         .key(format!("prl-f{file_index}l{n}"))
         .w_full()
         .h(LINE)
         .center_y()
-        .child(rule)
+        .child(rule(&p, picked))
         .child(number(line.old, p.muted))
         .child(number(line.new, p.muted))
-        .child(
-            text(sign.to_owned())
-                .font(theme::PATH_SMALL)
-                .color(ink)
-                .w(22.0)
-                .align(Align::Center),
-        )
-        .child(
-            text(content.to_owned())
-                .font(theme::PATH_SMALL)
-                .color(if line.text.starts_with('@') {
-                    p.muted
-                } else {
-                    p.text
-                })
-                .spans(
-                    line.marks
-                        .iter()
-                        .filter_map(|(range, paint)| {
-                            let mut span = Span::new(range.start, range.end);
-                            span.color = Some(p.syntax(*paint)?);
-                            Some(span)
-                        })
-                        .collect::<Vec<_>>(),
-                )
-                .grow(1.0)
-                .min_w(0.0)
-                .truncate(),
-        );
-    if let Some(fill) = fill {
-        el_line = el_line.fill(fill);
+        .child(sign(&look))
+        .child(code(&p, line, look.content));
+    commentable(shade(row, &p, look.fill, picked), s, path, line)
+}
+
+fn half() -> El {
+    row().w(0.0).grow(1.0).min_w(0.0).h_full().center_y()
+}
+
+fn split_context(s: &State, path: &str, file_index: usize, n: usize, line: &NumberedLine) -> El {
+    let p = s.palette;
+    let look = look(&p, line);
+    let picked = picked(s, path, line);
+    let side = |value: Option<u64>| {
+        half()
+            .child(number(value, p.muted))
+            .child(sign(&look))
+            .child(code(&p, line, look.content))
+    };
+    let row = row()
+        .key(format!("prl-f{file_index}l{n}"))
+        .w_full()
+        .h(LINE)
+        .center_y()
+        .child(rule(&p, picked))
+        .child(side(line.old))
+        .child(el().w(1.0).h_full().fill(p.line))
+        .child(side(line.new));
+    commentable(shade(row, &p, None, picked), s, path, line)
+}
+
+fn split_cell(
+    s: &State,
+    path: &str,
+    file_index: usize,
+    at: Option<usize>,
+    lines: &[NumberedLine],
+) -> El {
+    let p = s.palette;
+    let Some((n, line)) = at.and_then(|n| lines.get(n).map(|line| (n, line))) else {
+        return half().fill(p.panel);
+    };
+    let look = look(&p, line);
+    let picked = picked(s, path, line);
+    let cell = half()
+        .key(format!("prl-f{file_index}l{n}"))
+        .child(rule(&p, picked))
+        .child(number(line.old.or(line.new), p.muted))
+        .child(sign(&look))
+        .child(code(&p, line, look.content));
+    commentable(shade(cell, &p, look.fill, picked), s, path, line)
+}
+
+fn split_change(
+    s: &State,
+    path: &str,
+    file_index: usize,
+    (left, right): (Option<usize>, Option<usize>),
+    lines: &[NumberedLine],
+) -> El {
+    let p = s.palette;
+    row()
+        .key(change_key(file_index, left, right))
+        .w_full()
+        .h(LINE)
+        .child(split_cell(s, path, file_index, left, lines))
+        .child(el().w(1.0).h_full().fill(p.line))
+        .child(split_cell(s, path, file_index, right, lines))
+}
+
+fn change_key(file_index: usize, left: Option<usize>, right: Option<usize>) -> String {
+    format!("prl-f{file_index}c{}", left.or(right).unwrap_or_default())
+}
+
+fn split_rows(file: usize, lines: &[NumberedLine]) -> Vec<FileRow> {
+    let mut rows = Vec::with_capacity(lines.len());
+    let (mut removed, mut added) = (Vec::new(), Vec::new());
+    let flush = |rows: &mut Vec<FileRow>, removed: &mut Vec<usize>, added: &mut Vec<usize>| {
+        for k in 0..removed.len().max(added.len()) {
+            rows.push(FileRow::Pair(
+                file,
+                removed.get(k).copied(),
+                added.get(k).copied(),
+            ));
+        }
+        removed.clear();
+        added.clear();
+    };
+    for (n, line) in lines.iter().enumerate() {
+        match line.text.as_bytes().first() {
+            Some(b'-') => {
+                if !added.is_empty() {
+                    flush(&mut rows, &mut removed, &mut added);
+                }
+                removed.push(n);
+            }
+            Some(b'+') => added.push(n),
+            _ => {
+                flush(&mut rows, &mut removed, &mut added);
+                rows.push(FileRow::Line(file, n));
+            }
+        }
     }
-    if picked {
-        el_line = el_line.fill(p.selected);
+    flush(&mut rows, &mut removed, &mut added);
+    rows
+}
+
+impl FileRow {
+    fn lines(self) -> [Option<usize>; 2] {
+        match self {
+            FileRow::Line(_, n) => [Some(n), None],
+            FileRow::Pair(_, left, right) => [left, right],
+            _ => [None, None],
+        }
     }
-    if let Some((number, side)) = line.anchor {
-        let (pressed, dragged) = (path.to_owned(), path.to_owned());
-        el_line = el_line
-            .role("button")
-            .label(format!("Commenter la ligne {number}"))
-            .hover(p.hover)
-            .on_press_tx(move |s: &mut State, tx| {
-                s.pull_line_pressed(pressed.clone(), number, side, tx.mods().shift)
-            })
-            .on_drag(move |s: &mut State, drag, tx| {
-                s.pull_line_drag(&dragged, number, side, drag, tx)
-            });
-    }
-    el_line
 }
 
 #[derive(Clone, Copy)]
@@ -342,6 +490,7 @@ enum FileRow {
     Summary,
     Header(usize),
     Line(usize, usize),
+    Pair(usize, Option<usize>, Option<usize>),
     Thread(usize, u64),
     Composer,
     Binary(usize),
@@ -354,6 +503,7 @@ fn row_key(row: FileRow) -> String {
         FileRow::Summary => "prl-files-title".to_owned(),
         FileRow::Header(i) => format!("prl-fh{i}"),
         FileRow::Line(i, n) => format!("prl-f{i}l{n}"),
+        FileRow::Pair(i, left, right) => change_key(i, left, right),
         FileRow::Thread(_, id) => format!("prc-thread{id}"),
         FileRow::Composer => "prc-box".to_owned(),
         FileRow::Binary(i) => format!("prl-fb{i}"),
@@ -389,25 +539,37 @@ fn plan(s: &State, detail: &PullDetail, numbered: &[Vec<NumberedLine>]) -> Vec<F
         let mut shown: Vec<u64> = Vec::new();
         match (&file.patch, numbered.get(i)) {
             (Some(_), Some(lines)) => {
-                for (n, line) in lines.iter().enumerate() {
-                    rows.push(FileRow::Line(i, n));
-                    let Some((number, side)) = line.anchor else {
-                        continue;
-                    };
-                    for root in roots
-                        .iter()
-                        .filter(|r| !r.outdated && r.line == Some(number) && r.side == side)
+                let units = if s.mode == DiffMode::Split {
+                    split_rows(i, lines)
+                } else {
+                    (0..lines.len()).map(|n| FileRow::Line(i, n)).collect()
+                };
+                for unit in units {
+                    rows.push(unit);
+                    for line in unit
+                        .lines()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|n| lines.get(n))
                     {
-                        shown.push(root.id);
-                        placed |= list.reply_to == Some(root.id);
-                        rows.push(FileRow::Thread(i, root.id));
-                    }
-                    let here = list.pick.as_ref().is_some_and(|k| {
-                        k.path == file.change.path && k.line == number && k.side == side
-                    });
-                    if here && list.reply_to.is_none() && !placed {
-                        placed = true;
-                        rows.push(FileRow::Composer);
+                        let Some((number, side)) = line.anchor else {
+                            continue;
+                        };
+                        for root in roots
+                            .iter()
+                            .filter(|r| !r.outdated && r.line == Some(number) && r.side == side)
+                        {
+                            shown.push(root.id);
+                            placed |= list.reply_to == Some(root.id);
+                            rows.push(FileRow::Thread(i, root.id));
+                        }
+                        let here = list.pick.as_ref().is_some_and(|k| {
+                            k.path == file.change.path && k.line == number && k.side == side
+                        });
+                        if here && list.reply_to.is_none() && !placed {
+                            placed = true;
+                            rows.push(FileRow::Composer);
+                        }
                     }
                 }
             }
@@ -509,22 +671,44 @@ fn summary(s: &State, detail: &PullDetail) -> El {
         (a + f.change.additions, r + f.change.deletions)
     });
     let mut block = col().w_full().gap(6.0).pt(8.0).pb(12.0).child(
-        text(format!(
-            "{} fichier{}{} · +{added} −{removed} · {} sur {} vu{}",
-            detail.files.len(),
-            if detail.files.len() > 1 { "s" } else { "" },
-            if detail.files_truncated {
-                " (liste tronquée)"
-            } else {
-                ""
-            },
-            s.pull_viewed_count(),
-            detail.files.len(),
-            if s.pull_viewed_count() > 1 { "s" } else { "" },
-        ))
-        .key("prl-files-summary")
-        .font(theme::SMALL)
-        .color(p.muted),
+        row()
+            .w_full()
+            .gap(12.0)
+            .center_y()
+            .child(
+                text(format!(
+                    "{} fichier{}{} · +{added} −{removed} · {} sur {} vu{}",
+                    detail.files.len(),
+                    if detail.files.len() > 1 { "s" } else { "" },
+                    if detail.files_truncated {
+                        " (liste tronquée)"
+                    } else {
+                        ""
+                    },
+                    s.pull_viewed_count(),
+                    detail.files.len(),
+                    if s.pull_viewed_count() > 1 { "s" } else { "" },
+                ))
+                .key("prl-files-summary")
+                .font(theme::SMALL)
+                .color(p.muted)
+                .grow(1.0)
+                .min_w(0.0)
+                .truncate(),
+            )
+            .child(
+                row()
+                    .gap(6.0)
+                    .role("tablist")
+                    .focus_group()
+                    .child(mode_button(
+                        s,
+                        DiffMode::Unified,
+                        "prl-mode-unified",
+                        "Unifié",
+                    ))
+                    .child(mode_button(s, DiffMode::Split, "prl-mode-split", "Séparé")),
+            ),
     );
     if list.pick.is_none() && list.reply_to.is_none() {
         block = block.child(send_status(s));
@@ -542,7 +726,14 @@ fn build_row(s: &State, row: FileRow, numbered: &[Vec<NumberedLine>]) -> El {
         FileRow::Summary => summary(s, detail),
         FileRow::Header(i) => file(i).map_or_else(el, |f| file_header(s, i, f)),
         FileRow::Line(i, n) => match (file(i), numbered.get(i).and_then(|l| l.get(n))) {
+            (Some(f), Some(line)) if s.mode == DiffMode::Split && is_context(line) => {
+                split_context(s, &f.change.path, i, n, line)
+            }
             (Some(f), Some(line)) => diff_line(s, &f.change.path, i, n, line),
+            _ => el(),
+        },
+        FileRow::Pair(i, left, right) => match (file(i), numbered.get(i)) {
+            (Some(f), Some(lines)) => split_change(s, &f.change.path, i, (left, right), lines),
             _ => el(),
         },
         FileRow::Thread(i, id) => s
@@ -575,7 +766,7 @@ pub fn files_tab(s: &State, detail: &PullDetail) -> El {
         .key("prl-files")
         .w_full()
         .growth(GrowthSpec::default())
-        .virtual_rows_version((list.version, s.dark, rows.len()))
+        .virtual_rows_version((list.version, s.dark, s.mode, rows.len()))
         .virtual_rows(
             rows.len(),
             LINE,
