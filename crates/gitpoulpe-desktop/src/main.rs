@@ -206,6 +206,64 @@ fn demo_device(state: &mut State) {
     });
 }
 
+fn demo_accounts(state: &mut State) {
+    use gitpoulpe_core::{Connection, ConnectionBook, Provider};
+    use gitpoulpe_hosting::Session;
+    demo(state);
+    let account = |provider, web: &str, api: &str, login: &str| Connection {
+        id: format!("{}/{login}", web.trim_start_matches("https://")),
+        provider,
+        api: api.to_owned(),
+        web: web.to_owned(),
+        login: login.to_owned(),
+        scopes: Vec::new(),
+    };
+    let connections = vec![
+        account(
+            Provider::Github,
+            "https://github.com",
+            "https://api.github.com",
+            "d-hauet",
+        ),
+        account(
+            Provider::Github,
+            "https://github.com",
+            "https://api.github.com",
+            "atelier-bot",
+        ),
+        account(
+            Provider::Gitlab,
+            "https://gitlab.exemple.org",
+            "https://gitlab.exemple.org/api/v4",
+            "dhauet",
+        ),
+    ];
+    let session = |login: &str, scopes: &[&str], expires: Option<&str>, renews| Session {
+        login: login.to_owned(),
+        name: None,
+        scopes: scopes.iter().map(|s| (*s).to_owned()).collect(),
+        fine_grained: false,
+        expires_at: expires.map(str::to_owned),
+        renews_itself: renews,
+    };
+    let statuses = [
+        crate::accounts::Status::Ok(session("d-hauet", &["repo", "read:org"], Some("2026-11-25 18:42:10 UTC"), true)),
+        crate::accounts::Status::Ok(session("atelier-bot", &["repo", "read:org"], Some("2026-11-25 16:13:59 UTC"), false)),
+        crate::accounts::Status::Failed("le jeton est expiré, révoqué ou invalide : reconnectez le compte avec un nouveau jeton".to_owned()),
+    ];
+    for (connection, status) in connections.iter().zip(statuses) {
+        state
+            .accounts
+            .statuses
+            .insert(connection.id.clone(), status);
+    }
+    state.accounts.book = ConnectionBook { connections };
+    state.accounts.open = true;
+    state.accounts.manual = true;
+    state.accounts.provider = Provider::Gitlab;
+    state.accounts.enterprise = true;
+}
+
 fn demo_review_light(state: &mut State) {
     state.set_dark(false);
     demo_review(state);
@@ -248,6 +306,7 @@ fn main() {
             ("demo-review-files-split", demo_review_files_split),
             ("demo-review-list", demo_review_list),
             ("demo-device", demo_device),
+            ("demo-accounts", demo_accounts),
             ("demo-review-focus", demo_review_focus),
             ("demo-history", demo_history),
             ("demo-history-light", demo_history_light),

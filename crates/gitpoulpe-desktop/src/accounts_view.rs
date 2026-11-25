@@ -1,200 +1,139 @@
-use std::borrow::Cow;
-
 use gitpoulpe_core::{Connection, Provider};
-use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text};
+use gitpoulpe_hosting::{DeviceCode, GithubHost};
+use rune::{Color, El, ScrollSpec, col, el, row, text};
 
 use crate::accounts::Status;
 use crate::state::State;
 use crate::theme;
 use crate::widgets::{action, counted, field, quiet, screen_head, toggle};
 
-const ROW_HEIGHT: f32 = 52.0;
+const COLUMN: f32 = 720.0;
 
-fn status_line(s: &State, connection: &Connection) -> (String, bool) {
+struct Health {
+    ink: Color,
+    state: String,
+    detail: Option<String>,
+    advice: Option<String>,
+    reconnect: bool,
+}
+
+fn on_github_com(connection: &Connection) -> bool {
+    connection.provider == Provider::Github && connection.web == GithubHost::dotcom().web
+}
+
+fn health(s: &State, connection: &Connection) -> Health {
+    let p = s.palette;
+    let quiet = |state: &str| Health {
+        ink: p.muted,
+        state: state.to_owned(),
+        detail: None,
+        advice: None,
+        reconnect: false,
+    };
     match s.accounts.statuses.get(&connection.id) {
-        None => ("état non vérifié".to_owned(), false),
-        Some(Status::Checking) => ("vérification…".to_owned(), false),
-        Some(Status::Ok(session)) => (
-            {
-                let base = if session.fine_grained {
-                    "connecté · jeton à permissions détaillées".to_owned()
-                } else if session.scopes.is_empty() {
-                    "connecté · aucune portée accordée".to_owned()
-                } else {
-                    format!("connecté · portées : {}", session.scopes.join(", "))
-                };
-                match &session.expires_at {
-                    Some(date) => format!("{base} · expire le {date}"),
-                    None => base,
-                }
-            },
-            false,
-        ),
-        Some(Status::Failed(message)) => (message.clone(), true),
+        None => quiet("Pas encore vérifié"),
+        Some(Status::Checking) => quiet("Vérification…"),
+        Some(Status::Failed(message)) => Health {
+            ink: p.red,
+            state: "À reconnecter".to_owned(),
+            detail: Some(capitalized(message)),
+            advice: None,
+            reconnect: true,
+        },
+        Some(Status::Ok(session)) => {
+            let rights = if session.fine_grained {
+                "jeton à permissions détaillées".to_owned()
+            } else if session.scopes.is_empty() {
+                "aucune portée accordée".to_owned()
+            } else {
+                format!("portées : {}", session.scopes.join(", "))
+            };
+            let lasting = match (&session.expires_at, session.renews_itself) {
+                (_, true) => " · se prolonge automatiquement".to_owned(),
+                (Some(date), false) => format!(" · expire le {}", short_date(date)),
+                (None, false) => String::new(),
+            };
+            let expiring = session.expires_at.is_some() && !session.renews_itself;
+            let advice = (expiring && on_github_com(connection)).then(|| {
+                "Reconnectez-le une fois : il se prolongera ensuite tout seul.".to_owned()
+            });
+            Health {
+                ink: if advice.is_some() { p.lane(1) } else { p.green },
+                state: "Connecté".to_owned(),
+                detail: Some(format!("{rights}{lasting}")),
+                reconnect: advice.is_some(),
+                advice,
+            }
+        }
     }
 }
 
-fn account_row(s: &State, index: usize) -> El {
-    let p = s.palette;
-    let Some(connection) = s.accounts.book.connections.get(index) else {
-        return el().h(ROW_HEIGHT);
-    };
-    let selected = s.accounts.selected.as_ref() == Some(&connection.id);
-    let (detail, bad) = status_line(s, connection);
-    let id = connection.id.clone();
-    let mut item = el()
-        .key(format!("ac-row{index}"))
-        .role("option")
-        .label(format!(
-            "{} sur {}",
-            connection.login,
-            connection.host_caption()
-        ))
-        .w_full()
-        .h(ROW_HEIGHT)
-        .px(16.0)
-        .on_press(move |s: &mut State| s.select_account(id.clone()));
-    if selected {
-        item = item.fill(p.panel);
+fn short_date(date: &str) -> String {
+    match date.strip_suffix(" UTC") {
+        Some(stamp) if stamp.len() == 19 => format!("{} UTC", &stamp[..16]),
+        _ => date.to_owned(),
     }
-    item.child(
-        col()
-            .w_full()
-            .h(ROW_HEIGHT)
-            .center_y()
-            .gap(2.0)
-            .child(
-                text(format!(
-                    "{} · {}@{}",
-                    connection.provider.caption(),
-                    connection.login,
-                    connection.host_caption()
-                ))
-                .font(theme::PATH_SMALL)
-                .color(p.text)
-                .truncate(),
-            )
-            .child(
-                text(detail)
-                    .font(theme::SMALL)
-                    .color(if bad { p.red } else { p.muted })
-                    .truncate(),
-            ),
+}
+
+fn capitalized(message: &str) -> String {
+    let mut chars = message.chars();
+    chars
+        .next()
+        .map(|first| first.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
+}
+
+fn dot(color: Color) -> El {
+    el().w(8.0).h(8.0).radius(4.0).fill(color)
+}
+
+fn badge(s: &State, provider: Provider) -> El {
+    let p = s.palette;
+    el().px(8.0).py(3.0).radius(3.0).border(1.0, p.edge).child(
+        text(provider.caption().to_owned())
+            .font(theme::TINY)
+            .color(p.text),
     )
 }
 
-fn panel(s: &State) -> El {
+fn device_steps(s: &State, code: &DeviceCode) -> El {
     let p = s.palette;
-    let mut panel = col()
-        .key("ac-panel")
-        .w(460.0)
-        .h_full()
-        .px(16.0)
-        .py(14.0)
-        .gap(10.0)
+    let page = code
+        .verification_uri
+        .trim_start_matches("https://")
+        .trim_end_matches('/');
+    let minutes = code.expires_in.div_ceil(60);
+    let copied = s.accounts.device_copied;
+    let step = |number: &str, body: El| {
+        row()
+            .w_full()
+            .gap(12.0)
+            .child(
+                el().w(22.0)
+                    .h(22.0)
+                    .radius(11.0)
+                    .center()
+                    .border(1.0, p.edge)
+                    .child(text(number.to_owned()).font(theme::TINY).color(p.text)),
+            )
+            .child(col().grow(1.0).min_w(0.0).gap(8.0).child(body))
+    };
+    col()
+        .key("ac-device-box")
+        .w_full()
+        .gap(12.0)
+        .padding(14.0)
+        .radius(4.0)
         .fill(p.panel)
         .border(1.0, p.line)
-        .scroll(ScrollSpec {
-            stick_bottom: false,
-        });
-    if let Some(done) = &s.accounts.done {
-        panel = panel.child(
-            text(done.clone())
-                .key("ac-ok")
-                .font(theme::SMALL)
-                .color(p.text)
-                .wrap(),
-        );
-    }
-    if let Some(error) = &s.accounts.error {
-        panel = panel.child(
-            text(error.clone())
-                .key("ac-error")
-                .font(theme::SMALL)
-                .color(p.red)
-                .wrap(),
-        );
-    }
-    if let Some(connection) = s
-        .accounts
-        .selected
-        .as_ref()
-        .and_then(|id| s.accounts.book.get(id))
-    {
-        let id = connection.id.clone();
-        panel = panel
-            .child(
-                text(format!(
-                    "{} sur {}",
-                    connection.login,
-                    connection.host_caption()
-                ))
-                .font(theme::BODY_STRONG)
-                .color(p.text)
-                .wrap(),
-            )
-            .child(
-                row()
-                    .gap(8.0)
-                    .child(
-                        action(s, "ac-check", "Vérifier", false)
-                            .on_press(move |s: &mut State| s.check_account(&id)),
-                    )
-                    .child(
-                        action(s, "ac-browse", "Parcourir les dépôts", true).on_press({
-                            let id = connection.id.clone();
-                            move |s: &mut State| s.open_browser(&id)
-                        }),
-                    )
-                    .child(
-                        action(s, "ac-disconnect", "Déconnecter", false)
-                            .on_press(|s: &mut State| s.disconnect_account()),
-                    ),
-            );
-    }
-    let provider = s.accounts.provider;
-    panel = panel
-        .child(
-            text(format!("Connecter un compte {}", provider.caption()))
-                .key("ac-connect-title")
-                .font(theme::BODY_STRONG)
-                .color(p.text),
-        )
-        .child(
-            row()
+        .child(step(
+            "1",
+            col()
                 .gap(8.0)
                 .child(
-                    action(s, "ac-prov-github", "GitHub", provider == Provider::Github)
-                        .on_press(|s: &mut State| s.set_provider(Provider::Github)),
-                )
-                .child(
-                    action(s, "ac-prov-gitlab", "GitLab", provider == Provider::Gitlab)
-                        .on_press(|s: &mut State| s.set_provider(Provider::Gitlab)),
-                ),
-        );
-    if let Some(code) = &s.accounts.device {
-        let page = code
-            .verification_uri
-            .trim_start_matches("https://")
-            .trim_end_matches('/');
-        let minutes = code.expires_in.div_ceil(60);
-        let copied = s.accounts.device_copied;
-        panel = panel.child(
-            col()
-                .key("ac-device-box")
-                .w_full()
-                .gap(10.0)
-                .padding(14.0)
-                .radius(3.0)
-                .fill(p.panel)
-                .border(1.0, p.line)
-                .child(
-                    text(format!("Saisissez ce code sur {page} :"))
-                        .key("ac-device-uri")
+                    text("Copiez ce code".to_owned())
                         .font(theme::SMALL)
-                        .color(p.text)
-                        .w_full()
-                        .wrap(),
+                        .color(p.muted),
                 )
                 .child(
                     row()
@@ -216,6 +155,21 @@ fn panel(s: &State) -> El {
                             )
                             .on_press_tx(|s: &mut State, tx| s.copy_device_code(tx, false)),
                         ),
+                ),
+        ))
+        .child(step(
+            "2",
+            col()
+                .gap(8.0)
+                .child(
+                    text(format!(
+                        "Collez-le sur {page}, puis autorisez GitPoulpe."
+                    ))
+                    .key("ac-device-uri")
+                    .font(theme::SMALL)
+                    .color(p.text)
+                    .w_full()
+                    .wrap(),
                 )
                 .child(
                     row()
@@ -229,93 +183,310 @@ fn panel(s: &State) -> El {
                             quiet(s, "ac-device-cancel", "Annuler")
                                 .on_press(|s: &mut State| s.cancel_device()),
                         ),
+                ),
+        ))
+        .child(
+            text(format!(
+                "En attente de votre autorisation dans le navigateur… Le code reste valable {minutes} min."
+            ))
+            .key("ac-device-wait")
+            .font(theme::SMALL)
+            .color(p.muted)
+            .w_full()
+            .wrap(),
+        )
+}
+
+fn account_card(s: &State, index: usize, connection: &Connection) -> El {
+    let p = s.palette;
+    let health = health(s, connection);
+    let (browse_id, check_id, reconnect_id, disconnect_id) = (
+        connection.id.clone(),
+        connection.id.clone(),
+        connection.id.clone(),
+        connection.id.clone(),
+    );
+    let reconnecting = s.accounts.device_for.as_deref() == Some(connection.id.as_str());
+    let mut card = col()
+        .key(format!("ac-row{index}"))
+        .role("group")
+        .label(format!(
+            "{} {} sur {}",
+            connection.provider.caption(),
+            connection.login,
+            connection.host_caption()
+        ))
+        .w_full()
+        .padding(14.0)
+        .gap(10.0)
+        .radius(4.0)
+        .fill(p.raised)
+        .border(1.0, p.line)
+        .child(
+            row()
+                .w_full()
+                .gap(12.0)
+                .center_y()
+                .child(badge(s, connection.provider))
+                .child(
+                    col()
+                        .grow(1.0)
+                        .min_w(0.0)
+                        .gap(2.0)
+                        .child(
+                            text(connection.login.clone())
+                                .font(theme::BODY_STRONG)
+                                .color(p.text)
+                                .truncate(),
+                        )
+                        .child(
+                            text(connection.host_caption())
+                                .font(theme::PATH_SMALL)
+                                .color(p.muted)
+                                .truncate(),
+                        ),
                 )
                 .child(
-                    text(format!(
-                        "En attente de votre autorisation dans le navigateur… Le code reste valable {minutes} min."
-                    ))
-                    .key("ac-device-wait")
-                    .font(theme::SMALL)
-                    .color(p.muted)
-                    .w_full()
-                    .wrap(),
+                    action(
+                        s,
+                        &format!("ac-browse{index}"),
+                        "Parcourir les dépôts",
+                        false,
+                    )
+                    .on_press(move |s: &mut State| s.open_browser(&browse_id)),
+                ),
+        )
+        .child(
+            row()
+                .w_full()
+                .gap(8.0)
+                .center_y()
+                .child(dot(health.ink))
+                .child(
+                    text(health.state)
+                        .key(format!("ac-state{index}"))
+                        .font(theme::SMALL)
+                        .color(if health.ink == p.red { p.red } else { p.text })
+                        .shrink()
+                        .wrap(),
                 ),
         );
-    } else if !s.accounts.enterprise && provider == Provider::Github {
-        panel = panel.child(
-            action(
-                s,
-                "ac-device",
-                if s.accounts.busy {
-                    "Demande du code…"
-                } else {
-                    "Se connecter avec GitHub"
-                },
-                true,
-            )
-            .on_press(|s: &mut State| s.connect_device()),
-        );
-    }
-    panel = panel
-        .child(
-            text("Le jeton est gardé dans le trousseau du système, jamais dans les préférences ni dans un dépôt. Sans navigateur, pour une instance privée ou pour GitLab, collez un jeton d'accès personnel.".to_owned())
-                .key("ac-help")
+    if let Some(detail) = health.detail {
+        card = card.child(
+            text(detail)
+                .key(format!("ac-detail{index}"))
                 .font(theme::SMALL)
                 .color(p.muted)
+                .w_full()
                 .wrap(),
+        );
+    }
+    if let Some(advice) = health.advice {
+        card = card.child(
+            text(advice)
+                .key(format!("ac-advice{index}"))
+                .font(theme::SMALL)
+                .color(p.text)
+                .w_full()
+                .wrap(),
+        );
+    }
+    let mut actions = row().gap(6.0).center_y();
+    if health.reconnect && !reconnecting {
+        actions = actions.child(
+            action(s, &format!("ac-reconnect{index}"), "Reconnecter", true)
+                .on_press(move |s: &mut State| s.reconnect_account(&reconnect_id)),
+        );
+    }
+    actions = actions
+        .child(
+            quiet(s, &format!("ac-check{index}"), "Vérifier")
+                .on_press(move |s: &mut State| s.check_account(&check_id)),
+        )
+        .child(
+            quiet(s, &format!("ac-disconnect{index}"), "Déconnecter")
+                .label(format!("Déconnecter {}", connection.login))
+                .on_press(move |s: &mut State| s.disconnect_account(&disconnect_id)),
+        );
+    card = card.child(actions);
+    match &s.accounts.device {
+        Some(code) if reconnecting => card.child(device_steps(s, code)),
+        _ => card,
+    }
+}
+
+fn manual_form(s: &State) -> El {
+    let p = s.palette;
+    let provider = s.accounts.provider;
+    let mut form = col()
+        .key("ac-manual")
+        .w_full()
+        .gap(10.0)
+        .padding(14.0)
+        .radius(4.0)
+        .fill(p.panel)
+        .border(1.0, p.line)
+        .child(
+            row()
+                .gap(8.0)
+                .center_y()
+                .child(
+                    text("Fournisseur".to_owned())
+                        .font(theme::SMALL)
+                        .color(p.muted)
+                        .w(90.0),
+                )
+                .child(
+                    action(s, "ac-prov-github", "GitHub", provider == Provider::Github)
+                        .on_press(|s: &mut State| s.set_provider(Provider::Github)),
+                )
+                .child(
+                    action(s, "ac-prov-gitlab", "GitLab", provider == Provider::Gitlab)
+                        .on_press(|s: &mut State| s.set_provider(Provider::Gitlab)),
+                ),
         )
         .child(
             toggle(
                 s,
                 "ac-enterprise",
                 if provider == Provider::Github {
-                    "GitHub Enterprise Server"
+                    "Serveur GitHub Enterprise"
                 } else {
                     "Instance GitLab auto-hébergée"
                 },
                 s.accounts.enterprise,
             )
+            .self_start()
+            .px(0.0)
             .on_press(|s: &mut State| {
                 let on = !s.accounts.enterprise;
                 s.set_enterprise(on)
             }),
         );
+    let caption = |words: &str| text(words.to_owned()).font(theme::SMALL).color(p.muted);
     if s.accounts.enterprise {
-        panel = panel.child(
+        form = form.child(caption("Adresse du serveur")).child(
             field(
                 s,
                 "ac-server",
                 "Adresse du serveur",
                 &s.accounts.server,
-                "https://github.exemple.org",
+                if provider == Provider::Github {
+                    "https://github.exemple.org"
+                } else {
+                    "https://gitlab.exemple.org"
+                },
             )
             .on_edit(|s: &mut State| &mut s.accounts.server),
         );
     }
-    panel = panel.child(
+    form.child(caption("Jeton d'accès personnel")).child(
         field(
             s,
             "ac-token",
-            "Jeton d'accès",
+            "Jeton d'accès personnel",
             &s.accounts.token,
             "Collez le jeton",
         )
         .secure()
         .on_edit(|s: &mut State| &mut s.accounts.token),
-    );
-    panel.child(
-        action(
-            s,
-            "ac-connect",
-            if s.accounts.busy {
-                "Connexion…"
-            } else {
-                "Connecter"
-            },
-            true,
-        )
-        .on_press(|s: &mut State| s.connect_account()),
     )
+    .child(
+        text(if provider == Provider::Github {
+            "Jeton classique avec les portées repo et read:org, ou jeton à permissions détaillées. Il ne se prolonge pas tout seul."
+        } else {
+            "Jeton d'accès personnel GitLab : la portée api permet de commenter et de fusionner, read_api suffit pour lire."
+        }
+        .to_owned())
+        .key("ac-token-hint")
+        .font(theme::SMALL)
+        .color(p.muted)
+        .w_full()
+        .wrap(),
+    )
+    .child(
+        row().child(
+            action(
+                s,
+                "ac-connect",
+                if s.accounts.busy && s.accounts.device.is_none() {
+                    "Connexion…"
+                } else {
+                    "Connecter"
+                },
+                true,
+            )
+            .on_press(|s: &mut State| s.connect_account()),
+        ),
+    )
+}
+
+fn add_section(s: &State) -> El {
+    let p = s.palette;
+    let mut section = col().w_full().gap(10.0).child(
+        text("Ajouter un compte".to_owned())
+            .key("ac-connect-title")
+            .font(theme::BODY_STRONG)
+            .color(p.text),
+    );
+    match &s.accounts.device {
+        Some(code) if s.accounts.device_for.is_none() => {
+            section = section.child(device_steps(s, code));
+        }
+        _ => {
+            section = section
+                .child(
+                    row().child(
+                        action(
+                            s,
+                            "ac-device",
+                            if s.accounts.busy && s.accounts.device_for.is_none() {
+                                "Demande du code…"
+                            } else {
+                                "Se connecter avec GitHub"
+                            },
+                            true,
+                        )
+                        .on_press(|s: &mut State| s.connect_device()),
+                    ),
+                )
+                .child(
+                    text("GitHub s'ouvre dans votre navigateur : vous y autorisez GitPoulpe avec un code, sans lui confier de mot de passe. La session se prolonge ensuite toute seule.".to_owned())
+                        .key("ac-device-help")
+                        .font(theme::SMALL)
+                        .color(p.muted)
+                        .w_full()
+                        .wrap(),
+                );
+        }
+    }
+    if let Some(error) = &s.accounts.error {
+        section = section.child(
+            text(error.clone())
+                .key("ac-error")
+                .font(theme::SMALL)
+                .color(p.red)
+                .w_full()
+                .wrap(),
+        );
+    }
+    section = section.child(
+        quiet(
+            s,
+            "ac-other",
+            if s.accounts.manual {
+                "Masquer les autres moyens"
+            } else {
+                "GitLab, GitHub Enterprise ou jeton d'accès…"
+            },
+        )
+        .self_start()
+        .on_press(|s: &mut State| s.toggle_manual()),
+    );
+    if s.accounts.manual {
+        section = section.child(manual_form(s));
+    }
+    section
 }
 
 pub fn accounts_screen(s: &State) -> El {
@@ -328,46 +499,77 @@ pub fn accounts_screen(s: &State) -> El {
         s,
         "ac-head",
         "Comptes fournisseurs",
-        counted(count, "connexion", "connexions"),
+        counted(count, "compte connecté", "comptes connectés"),
         vec![action(s, "ac-close", "Fermer", false).on_press(|s: &mut State| s.close_accounts())],
     );
-    let list: El = if count == 0 {
-        col().w_full().grow(1.0).center().child(
+    let mut column = col()
+        .w_full()
+        .max_w(COLUMN)
+        .gap(18.0)
+        .child(
+            text("GitPoulpe se sert de ces comptes pour les pull requests, les notifications et vos dépôts distants.".to_owned())
+                .key("ac-intro")
+                .font(theme::SMALL)
+                .color(p.muted)
+                .w_full()
+                .wrap(),
+        );
+    if let Some(done) = &s.accounts.done {
+        column = column.child(
+            row()
+                .key("ac-ok")
+                .w_full()
+                .gap(8.0)
+                .center_y()
+                .child(dot(p.green))
+                .child(
+                    text(done.clone())
+                        .font(theme::SMALL)
+                        .color(p.text)
+                        .shrink()
+                        .wrap(),
+                ),
+        );
+    }
+    let mut accounts = col().w_full().gap(10.0).child(
+        text("Vos comptes".to_owned())
+            .font(theme::BODY_STRONG)
+            .color(p.text),
+    );
+    if count == 0 {
+        accounts = accounts.child(
             text("Aucun compte connecté.".to_owned())
                 .key("ac-empty")
-                .font(theme::BODY)
+                .font(theme::SMALL)
                 .color(p.muted),
-        )
-    } else {
-        col()
-            .key("ac-viewport")
-            .grow(1.0)
-            .min_w(0.0)
-            .h_full()
-            .scroll(ScrollSpec {
-                stick_bottom: false,
-            })
-            .child(
-                col()
-                    .key("ac-rows")
-                    .role("listbox")
-                    .w_full()
-                    .growth(GrowthSpec::default())
-                    .virtual_rows_version((s.accounts.version, s.dark))
-                    .virtual_rows(
-                        count,
-                        ROW_HEIGHT,
-                        |_: &State, i| Cow::Owned(format!("ack{i}")),
-                        account_row,
-                    ),
-            )
-    };
+        );
+    }
+    for (index, connection) in s.accounts.book.connections.iter().enumerate() {
+        accounts = accounts.child(account_card(s, index, connection));
+    }
+    column = column
+        .child(accounts)
+        .child(el().w_full().h(1.0).fill(p.line))
+        .child(add_section(s))
+        .child(
+            text("Les jetons restent dans le trousseau du système, jamais dans les préférences ni dans un dépôt.".to_owned())
+                .key("ac-help")
+                .font(theme::SMALL)
+                .color(p.muted)
+                .w_full()
+                .wrap(),
+        );
     col().w_full().grow(1.0).min_h(0.0).child(header).child(
-        row()
+        col()
+            .key("ac-panel")
             .w_full()
             .grow(1.0)
             .min_h(0.0)
-            .child(list)
-            .child(panel(s)),
+            .px(20.0)
+            .py(16.0)
+            .scroll(ScrollSpec {
+                stick_bottom: false,
+            })
+            .child(column),
     )
 }

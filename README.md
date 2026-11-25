@@ -208,11 +208,12 @@ The **Gitflow** button on the branches screen manages feature, release and hotfi
 
 ## GitHub accounts
 
-The **Comptes fournisseurs** button on the profiles screen connects GitHub.com or a GitHub Enterprise Server with a personal access token. No GitPoulpe account exists or is needed.
+The **Comptes fournisseurs** screen (in the menu's Réglages) lists your accounts as cards and adds new ones. "Se connecter avec GitHub" signs in to GitHub.com from the browser; "GitLab, GitHub Enterprise ou jeton d'accès…" unfolds the form for a personal access token, a GitHub Enterprise Server or GitLab. No GitPoulpe account exists or is needed.
 
+- Each card shows the account, its server and its state: "Connecté" with the scopes, "se prolonge automatiquement" for a browser sign-in, or the expiry date of a pasted token; "À reconnecter" with the reason otherwise. "Reconnecter" signs in again in place (the code shows inside the card for GitHub.com) or reopens the form filled in for that server; "Vérifier", "Parcourir les dépôts" and "Déconnecter" act on that account only.
+- A browser sign-in gets an eight-hour token and a refresh token, both kept in the keyring; GitPoulpe renews the pair a few minutes before it expires, so the session lasts until the refresh token goes unused for six months or is revoked. Renewals are serialised (a refresh token works once), and a refused renewal asks to reconnect. A pasted token is used as is and never renewed.
 - The token is validated against the server before anything is saved, then stored in the system keyring (Secret Service on Linux). Preferences only hold the account name, server and granted scopes, never the token. The field is masked.
-- The account in use and the scopes the token grants are shown; fine-grained tokens, which carry no scope list, are labelled as such.
-- Each connection is re-checked when the screen opens or on demand. An expired or revoked token, an organisation that requires SSO authorisation (with the authorisation link), a rate limit and a refused permission are reported as distinct, recoverable states: pasting a new token reconnects the same account.
+- Each connection is re-checked when the screen opens or on demand. An expired or revoked token, an organisation that requires SSO authorisation (with the authorisation link), a rate limit and a refused permission are reported as distinct, recoverable states.
 - Servers must use HTTPS (plain HTTP is accepted for loopback only), API requests never follow redirects, and requests to another host are refused, so the token cannot leave the configured server. Attached images are downloaded without the token (see [Attachments in pull and merge requests](#attachments-in-pull-and-merge-requests)).
 - Disconnecting removes only that connection's token. Local Git profiles are not touched.
 

@@ -105,12 +105,18 @@ fn screen(store: Arc<MemoryStore>) -> Runtime<State> {
     settle(&mut rt, |s| s.profiles_open);
     super::menu(&mut rt, "nav-accounts");
     settle(&mut rt, |s| s.accounts.open);
+    click(&mut rt, "ac-other");
+    settle(&mut rt, |s| s.accounts.manual);
     click(&mut rt, "ac-enterprise");
     settle(&mut rt, |s| s.accounts.enterprise);
     rt
 }
 
 fn connect(rt: &mut Runtime<State>, fake: &Fake, token: &str) {
+    if !rt.state.accounts.manual {
+        click(rt, "ac-other");
+        settle(rt, |s| s.accounts.manual);
+    }
     let before = rt.state.accounts.book.connections.len();
     rt.state.accounts.server = TextEdit::new(fake.base());
     rt.state.accounts.token = TextEdit::new(token);
@@ -122,7 +128,7 @@ fn connect(rt: &mut Runtime<State>, fake: &Fake, token: &str) {
 }
 
 fn browse(rt: &mut Runtime<State>) {
-    click(rt, "ac-browse");
+    click(rt, "ac-browse0");
     settle(rt, |s| {
         s.accounts.browser.open && !s.accounts.browser.loading
     });
@@ -197,16 +203,16 @@ fn two_servers_with_the_same_repository_names_stay_apart_and_a_late_answer_never
     let slow = ids.iter().find(|i| i.ends_with("/slow")).unwrap().clone();
     let other = ids.iter().find(|i| i.ends_with("/octo2")).unwrap().clone();
     let identity = serde_json::to_string(&rt.state.book).unwrap();
-    rt.state.select_account(slow.clone());
-    step(&mut rt);
-    click(&mut rt, "ac-browse");
+    let card = |id: &str| ids.iter().position(|i| i == id).unwrap();
+    click(&mut rt, &format!("ac-browse{}", card(&slow)));
     step(&mut rt);
     assert!(rt.state.accounts.browser.loading);
     click(&mut rt, "br-back");
     settle(&mut rt, |s| !s.accounts.browser.open);
-    rt.state.select_account(other.clone());
-    step(&mut rt);
-    browse(&mut rt);
+    click(&mut rt, &format!("ac-browse{}", card(&other)));
+    settle(&mut rt, |s| {
+        s.accounts.browser.open && !s.accounts.browser.loading
+    });
     assert!(shows(&rt, "Dépôts · Octo2@"));
     assert!(shows(&rt, "octo/a"));
     std::thread::sleep(std::time::Duration::from_secs(7));
@@ -237,7 +243,7 @@ fn a_restricted_or_revoked_token_shows_its_own_message_and_never_falls_back_to_a
     connect(&mut rt, &fake, "good");
     let key = rt.state.accounts.book.connections[0].secret_key();
     store.set(&key, "sso").unwrap();
-    click(&mut rt, "ac-browse");
+    click(&mut rt, "ac-browse0");
     settle(&mut rt, |s| s.accounts.browser.error.is_some());
     assert!(shows(&rt, "autorisation SSO"));
     assert!(shows(&rt, "Organisations indisponibles"));

@@ -111,7 +111,25 @@ fn screen(store: Arc<MemoryStore>) -> Runtime<State> {
     rt
 }
 
+fn manual(rt: &mut Runtime<State>) {
+    if !rt.state.accounts.manual {
+        click(rt, "ac-other");
+        settle(rt, |s| s.accounts.manual);
+    }
+}
+
+fn card_of(rt: &Runtime<State>, provider: gitpoulpe_core::Provider) -> usize {
+    rt.state
+        .accounts
+        .book
+        .connections
+        .iter()
+        .position(|c| c.provider == provider)
+        .expect("a card for this provider")
+}
+
 fn connect(rt: &mut Runtime<State>, fake: &Fake, token: &str) {
+    manual(rt);
     if !rt.state.accounts.enterprise {
         click(rt, "ac-enterprise");
         settle(rt, |s| s.accounts.enterprise);
@@ -154,15 +172,27 @@ fn a_revoked_token_is_reported_on_the_next_check_and_reconnecting_recovers() {
     settle(&mut rt, |s| !s.accounts.busy && s.accounts.done.is_some());
     let key = rt.state.accounts.book.connections[0].secret_key();
     store.set(&key, "revoked").unwrap();
-    click(&mut rt, "ac-check");
+    click(&mut rt, "ac-check0");
     settle(&mut rt, |s| {
         matches!(
             s.accounts.statuses.values().next(),
             Some(crate::accounts::Status::Failed(_))
         )
     });
-    assert!(shows(&rt, "expiré, révoqué ou invalide"));
-    connect(&mut rt, &fake, "good");
+    assert!(shows(&rt, "expiré, révoqué ou invalide") && shows(&rt, "À reconnecter"));
+    rt.state.accounts.manual = false;
+    rt.state.accounts.enterprise = false;
+    rt.state.accounts.server = TextEdit::new("");
+    step(&mut rt);
+    click(&mut rt, "ac-reconnect0");
+    settle(&mut rt, |s| s.accounts.manual);
+    assert!(
+        rt.state.accounts.enterprise && rt.state.accounts.server.text == fake.base(),
+        "the form comes back filled in for this server"
+    );
+    rt.state.accounts.token = TextEdit::new("good");
+    step(&mut rt);
+    click(&mut rt, "ac-connect");
     settle(&mut rt, |s| {
         !s.accounts.busy
             && matches!(
@@ -213,7 +243,7 @@ fn disconnecting_removes_the_token_but_never_touches_local_git_profiles() {
     let profiles = rt.state.book.clone();
     connect(&mut rt, &fake, "good");
     settle(&mut rt, |s| !s.accounts.busy && s.accounts.done.is_some());
-    click(&mut rt, "ac-disconnect");
+    click(&mut rt, "ac-disconnect0");
     settle(&mut rt, |s| s.accounts.book.connections.is_empty());
     assert!(store.keys().is_empty());
     assert!(shows(&rt, "vos profils Git sont inchangés"));
@@ -305,22 +335,36 @@ fn the_code_is_shown_while_waiting_and_cancelling_stops_everything_and_stores_no
 }
 
 #[test]
-fn a_wrong_client_id_is_explained_and_the_enterprise_form_offers_no_browser_sign_in() {
+fn a_wrong_client_id_is_explained_and_browser_sign_in_ignores_the_manual_form() {
     let fake = Fake::start();
     let mut rt = screen(Arc::new(MemoryStore::default()));
     point_oauth_at(&mut rt, &fake, 1);
     rt.state.accounts.oauth_client_id = "other".to_owned();
+    assert!(
+        rect_of(&rt, "ac-token").is_none(),
+        "the token form starts folded"
+    );
     click(&mut rt, "ac-device");
     settle(&mut rt, |s| !s.accounts.busy && s.accounts.error.is_some());
     assert!(shows(&rt, "identifiant d'application OAuth inconnu"));
+    manual(&mut rt);
+    click(&mut rt, "ac-prov-gitlab");
     click(&mut rt, "ac-enterprise");
     settle(&mut rt, |s| s.accounts.enterprise);
-    assert!(rect_of(&rt, "ac-device").is_none());
-    rt.state.connect_device();
-    assert!(!rt.state.accounts.busy && rt.state.accounts.device_task.is_none());
+    rt.state.accounts.oauth_client_id = "client-1".to_owned();
+    click(&mut rt, "ac-device");
+    settle(&mut rt, |s| !s.accounts.busy && s.accounts.done.is_some());
+    let connection = &rt.state.accounts.book.connections[0];
+    assert_eq!(
+        (connection.provider, connection.login.as_str()),
+        (gitpoulpe_core::Provider::Github, "Octo"),
+        "browser sign-in goes to GitHub whatever the token form is set to"
+    );
+    assert!(!rt.state.accounts.manual, "the form folds once connected");
 }
 
 fn connect_gitlab_account(rt: &mut Runtime<State>, fake: &Fake, token: &str) {
+    manual(rt);
     click(rt, "ac-prov-gitlab");
     settle(rt, |s| {
         s.accounts.provider == gitpoulpe_core::Provider::Gitlab
@@ -349,8 +393,7 @@ fn a_gitlab_account_connects_next_to_a_github_one_with_its_scopes_and_expiry_and
         !s.accounts.busy && s.accounts.book.connections.len() == 2
     });
     assert!(shows(&rt, "Connecté en tant que Octo sur 127.0.0.1"));
-    assert!(shows(&rt, "Connecter un compte GitLab"));
-    assert!(rect_of(&rt, "ac-device").is_none());
+    assert!(rect_of(&rt, "ac-row0").is_some() && rect_of(&rt, "ac-row1").is_some());
     settle(&mut rt, |s| {
         s.accounts
             .statuses
@@ -363,8 +406,7 @@ fn a_gitlab_account_connects_next_to_a_github_one_with_its_scopes_and_expiry_and
         &rt,
         "portées : read_api, read_repository, write_repository · expire le 2027-01-31"
     ));
-    assert!(shows(&rt, "GitLab · Octo@"));
-    assert!(shows(&rt, "GitHub · Octo@"));
+    assert!(shows(&rt, "GitLab") && shows(&rt, "GitHub"));
     let mut keys = store.keys();
     keys.sort();
     assert!(
@@ -381,9 +423,9 @@ fn a_gitlab_account_connects_next_to_a_github_one_with_its_scopes_and_expiry_and
         .unwrap()
         .id
         .clone();
-    rt.state.select_account(gitlab_id);
-    step(&mut rt);
-    click(&mut rt, "ac-disconnect");
+    assert!(rt.state.accounts.book.get(&gitlab_id).is_some());
+    let card = card_of(&rt, gitpoulpe_core::Provider::Gitlab);
+    click(&mut rt, &format!("ac-disconnect{card}"));
     settle(&mut rt, |s| s.accounts.book.connections.len() == 1);
     assert_eq!(store.keys().len(), 1);
     assert!(store.keys()[0].starts_with("github:"));
@@ -398,4 +440,43 @@ fn a_rejected_gitlab_token_leaves_nothing_behind_and_explains_why() {
     settle(&mut rt, |s| !s.accounts.busy && s.accounts.error.is_some());
     assert!(shows(&rt, "expiré, révoqué ou invalide"));
     assert!(store.keys().is_empty() && rt.state.accounts.book.connections.is_empty());
+}
+
+#[test]
+fn reconnecting_a_github_com_account_shows_the_code_inside_its_own_card() {
+    let fake = Fake::start();
+    let mut rt = screen(Arc::new(MemoryStore::default()));
+    point_oauth_at(&mut rt, &fake, 600);
+    let connection = gitpoulpe_core::Connection {
+        id: "github.com/octo".to_owned(),
+        provider: gitpoulpe_core::Provider::Github,
+        api: fake.base(),
+        web: "https://github.com".to_owned(),
+        login: "Octo".to_owned(),
+        scopes: Vec::new(),
+    };
+    rt.state.accounts.book.upsert(connection.clone());
+    rt.state.accounts.statuses.insert(
+        connection.id.clone(),
+        crate::accounts::Status::Failed("le jeton est expiré".to_owned()),
+    );
+    rt.state.accounts.version += 1;
+    step(&mut rt);
+    click(&mut rt, "ac-reconnect0");
+    settle(&mut rt, |s| s.accounts.device.is_some());
+    let card = rect_of(&rt, "ac-row0").unwrap();
+    let code = rect_of(&rt, "ac-device-code").unwrap();
+    assert!(
+        code[1] > card[1] && code[1] + code[3] <= card[1] + card[3],
+        "the code sits in the card: {card:?} {code:?}"
+    );
+    assert!(
+        rect_of(&rt, "ac-device").is_some(),
+        "adding another account stays possible"
+    );
+    assert!(rect_of(&rt, "ac-reconnect0").is_none());
+    click(&mut rt, "ac-device-cancel");
+    settle(&mut rt, |s| s.accounts.device.is_none() && !s.accounts.busy);
+    assert!(rt.state.accounts.device_for.is_none());
+    assert!(rect_of(&rt, "ac-reconnect0").is_some());
 }

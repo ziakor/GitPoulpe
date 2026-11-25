@@ -31,8 +31,9 @@ pub struct AccountsState {
     pub busy: bool,
     pub error: Option<String>,
     pub done: Option<String>,
-    pub selected: Option<String>,
     pub statuses: HashMap<String, Status>,
+    pub manual: bool,
+    pub device_for: Option<String>,
     pub enterprise: bool,
     pub server: TextEdit,
     pub token: TextEdit,
@@ -56,8 +57,9 @@ impl AccountsState {
             busy: false,
             error: None,
             done: None,
-            selected: None,
             statuses: HashMap::new(),
+            manual: false,
+            device_for: None,
             enterprise: false,
             server: TextEdit::new(""),
             token: TextEdit::new(""),
@@ -115,8 +117,34 @@ impl State {
         self.accounts.token = TextEdit::new("");
     }
 
-    pub fn select_account(&mut self, id: String) {
-        self.accounts.selected = Some(id);
+    pub fn toggle_manual(&mut self) {
+        self.accounts.manual = !self.accounts.manual;
+        self.accounts.error = None;
+        self.accounts.version += 1;
+    }
+
+    pub fn reconnect_account(&mut self, id: &str) {
+        let Some(connection) = self.accounts.book.get(id).cloned() else {
+            return;
+        };
+        if connection.provider == Provider::Github && connection.web == GithubHost::dotcom().web {
+            self.cancel_device();
+            self.accounts.device_for = Some(connection.id);
+            self.connect_device();
+            return;
+        }
+        let dotcom = match connection.provider {
+            Provider::Github => GithubHost::dotcom().web,
+            Provider::Gitlab => GitlabHost::dotcom().web,
+        };
+        self.cancel_device();
+        self.accounts.manual = true;
+        self.accounts.provider = connection.provider;
+        self.accounts.enterprise = connection.web != dotcom;
+        self.accounts.server = TextEdit::new(&connection.web);
+        self.accounts.token = TextEdit::new("");
+        self.accounts.error = None;
+        self.accounts.done = None;
         self.accounts.version += 1;
     }
 
@@ -224,10 +252,7 @@ impl State {
     }
 
     pub fn connect_device(&mut self) {
-        if self.accounts.busy
-            || self.accounts.enterprise
-            || self.accounts.provider != Provider::Github
-        {
+        if self.accounts.busy {
             return;
         }
         self.accounts.request += 1;
@@ -287,6 +312,7 @@ impl State {
             self.accounts.busy = false;
         }
         self.accounts.device_copied = false;
+        self.accounts.device_for = None;
         self.accounts.version += 1;
     }
 
@@ -315,18 +341,14 @@ impl State {
         true
     }
 
-    pub fn disconnect_account(&mut self) {
-        let Some(id) = self.accounts.selected.clone() else {
-            return;
-        };
-        let Some(connection) = self.accounts.book.get(&id).cloned() else {
+    pub fn disconnect_account(&mut self, id: &str) {
+        let Some(connection) = self.accounts.book.get(id).cloned() else {
             return;
         };
         match disconnect(self.hosting.secrets.as_ref(), &connection) {
             Ok(()) => {
-                self.accounts.book.remove(&id);
-                self.accounts.statuses.remove(&id);
-                self.accounts.selected = None;
+                self.accounts.book.remove(id);
+                self.accounts.statuses.remove(id);
                 let _ = self.prefs.set(CONNECTIONS_KEY, &self.accounts.book);
                 self.accounts.done = Some(format!(
                     "{} déconnecté : le jeton est retiré, vos profils Git sont inchangés.",
@@ -350,6 +372,7 @@ impl State {
         self.accounts.busy = false;
         self.accounts.device = None;
         self.accounts.device_task = None;
+        self.accounts.device_for = None;
         match result {
             Ok((connection, session)) => {
                 self.accounts.done = Some(format!(
@@ -360,7 +383,7 @@ impl State {
                 self.accounts
                     .statuses
                     .insert(connection.id.clone(), Status::Ok(session));
-                self.accounts.selected = Some(connection.id.clone());
+                self.accounts.manual = false;
                 self.accounts.book.upsert(connection);
                 let _ = self.prefs.set(CONNECTIONS_KEY, &self.accounts.book);
                 self.accounts.token = TextEdit::new("");
