@@ -76,13 +76,13 @@ pub async fn list_reviews(
     number: u64,
 ) -> Result<Vec<Review>, GithubError> {
     if connection.provider == gitpoulpe_core::Provider::Gitlab {
-        let client = client(store, connection)?;
+        let client = client(store, connection).await?;
         return crate::gitlab_review::list_reviews(&client, (owner, name), number).await;
     }
     if !valid_org(owner) || !valid_org(name) {
         return Err(GithubError::NotFound);
     }
-    let client = client(store, connection)?;
+    let client = client(store, connection).await?;
     let raw = pages(
         &client,
         format!("repos/{owner}/{name}/pulls/{number}/reviews?per_page=100"),
@@ -114,7 +114,7 @@ pub async fn submit_review(
     submission: &ReviewSubmission,
 ) -> Result<Review, GithubError> {
     if connection.provider == gitpoulpe_core::Provider::Gitlab {
-        let client = client(store, connection)?;
+        let client = client(store, connection).await?;
         return crate::gitlab_review::submit_review(
             &client,
             connection,
@@ -176,7 +176,7 @@ pub async fn submit_review(
             c
         })
         .collect();
-    let client = client(store, connection)?;
+    let client = client(store, connection).await?;
     let response = client
         .send(
             "POST",

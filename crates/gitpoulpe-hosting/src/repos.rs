@@ -2,7 +2,7 @@ use gitpoulpe_core::Connection;
 use serde_json::Value;
 
 use crate::github::{GithubError, interpret_failure};
-use crate::http::{ApiClient, Token, next_link};
+use crate::http::{ApiClient, next_link};
 use crate::secrets::SecretStore;
 
 pub(crate) const PAGE_SIZE: usize = 100;
@@ -41,14 +41,11 @@ pub struct Listing<T> {
     pub truncated: bool,
 }
 
-pub(crate) fn client(
+pub(crate) async fn client(
     store: &dyn SecretStore,
     connection: &Connection,
 ) -> Result<ApiClient, GithubError> {
-    let token = store
-        .get(&connection.secret_key())?
-        .map(|t| Token::new(&t))
-        .ok_or(GithubError::NotConnected)?;
+    let token = crate::renewal::access_token(store, connection, None).await?;
     Ok(ApiClient::new(&connection.api, Some(&token))?)
 }
 
@@ -127,7 +124,7 @@ pub async fn list_organizations(
     store: &dyn SecretStore,
     connection: &Connection,
 ) -> Result<Listing<Organization>, GithubError> {
-    let client = client(store, connection)?;
+    let client = client(store, connection).await?;
     if connection.provider == gitpoulpe_core::Provider::Gitlab {
         return crate::gitlab_repos::list_groups(&client).await;
     }
@@ -154,7 +151,7 @@ pub async fn list_repositories(
     connection: &Connection,
     organization: Option<&str>,
 ) -> Result<Listing<RepoSummary>, GithubError> {
-    let client = client(store, connection)?;
+    let client = client(store, connection).await?;
     if connection.provider == gitpoulpe_core::Provider::Gitlab {
         return crate::gitlab_repos::list_projects(connection, &client, organization).await;
     }

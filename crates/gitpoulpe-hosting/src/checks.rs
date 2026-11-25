@@ -83,7 +83,7 @@ pub async fn load_checks(
     sha: &str,
 ) -> Result<Checks, GithubError> {
     if connection.provider == gitpoulpe_core::Provider::Gitlab {
-        let client = client(store, connection)?;
+        let client = client(store, connection).await?;
         return crate::gitlab_merge::load_checks(&client, (owner, name), number, sha).await;
     }
     let sha_ok =
@@ -91,7 +91,7 @@ pub async fn load_checks(
     if !valid_org(owner) || !valid_org(name) || !sha_ok {
         return Err(GithubError::NotFound);
     }
-    let client = client(store, connection)?;
+    let client = client(store, connection).await?;
     let mut items = Vec::new();
     let mut truncated = false;
     let mut next = Some(format!(

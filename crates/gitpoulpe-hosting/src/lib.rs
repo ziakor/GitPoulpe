@@ -17,6 +17,7 @@ mod pull_read;
 mod pull_review;
 mod pulls;
 mod remote_url;
+mod renewal;
 mod repos;
 mod secrets;
 
@@ -27,7 +28,10 @@ pub use device::{
     start_device_flow,
 };
 pub use forks::{ForkOutcome, create_fork};
-pub use github::{GithubError, GithubHost, Session, check_connection, connect_github, disconnect};
+pub use github::{
+    GithubError, GithubHost, Session, check_connection, connect_github, connect_github_grant,
+    disconnect,
+};
 pub use gitlab::{GitlabHost, check_gitlab, connect_gitlab};
 pub use http::{ApiClient, HttpError, Response, Token, next_link, validate_base};
 pub use issues::{
@@ -52,5 +56,6 @@ pub use pulls::{
     ChangedFile, Comparison, HostedPull, PullDraft, PullTarget, create_pull_request, prepare_pull,
 };
 pub use remote_url::{RemoteRef, parse_remote};
+pub use renewal::{Grant, renews_itself};
 pub use repos::{Listing, Organization, RepoSummary, list_organizations, list_repositories};
 pub use secrets::{KeyringStore, MemoryStore, SecretError, SecretStore};

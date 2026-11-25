@@ -4,7 +4,8 @@ use std::sync::Arc;
 use gitpoulpe_core::{Connection, ConnectionBook, Provider};
 use gitpoulpe_hosting::{
     DeviceCode, GITHUB_CLIENT_ID, GithubHost, GitlabHost, SecretStore, Session, await_device_token,
-    check_connection, connect_github, connect_gitlab, disconnect, start_device_flow,
+    check_connection, connect_github, connect_github_grant, connect_gitlab, disconnect,
+    start_device_flow,
 };
 use rune::TextEdit;
 
@@ -264,11 +265,11 @@ impl State {
                 code: code.clone(),
             });
             let result = async {
-                let token = await_device_token(&host, &client_id, &code, |d| {
+                let grant = await_device_token(&host, &client_id, &code, |d| {
                     tokio::time::sleep(std::time::Duration::from_millis(d.as_secs() * second_ms))
                 })
                 .await?;
-                connect_github(secrets.as_ref(), &host, token.expose()).await
+                connect_github_grant(secrets.as_ref(), &host, grant, &client_id).await
             }
             .await
             .map_err(|e| e.to_string());

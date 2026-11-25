@@ -729,7 +729,7 @@ pub async fn fetch_preview(
             } else {
                 "*/*"
             };
-            let client = client(store, connection)?;
+            let client = client(store, connection).await?;
             let response = client.get_bytes(path, accept, MEDIA_LIMIT).await?;
             (format!("{}/{path}", client.base()), response)
         }

@@ -5,8 +5,9 @@ use std::time::Duration;
 
 use common::FakeApi;
 use gitpoulpe_hosting::{
-    DevicePoll, GithubError, GithubHost, MemoryStore, SecretStore, await_device_token,
-    connect_github, poll_device_flow, start_device_flow,
+    DevicePoll, GithubError, GithubHost, Grant, MemoryStore, SecretStore, await_device_token,
+    check_connection, connect_github, connect_github_grant, disconnect, poll_device_flow,
+    renews_itself, start_device_flow,
 };
 
 fn host(api: &FakeApi) -> GithubHost {
@@ -25,7 +26,7 @@ async fn the_flow_shows_a_code_waits_slows_down_when_asked_and_ends_with_a_worki
     assert!(code.verification_uri.ends_with("/login/device"));
     assert_eq!((code.expires_in, code.interval), (900, 5));
     let sleeps = RefCell::new(Vec::new());
-    let token = await_device_token(&host, "client-1", &code, |d: Duration| {
+    let grant = await_device_token(&host, "client-1", &code, |d: Duration| {
         sleeps.borrow_mut().push(d.as_secs());
         async {}
     })
@@ -33,8 +34,11 @@ async fn the_flow_shows_a_code_waits_slows_down_when_asked_and_ends_with_a_worki
     .unwrap();
     assert_eq!(*sleeps.borrow(), [5, 5, 10]);
     let store = MemoryStore::default();
-    let (connection, session) = connect_github(&store, &host, token.expose()).await.unwrap();
+    let (connection, session) = connect_github_grant(&store, &host, grant, "client-1")
+        .await
+        .unwrap();
     assert_eq!(session.login, "Octo");
+    assert!(session.renews_itself && renews_itself(&store, &connection));
     assert_eq!(
         store.get(&connection.secret_key()).unwrap().as_deref(),
         Some("good")
@@ -105,10 +109,92 @@ async fn the_token_obtained_never_shows_in_debug_output() {
         if let DevicePoll::Authorized(t) =
             poll_device_flow(&host, "client-1", "dc-ok").await.unwrap()
         {
-            assert!(!format!("{t:?}").contains("good"));
+            let shown = format!("{t:?}");
+            assert!(
+                !shown.contains("good") && !shown.contains("ghr-"),
+                "{shown}"
+            );
             break t;
         }
         assert!(polls < 5);
     };
-    assert_eq!(token.expose(), "good");
+    assert_eq!(token.access.expose(), "good");
+}
+
+async fn brief_grant(host: &GithubHost, code: &str) -> Grant {
+    match poll_device_flow(host, "client-1", code).await.unwrap() {
+        DevicePoll::Authorized(grant) => grant,
+        other => panic!("{other:?}"),
+    }
+}
+
+fn renewals(api: &FakeApi) -> usize {
+    api.requests()
+        .lines()
+        .filter(|l| l.contains(r#"\"grant_type\":\"refresh_token\""#))
+        .count()
+}
+
+#[tokio::test]
+async fn an_access_token_about_to_expire_is_renewed_once_for_concurrent_requests_and_rotated() {
+    let api = FakeApi::start("fake_github.py");
+    let host = host(&api);
+    let store = MemoryStore::default();
+    let grant = brief_grant(&host, "dc-brief").await;
+    let (connection, _) = connect_github_grant(&store, &host, grant, "client-1")
+        .await
+        .unwrap();
+    assert_eq!(renewals(&api), 0);
+    let (first, second) = tokio::join!(
+        check_connection(&store, &connection),
+        check_connection(&store, &connection)
+    );
+    assert_eq!(first.unwrap().login, "Octo");
+    assert!(second.unwrap().renews_itself);
+    assert_eq!(renewals(&api), 1, "one renewal for both requests");
+    let log = api.requests();
+    assert!(log.contains(r#"\"refresh_token\":\"ghr-brief\""#), "{log}");
+    assert!(!log.contains("client_secret"), "{log}");
+    check_connection(&store, &connection).await.unwrap();
+    assert_eq!(renewals(&api), 1, "the renewed token lasts eight hours");
+    assert!(renews_itself(&store, &connection));
+}
+
+#[tokio::test]
+async fn a_refused_renewal_asks_to_reconnect_and_a_pasted_token_or_a_disconnect_clears_it() {
+    let api = FakeApi::start("fake_github.py");
+    let host = host(&api);
+    let store = MemoryStore::default();
+    let grant = brief_grant(&host, "dc-dead").await;
+    let (connection, _) = connect_github_grant(&store, &host, grant, "client-1")
+        .await
+        .unwrap();
+    assert_eq!(
+        check_connection(&store, &connection).await.unwrap_err(),
+        GithubError::SessionExpired
+    );
+    assert!(!renews_itself(&store, &connection));
+    assert!(
+        GithubError::SessionExpired
+            .to_string()
+            .contains("reconnectez"),
+        "the message says what to do"
+    );
+
+    let grant = brief_grant(&host, "dc-brief").await;
+    let (connection, _) = connect_github_grant(&store, &host, grant, "client-1")
+        .await
+        .unwrap();
+    assert!(renews_itself(&store, &connection));
+    connect_github(&store, &host, "good").await.unwrap();
+    assert!(
+        !renews_itself(&store, &connection),
+        "a pasted token does not keep an old renewal"
+    );
+    let grant = brief_grant(&host, "dc-brief").await;
+    connect_github_grant(&store, &host, grant, "client-1")
+        .await
+        .unwrap();
+    disconnect(&store, &connection).unwrap();
+    assert!(store.keys().is_empty(), "{:?}", store.keys());
 }

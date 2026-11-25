@@ -75,7 +75,7 @@ pub async fn fetch_notifications(
     store: &dyn SecretStore,
     connection: &Connection,
 ) -> Result<Vec<RawNotice>, GithubError> {
-    let client = client(store, connection)?;
+    let client = client(store, connection).await?;
     match connection.provider {
         Provider::Github => {
             let raw = pages(&client, "notifications?per_page=50".to_owned()).await?;

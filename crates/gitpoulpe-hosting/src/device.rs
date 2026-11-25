@@ -4,7 +4,8 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 use crate::github::{GithubError, GithubHost};
-use crate::http::{ApiClient, Token, validate_base};
+use crate::http::{ApiClient, validate_base};
+use crate::renewal::Grant;
 
 pub const GITHUB_CLIENT_ID: &str = "Ov23litIXPvCD0wH5guL";
 const SCOPES: &str = "repo read:org";
@@ -24,7 +25,7 @@ pub struct DeviceCode {
 pub enum DevicePoll {
     Pending,
     SlowDown(u64),
-    Authorized(Token),
+    Authorized(Grant),
     Denied,
     Expired,
 }
@@ -97,12 +98,10 @@ pub async fn poll_device_flow(
         )
         .await?;
     let value = response.json().map_err(|_| GithubError::Unreadable)?;
-    if let Some(token) = value.get("access_token").and_then(Value::as_str) {
-        let token = Token::new(token);
-        if token.is_empty() {
-            return Err(GithubError::Unreadable);
-        }
-        return Ok(DevicePoll::Authorized(token));
+    if value.get("access_token").is_some() {
+        return Grant::from_reply(&value)
+            .map(DevicePoll::Authorized)
+            .ok_or(GithubError::Unreadable);
     }
     match value.get("error").and_then(Value::as_str) {
         Some("authorization_pending") => Ok(DevicePoll::Pending),
@@ -123,7 +122,7 @@ pub async fn await_device_token<S, F>(
     client_id: &str,
     code: &DeviceCode,
     sleep: S,
-) -> Result<Token, GithubError>
+) -> Result<Grant, GithubError>
 where
     S: Fn(Duration) -> F,
     F: Future<Output = ()>,
@@ -137,7 +136,7 @@ where
         sleep(Duration::from_secs(interval)).await;
         waited += interval;
         match poll_device_flow(host, client_id, &code.device_code).await? {
-            DevicePoll::Authorized(token) => return Ok(token),
+            DevicePoll::Authorized(grant) => return Ok(grant),
             DevicePoll::Pending => {}
             DevicePoll::SlowDown(next) => interval = next.max(interval),
             DevicePoll::Denied => return Err(GithubError::DeviceDenied),

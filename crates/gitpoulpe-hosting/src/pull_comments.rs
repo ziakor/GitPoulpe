@@ -153,11 +153,11 @@ pub async fn list_comments(
     number: u64,
 ) -> Result<PullComments, GithubError> {
     if connection.provider == gitpoulpe_core::Provider::Gitlab {
-        let client = client(store, connection)?;
+        let client = client(store, connection).await?;
         return crate::gitlab_review::list_comments(&client, (owner, name), number).await;
     }
     checked(owner, name)?;
-    let client = client(store, connection)?.with_accept(RICH);
+    let client = client(store, connection).await?.with_accept(RICH);
     let issue = pages(
         &client,
         format!("repos/{owner}/{name}/issues/{number}/comments?per_page=100"),
@@ -191,12 +191,12 @@ pub async fn post_comment(
     body: &str,
 ) -> Result<IssueComment, GithubError> {
     if connection.provider == gitpoulpe_core::Provider::Gitlab {
-        let client = client(store, connection)?;
+        let client = client(store, connection).await?;
         return crate::gitlab_review::post_comment(&client, (owner, name), number, body).await;
     }
     checked(owner, name)?;
     let body = nonempty(body)?;
-    let client = client(store, connection)?;
+    let client = client(store, connection).await?;
     let response = client
         .send(
             "POST",
@@ -222,11 +222,11 @@ pub async fn current_head(
     number: u64,
 ) -> Result<String, GithubError> {
     if connection.provider == gitpoulpe_core::Provider::Gitlab {
-        let client = client(store, connection)?;
+        let client = client(store, connection).await?;
         return crate::gitlab_review::current_head(&client, (owner, name), number).await;
     }
     checked(owner, name)?;
-    let client = client(store, connection)?;
+    let client = client(store, connection).await?;
     let response = client
         .get(&format!("repos/{owner}/{name}/pulls/{number}"))
         .await?;
@@ -250,7 +250,7 @@ pub async fn post_line_comment(
     body: &str,
 ) -> Result<ReviewComment, GithubError> {
     if connection.provider == gitpoulpe_core::Provider::Gitlab {
-        let client = client(store, connection)?;
+        let client = client(store, connection).await?;
         return crate::gitlab_review::post_line_comment(
             &client,
             (owner, name),
@@ -274,7 +274,7 @@ pub async fn post_line_comment(
             current: head.chars().take(7).collect(),
         });
     }
-    let client = client(store, connection)?;
+    let client = client(store, connection).await?;
     let mut payload = json!({
         "body": body,
         "commit_id": anchor.commit_sha,
@@ -313,7 +313,7 @@ pub async fn reply_to_comment(
     body: &str,
 ) -> Result<ReviewComment, GithubError> {
     if connection.provider == gitpoulpe_core::Provider::Gitlab {
-        let client = client(store, connection)?;
+        let client = client(store, connection).await?;
         return crate::gitlab_review::reply_to_comment(
             &client,
             (owner, name),
@@ -325,7 +325,7 @@ pub async fn reply_to_comment(
     }
     checked(owner, name)?;
     let body = nonempty(body)?;
-    let client = client(store, connection)?;
+    let client = client(store, connection).await?;
     let response = client
         .send(
             "POST",

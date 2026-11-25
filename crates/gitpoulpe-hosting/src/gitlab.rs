@@ -68,6 +68,7 @@ async fn current_user(api: &str, token: &Token) -> Result<Session, GithubError> 
         scopes,
         fine_grained: false,
         expires_at,
+        renews_itself: false,
     })
 }
 

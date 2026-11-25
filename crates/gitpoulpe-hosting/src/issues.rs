@@ -174,7 +174,7 @@ pub async fn list_issues(
     query: &str,
 ) -> Result<(Vec<IssueSummary>, bool), GithubError> {
     let query = query.trim();
-    let client = client(store, connection)?;
+    let client = client(store, connection).await?;
     match connection.provider {
         Provider::Github => {
             if !valid_org(owner) || !valid_org(name) {
@@ -276,7 +276,7 @@ pub async fn load_issue(
     name: &str,
     number: u64,
 ) -> Result<IssueDetail, GithubError> {
-    let client = client(store, connection)?;
+    let client = client(store, connection).await?;
     match connection.provider {
         Provider::Github => load_github(&client, owner, name, number).await,
         Provider::Gitlab => load_gitlab(&client, owner, name, number).await,

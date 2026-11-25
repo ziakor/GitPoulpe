@@ -55,7 +55,7 @@ where
     {
         return Err(GithubError::NotFound);
     }
-    let client = client(store, connection)?;
+    let client = client(store, connection).await?;
     let target = destination.unwrap_or(&connection.login).to_owned();
     let source = format!("{source_owner}/{source_name}");
     if let Some(existing) = fetch(&client, connection, &target, source_name).await? {

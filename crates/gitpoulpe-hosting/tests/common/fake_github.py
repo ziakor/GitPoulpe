@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 LOG = sys.argv[1]
 POLLS = [0]
+RENEWED = []
 FORKS = {}
 SENT = []
 REVIEWS = []
@@ -522,10 +523,22 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"device_code": "dc-ok", "user_code": "ABCD-1234",
                                     "verification_uri": f"http://127.0.0.1:{self.server.server_address[1]}/login/device",
                                     "expires_in": 900, "interval": 5})
+        if self.path == "/login/oauth/access_token" and body.get("grant_type") == "refresh_token":
+            refresh = body.get("refresh_token")
+            if refresh in RENEWED or not str(refresh).startswith("ghr-") or refresh == "ghr-dead":
+                return self.reply(200, {"error": "bad_refresh_token"})
+            RENEWED.append(refresh)
+            return self.reply(200, {"access_token": "good", "refresh_token": f"ghr-next{len(RENEWED)}",
+                                    "expires_in": 28800, "refresh_token_expires_in": 15897600,
+                                    "token_type": "bearer", "scope": ""})
         if self.path == "/login/oauth/access_token":
             code = body.get("device_code")
             if body.get("grant_type") != "urn:ietf:params:oauth:grant-type:device_code":
                 return self.reply(200, {"error": "unsupported_grant_type"})
+            if code in ("dc-brief", "dc-dead"):
+                return self.reply(200, {"access_token": "good", "refresh_token": "ghr-brief" if code == "dc-brief" else "ghr-dead",
+                                        "expires_in": 60, "refresh_token_expires_in": 15897600,
+                                        "token_type": "bearer", "scope": ""})
             if code == "dc-deny":
                 return self.reply(200, {"error": "access_denied"})
             if code == "dc-exp":
@@ -538,7 +551,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(200, {"error": "authorization_pending"})
                 if POLLS[0] == 2:
                     return self.reply(200, {"error": "slow_down", "interval": 10})
-                return self.reply(200, {"access_token": "good", "token_type": "bearer", "scope": "repo,read:org"})
+                return self.reply(200, {"access_token": "good", "refresh_token": "ghr-1", "expires_in": 28800,
+                                        "refresh_token_expires_in": 15897600, "token_type": "bearer",
+                                        "scope": "repo,read:org"})
         return self.reply(404, {"message": "Not Found"})
 
     def do_GET(self):

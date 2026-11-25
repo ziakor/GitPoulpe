@@ -99,13 +99,13 @@ pub async fn prepare_merge(
     number: u64,
 ) -> Result<MergeReadiness, GithubError> {
     if connection.provider == gitpoulpe_core::Provider::Gitlab {
-        let client = client(store, connection)?;
+        let client = client(store, connection).await?;
         return crate::gitlab_merge::prepare_merge(&client, (owner, name), number).await;
     }
     if !valid_org(owner) || !valid_org(name) {
         return Err(GithubError::NotFound);
     }
-    let client = client(store, connection)?;
+    let client = client(store, connection).await?;
     let get = |path: String| {
         let client = client.clone();
         async move { client.get(&path).await }
@@ -267,7 +267,7 @@ pub async fn merge_pull(
     request: &MergeRequest,
 ) -> Result<HostedMerge, GithubError> {
     if connection.provider == gitpoulpe_core::Provider::Gitlab {
-        let client = client(store, connection)?;
+        let client = client(store, connection).await?;
         return crate::gitlab_merge::merge_pull(
             &client,
             connection,
@@ -287,7 +287,7 @@ pub async fn merge_pull(
             current: head.chars().take(7).collect(),
         });
     }
-    let client = client(store, connection)?;
+    let client = client(store, connection).await?;
     let mut body = json!({ "merge_method": request.method.api(), "sha": request.expected_head });
     if !request.message.trim().is_empty() {
         body["commit_message"] = json!(request.message.trim());
@@ -331,7 +331,7 @@ pub async fn is_merged(
     name: &str,
     number: u64,
 ) -> Result<bool, GithubError> {
-    let client = client(store, connection)?;
+    let client = client(store, connection).await?;
     if connection.provider == gitpoulpe_core::Provider::Gitlab {
         return crate::gitlab_merge::is_merged(&client, (owner, name), number).await;
     }

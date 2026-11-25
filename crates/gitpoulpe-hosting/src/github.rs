@@ -1,6 +1,7 @@
 use gitpoulpe_core::{Connection, Provider};
 
 use crate::http::{ApiClient, HttpError, Response, Token, validate_base};
+use crate::renewal::{self, Grant};
 use crate::secrets::{SecretError, SecretStore};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,6 +32,7 @@ pub struct Session {
     pub scopes: Vec<String>,
     pub fine_grained: bool,
     pub expires_at: Option<String>,
+    pub renews_itself: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,6 +48,7 @@ pub enum GithubError {
     Http(HttpError),
     Secret(SecretError),
     NotConnected,
+    SessionExpired,
     DeviceDenied,
     DeviceExpired,
     ForkPending,
@@ -81,6 +84,9 @@ impl std::fmt::Display for GithubError {
             Self::Http(e) => write!(f, "{e}"),
             Self::Secret(e) => write!(f, "{e}"),
             Self::NotConnected => f.write_str("aucun jeton n'est enregistré pour cette connexion"),
+            Self::SessionExpired => f.write_str(
+                "la session GitHub n'a pas pu être prolongée (inutilisée depuis six mois ou révoquée) : reconnectez le compte",
+            ),
             Self::ForkPending => f.write_str(
                 "le fork est en cours de création chez GitHub : réessayez dans un instant",
             ),
@@ -208,6 +214,7 @@ fn parse_session(response: &Response) -> Result<Session, GithubError> {
         expires_at: response
             .header("github-authentication-token-expiration")
             .map(str::to_owned),
+        renews_itself: false,
     })
 }
 
@@ -233,11 +240,19 @@ pub async fn connect_github(
     host: &GithubHost,
     token: &str,
 ) -> Result<(Connection, Session), GithubError> {
-    let token = Token::new(token);
-    if token.is_empty() {
+    connect_github_grant(store, host, Grant::lasting(Token::new(token)), "").await
+}
+
+pub async fn connect_github_grant(
+    store: &dyn SecretStore,
+    host: &GithubHost,
+    grant: Grant,
+    client_id: &str,
+) -> Result<(Connection, Session), GithubError> {
+    if grant.access.is_empty() {
         return Err(GithubError::EmptyToken);
     }
-    let session = current_user(&host.api, &token).await?;
+    let mut session = current_user(&host.api, &grant.access).await?;
     let connection = Connection {
         id: connection_id(host, &session.login),
         provider: Provider::Github,
@@ -246,7 +261,8 @@ pub async fn connect_github(
         login: session.login.clone(),
         scopes: session.scopes.clone(),
     };
-    store.set(&connection.secret_key(), token.expose())?;
+    renewal::save(store, &connection, &grant, client_id)?;
+    session.renews_itself = grant.refresh.is_some();
     Ok((connection, session))
 }
 
@@ -257,20 +273,25 @@ pub async fn check_connection(
     if connection.provider == Provider::Gitlab {
         return crate::gitlab::check_gitlab(store, connection).await;
     }
-    let token = store
-        .get(&connection.secret_key())?
-        .map(|t| Token::new(&t))
-        .ok_or(GithubError::NotConnected)?;
-    let session = current_user(&connection.api, &token).await?;
+    let token = renewal::access_token(store, connection, None).await?;
+    let mut session = match current_user(&connection.api, &token).await {
+        Err(GithubError::Unauthorized) if renewal::renews_itself(store, connection) => {
+            let token = renewal::access_token(store, connection, Some(&token)).await?;
+            current_user(&connection.api, &token).await?
+        }
+        other => other?,
+    };
     if session.login != connection.login {
         return Err(GithubError::Forbidden(
             "le jeton appartient à un autre compte que cette connexion".to_owned(),
         ));
     }
+    session.renews_itself = renewal::renews_itself(store, connection);
     Ok(session)
 }
 
 pub fn disconnect(store: &dyn SecretStore, connection: &Connection) -> Result<(), GithubError> {
     store.delete(&connection.secret_key())?;
+    renewal::forget(store, connection)?;
     Ok(())
 }

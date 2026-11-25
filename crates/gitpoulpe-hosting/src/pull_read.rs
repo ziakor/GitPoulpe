@@ -133,13 +133,13 @@ pub async fn list_pulls(
     filter: PullFilter,
 ) -> Result<(Vec<PullSummary>, bool), GithubError> {
     if connection.provider == gitpoulpe_core::Provider::Gitlab {
-        let client = client(store, connection)?;
+        let client = client(store, connection).await?;
         return crate::gitlab_pulls::list_mrs(&client, (owner, name), filter).await;
     }
     if !valid_org(owner) || !valid_org(name) {
         return Err(GithubError::NotFound);
     }
-    let client = client(store, connection)?;
+    let client = client(store, connection).await?;
     let raw = pages(
         &client,
         format!(
@@ -162,13 +162,13 @@ pub async fn load_pull(
     number: u64,
 ) -> Result<PullDetail, GithubError> {
     if connection.provider == gitpoulpe_core::Provider::Gitlab {
-        let client = client(store, connection)?;
+        let client = client(store, connection).await?;
         return crate::gitlab_pulls::load_mr(&client, (owner, name), number).await;
     }
     if !valid_org(owner) || !valid_org(name) {
         return Err(GithubError::NotFound);
     }
-    let client = client(store, connection)?;
+    let client = client(store, connection).await?;
     let base = format!("repos/{owner}/{name}/pulls/{number}");
     let response = client.clone().with_accept(RICH).get(&base).await?;
     if !response.ok() {

@@ -172,7 +172,7 @@ pub async fn prepare_pull(
     base: Option<&str>,
 ) -> Result<PullTarget, GithubError> {
     if connection.provider == gitpoulpe_core::Provider::Gitlab {
-        let client = client(store, connection)?;
+        let client = client(store, connection).await?;
         return crate::gitlab_pulls::prepare_mr(
             &client,
             connection,
@@ -190,7 +190,7 @@ pub async fn prepare_pull(
     {
         return Err(GithubError::NotFound);
     }
-    let client = client(store, connection)?;
+    let client = client(store, connection).await?;
     let head_repo = get_repo(&client, connection, head_owner, head_name).await?;
     let target_repo = match head_repo.parent.as_deref().filter(|_| to_parent) {
         Some(parent) => {
@@ -276,7 +276,7 @@ pub async fn create_pull_request(
     if !prepared.published {
         return Err(GithubError::BranchNotPublished(prepared.branch.clone()));
     }
-    let client = client(store, connection)?;
+    let client = client(store, connection).await?;
     if connection.provider == gitpoulpe_core::Provider::Gitlab {
         return crate::gitlab_pulls::create_mr(&client, connection, prepared, draft).await;
     }
