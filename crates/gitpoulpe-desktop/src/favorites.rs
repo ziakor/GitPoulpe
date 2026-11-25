@@ -33,7 +33,8 @@ pub struct FavoritesState {
 
 impl State {
     fn save_favorites(&mut self) {
-        let _ = self.prefs.set(FAVORITES_KEY, &self.favorites.book);
+        let book = self.favorites.book.clone();
+        self.save_pref(FAVORITES_KEY, &book);
     }
 
     fn favorite_fail(&mut self, message: impl Into<String>) {

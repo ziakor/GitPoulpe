@@ -1239,6 +1239,7 @@ dependencies = [
  "gitpoulpe-terminal",
  "rune",
  "rune-kit",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",

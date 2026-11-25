@@ -68,6 +68,7 @@ mod review_demo;
 mod review_files_view;
 mod review_side_view;
 mod sequencing;
+mod shared_prefs;
 mod shell;
 mod shortcuts;
 mod shortcuts_view;

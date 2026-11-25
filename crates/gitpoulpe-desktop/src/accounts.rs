@@ -99,6 +99,10 @@ impl Hosting {
 
 impl State {
     pub fn open_accounts(&mut self) {
+        self.reload_prefs();
+        if let Some(book) = self.prefs.get::<ConnectionBook>(CONNECTIONS_KEY) {
+            self.accounts.book = book;
+        }
         self.profiles_open = false;
         self.accounts.open = true;
         self.accounts.error = None;
@@ -347,9 +351,11 @@ impl State {
         };
         match disconnect(self.hosting.secrets.as_ref(), &connection) {
             Ok(()) => {
-                self.accounts.book.remove(id);
                 self.accounts.statuses.remove(id);
-                let _ = self.prefs.set(CONNECTIONS_KEY, &self.accounts.book);
+                let local = std::mem::take(&mut self.accounts.book);
+                self.accounts.book = self.update_pref(CONNECTIONS_KEY, local, |book| {
+                    book.remove(id);
+                });
                 self.accounts.done = Some(format!(
                     "{} déconnecté : le jeton est retiré, vos profils Git sont inchangés.",
                     connection.login
@@ -384,8 +390,10 @@ impl State {
                     .statuses
                     .insert(connection.id.clone(), Status::Ok(session));
                 self.accounts.manual = false;
-                self.accounts.book.upsert(connection);
-                let _ = self.prefs.set(CONNECTIONS_KEY, &self.accounts.book);
+                let local = std::mem::take(&mut self.accounts.book);
+                self.accounts.book = self.update_pref(CONNECTIONS_KEY, local, |book| {
+                    book.upsert(connection);
+                });
                 self.accounts.token = TextEdit::new("");
             }
             Err(message) => self.accounts.error = Some(message),

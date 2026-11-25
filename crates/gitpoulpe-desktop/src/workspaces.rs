@@ -60,7 +60,8 @@ fn text_path(path: &Path) -> Result<String, String> {
 
 impl State {
     fn save_workspaces(&mut self) {
-        let _ = self.prefs.set(WORKSPACES_KEY, &self.workspaces.book);
+        let book = self.workspaces.book.clone();
+        self.save_pref(WORKSPACES_KEY, &book);
     }
 
     fn workspace_fail(&mut self, message: impl Into<String>) {

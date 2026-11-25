@@ -247,7 +247,8 @@ impl State {
     }
 
     fn save_shortcuts(&mut self) {
-        let _ = self.prefs.set(SHORTCUTS_KEY, &self.shortcuts.custom);
+        let custom = self.shortcuts.custom.clone();
+        self.save_pref(SHORTCUTS_KEY, &custom);
     }
 
     pub fn open_shortcuts(&mut self) {

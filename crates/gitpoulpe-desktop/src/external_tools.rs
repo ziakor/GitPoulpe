@@ -95,7 +95,7 @@ impl State {
             }
             book.set(kind, config);
         }
-        let _ = self.prefs.set(TOOLS_KEY, &book);
+        self.save_pref(TOOLS_KEY, &book);
         self.tools.book = book;
         self.tools.error = None;
         self.tools.notice = Some("Outils enregistrés.".to_owned());

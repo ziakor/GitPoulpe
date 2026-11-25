@@ -53,7 +53,8 @@ pub fn kind_label(kind: NoticeKind) -> &'static str {
 
 impl State {
     fn save_notices(&mut self) {
-        let _ = self.prefs.set(NOTICES_KEY, &self.notices.book);
+        let book = self.notices.book.clone();
+        self.save_pref(NOTICES_KEY, &book);
     }
 
     pub fn notices_unread(&self) -> usize {

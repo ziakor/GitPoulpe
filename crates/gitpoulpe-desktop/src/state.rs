@@ -496,7 +496,8 @@ impl State {
     }
 
     pub fn save_list_width(&mut self) {
-        let _ = self.prefs.set(LIST_WIDTH_KEY, &self.list_width);
+        let width = self.list_width;
+        self.save_pref(LIST_WIDTH_KEY, &width);
     }
 
     pub fn jump_to(&mut self, position: usize) {
@@ -1432,7 +1433,8 @@ impl State {
             DiffMode::Unified => DiffMode::Split,
             DiffMode::Split => DiffMode::Unified,
         };
-        let _ = self.prefs.set(MODE_KEY, self.mode.pref());
+        let mode = self.mode.pref();
+        self.save_pref(MODE_KEY, mode);
         self.stick_end = false;
         self.relayout();
         let Some((position, line)) = anchor else {
@@ -2154,7 +2156,8 @@ impl State {
     }
 
     fn persist_profiles(&mut self) {
-        let _ = self.prefs.set(PROFILES_KEY, &self.book);
+        let book = self.book.clone();
+        self.save_pref(PROFILES_KEY, &book);
     }
 
     pub fn open_profiles(&mut self) {
@@ -2395,21 +2398,18 @@ impl State {
         let (before_copy, after_copy, detail_copy) =
             (before.clone(), after.clone(), detail.clone());
         let prefs_key = format!("journal:{key}");
-        let mut journal: Vec<JournalEntry> = self.prefs.get(&prefs_key).unwrap_or_default();
         let at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
-        push_journal(
-            &mut journal,
-            JournalEntry {
-                at,
-                action: action.to_owned(),
-                before,
-                after,
-                detail,
-            },
-        );
-        let _ = self.prefs.set(&prefs_key, &journal);
+        let entry = JournalEntry {
+            at,
+            action: action.to_owned(),
+            before,
+            after,
+            detail,
+        };
+        let local: Vec<JournalEntry> = self.prefs.get(&prefs_key).unwrap_or_default();
+        self.update_pref(&prefs_key, local, |journal| push_journal(journal, entry));
         self.record_undo(action, &before_copy, &after_copy, &detail_copy);
     }
 

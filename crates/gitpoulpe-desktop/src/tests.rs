@@ -46,6 +46,7 @@ mod requesting;
 mod requesting_gitlab;
 mod resetting;
 mod sequencing;
+mod sharing_prefs;
 mod shortcut_settings;
 mod staging;
 mod stashing;

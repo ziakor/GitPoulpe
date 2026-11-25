@@ -44,7 +44,7 @@ impl State {
 
     fn save_undo_records(&mut self, records: &[UndoRecord]) {
         if let Some(key) = self.undo_key() {
-            let _ = self.prefs.set(&key, &records.to_vec());
+            self.save_pref(&key, &records.to_vec());
         }
     }
 
