@@ -548,6 +548,46 @@ fn replies_join_their_thread_and_a_range_stays_on_one_side() {
     assert_eq!((pick.start, pick.line), (None, 2));
 }
 
+#[test]
+fn a_viewed_file_folds_until_its_patch_changes_and_its_header_unfolds_it() {
+    let fake = Fake::start();
+    let (_dir, mut rt) = list_screen(&fake);
+    click(&mut rt, "prlk0");
+    loaded(&mut rt, 1);
+    click(&mut rt, "prl-tab-files");
+    step(&mut rt);
+    assert!(shows(&rt, "0 sur 3 vu"));
+    assert!(rect_of(&rt, "prl-f0l1").is_some());
+    click(&mut rt, "prl-viewed0");
+    step(&mut rt);
+    assert!(super::ticked(&rt, "prl-viewed0"));
+    assert!(rect_of(&rt, "prl-f0l1").is_none(), "a viewed file folds");
+    assert!(rect_of(&rt, "prl-f1l1").is_some());
+    assert!(shows(&rt, "1 sur 3 vu"));
+    click(&mut rt, "prl-fold0");
+    step(&mut rt);
+    assert!(rect_of(&rt, "prl-f0l1").is_some(), "its header unfolds it");
+    assert!(super::ticked(&rt, "prl-viewed0"));
+    click(&mut rt, "prl-fold0");
+    step(&mut rt);
+    assert!(rect_of(&rt, "prl-f0l1").is_none());
+    click(&mut rt, "prl-viewed0");
+    step(&mut rt);
+    assert!(
+        rect_of(&rt, "prl-f0l1").is_some(),
+        "unticking unfolds it again"
+    );
+    click(&mut rt, "prl-viewed0");
+    step(&mut rt);
+    longer_first_file(&mut rt);
+    assert!(
+        !super::ticked(&rt, "prl-viewed0"),
+        "a file changed since it was viewed is to be read again"
+    );
+    assert!(rect_of(&rt, "prl-f0l1").is_some());
+    assert!(shows(&rt, "0 sur 3 vu"));
+}
+
 fn longer_first_file(rt: &mut Runtime<State>) {
     let list = &mut rt.state.pulls.list;
     list.detail.as_mut().unwrap().files[0].patch =

@@ -359,4 +359,5 @@ pub fn review_files_scene(state: &mut State) {
         Side::Right,
     );
     state.pulls.list.compose = rune::TextEdit::new("Un état vide plus explicite ?");
+    state.pull_toggle_viewed("services/agent/migrations/0042_analyzer_settings.sql");
 }

@@ -8,7 +8,7 @@ use crate::attachments_view::{Body, binary_file, rich_body};
 use crate::pull_list::{CommentKind, NumberedLine, current_numbered, when};
 use crate::state::State;
 use crate::theme;
-use crate::widgets::{action, area, quiet};
+use crate::widgets::{action, area, chevron_icon, quiet, toggle};
 
 const LINE: f32 = 22.0;
 const NUMBER: f32 = 44.0;
@@ -358,6 +358,18 @@ fn plan(s: &State, detail: &PullDetail, numbered: &[Vec<NumberedLine>]) -> Vec<F
     let mut placed = false;
     for (i, file) in detail.files.iter().enumerate() {
         rows.push(FileRow::Header(i));
+        if s.pull_file_folded(&file.change.path) {
+            let here = list
+                .pick
+                .as_ref()
+                .is_some_and(|k| k.path == file.change.path);
+            if here && list.reply_to.is_none() && !placed {
+                placed = true;
+                rows.push(FileRow::Composer);
+            }
+            rows.push(FileRow::Gap(i));
+            continue;
+        }
         let roots: Vec<&ReviewComment> = list
             .comments
             .review
@@ -414,23 +426,49 @@ fn plan(s: &State, detail: &PullDetail, numbered: &[Vec<NumberedLine>]) -> Vec<F
 fn file_header(s: &State, index: usize, file: &PullFile) -> El {
     let p = s.palette;
     let change = &file.change;
+    let folded = s.pull_file_folded(&change.path);
+    let viewed = s.pull_file_viewed(&change.path);
+    let (fold_path, viewed_path) = (change.path.clone(), change.path.clone());
     row()
         .w_full()
-        .px(12.0)
-        .py(8.0)
+        .pl(4.0)
+        .pr(6.0)
+        .py(4.0)
         .gap(10.0)
         .center_y()
         .fill(p.raised)
         .radius(3.0)
         .border(1.0, p.line)
         .child(
-            text(change.path.clone())
-                .key(format!("prl-file{index}"))
-                .font(theme::PATH)
-                .color(p.text)
+            row()
+                .key(format!("prl-fold{index}"))
+                .role("button")
+                .label(format!(
+                    "{} {}",
+                    if folded { "Déplier" } else { "Replier" },
+                    change.path
+                ))
+                .focusable(true)
+                .focus_ring(2.0, 0.0, p.accent)
                 .grow(1.0)
                 .min_w(0.0)
-                .truncate(),
+                .px(6.0)
+                .py(4.0)
+                .gap(8.0)
+                .center_y()
+                .radius(3.0)
+                .hover(p.hover)
+                .on_press(move |s: &mut State| s.pull_toggle_fold(&fold_path))
+                .child(chevron_icon(p.muted, !folded))
+                .child(
+                    text(change.path.clone())
+                        .key(format!("prl-file{index}"))
+                        .font(theme::PATH)
+                        .color(if viewed { p.muted } else { p.text })
+                        .grow(1.0)
+                        .min_w(0.0)
+                        .truncate(),
+                ),
         )
         .child(
             text(status_word(&change.status).to_owned())
@@ -447,6 +485,11 @@ fn file_header(s: &State, index: usize, file: &PullFile) -> El {
                 .font(theme::TINY)
                 .color(p.red),
         )
+        .child(
+            toggle(s, &format!("prl-viewed{index}"), "Vu", viewed)
+                .label(format!("Marquer {} comme vu", change.path))
+                .on_press(move |s: &mut State| s.pull_toggle_viewed(&viewed_path)),
+        )
 }
 
 fn summary(s: &State, detail: &PullDetail) -> El {
@@ -457,15 +500,19 @@ fn summary(s: &State, detail: &PullDetail) -> El {
     });
     let mut block = col().w_full().gap(6.0).pt(8.0).pb(12.0).child(
         text(format!(
-            "{} fichier{}{} · +{added} −{removed}",
+            "{} fichier{}{} · +{added} −{removed} · {} sur {} vu{}",
             detail.files.len(),
             if detail.files.len() > 1 { "s" } else { "" },
             if detail.files_truncated {
                 " (liste tronquée)"
             } else {
                 ""
-            }
+            },
+            s.pull_viewed_count(),
+            detail.files.len(),
+            if s.pull_viewed_count() > 1 { "s" } else { "" },
         ))
+        .key("prl-files-summary")
         .font(theme::SMALL)
         .color(p.muted),
     );

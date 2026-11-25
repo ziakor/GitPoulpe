@@ -232,6 +232,17 @@ pub fn panel_icon(color: Color, collapse: bool) -> El {
     canvas(shape).w(16.0).h(16.0)
 }
 
+pub fn chevron_icon(color: Color, open: bool) -> El {
+    let points = if open {
+        vec![[3.0, 4.5], [6.0, 7.5], [9.0, 4.5]]
+    } else {
+        vec![[4.5, 3.0], [7.5, 6.0], [4.5, 9.0]]
+    };
+    canvas(Shape::new().stroke_with(points, false, 1.5, LineCap::Round, color))
+        .w(12.0)
+        .h(12.0)
+}
+
 pub fn icon_button(s: &State, key: &str, label: &str, icon: El) -> El {
     let p = s.palette;
     el().key(key.to_owned())

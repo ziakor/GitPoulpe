@@ -87,6 +87,8 @@ pub struct PullListState {
     pub checks_request: u64,
     pub checks_note: Option<String>,
     pub drafts: HashMap<String, ReviewDraft>,
+    pub viewed: HashMap<String, HashMap<String, u64>>,
+    pub fold_override: HashMap<String, bool>,
     pub review_body: TextEdit,
     pub decision: ReviewDecision,
     pub review_request: u64,
@@ -197,6 +199,8 @@ impl Default for PullListState {
             checks_request: 0,
             checks_note: None,
             drafts: HashMap::new(),
+            viewed: HashMap::new(),
+            fold_override: HashMap::new(),
             review_body: TextEdit::new(""),
             decision: ReviewDecision::Comment,
             review_request: 0,
@@ -287,8 +291,10 @@ impl State {
         let checks_request = self.pulls.list.checks_request + 1;
         let merge_request = self.pulls.list.merge_request + 1;
         let drafts = std::mem::take(&mut self.pulls.list.drafts);
+        let viewed = std::mem::take(&mut self.pulls.list.viewed);
         self.pulls.list = PullListState {
             drafts,
+            viewed,
             review_request,
             checks_request,
             merge_request,
@@ -389,6 +395,7 @@ impl State {
         self.pulls.list.selected = Some(number);
         if previous != Some(number) {
             let list = &mut self.pulls.list;
+            list.fold_override.clear();
             list.merge = None;
             list.merge_error = None;
             list.merge_confirm = None;
@@ -1264,6 +1271,63 @@ impl State {
                 list.decision = ReviewDecision::Comment;
             }
         }
+    }
+
+    pub fn pull_file_viewed(&self, path: &str) -> bool {
+        let (Some(key), Some(detail)) = (self.review_key(), self.pulls.list.detail.as_ref()) else {
+            return false;
+        };
+        self.pulls
+            .list
+            .viewed
+            .get(&key)
+            .and_then(|files| files.get(path))
+            .is_some_and(|hash| *hash == patch_hash(detail, path))
+    }
+
+    pub fn pull_file_folded(&self, path: &str) -> bool {
+        self.pulls
+            .list
+            .fold_override
+            .get(path)
+            .copied()
+            .unwrap_or_else(|| self.pull_file_viewed(path))
+    }
+
+    pub fn pull_viewed_count(&self) -> usize {
+        self.pulls.list.detail.as_ref().map_or(0, |detail| {
+            detail
+                .files
+                .iter()
+                .filter(|f| self.pull_file_viewed(&f.change.path))
+                .count()
+        })
+    }
+
+    pub fn pull_toggle_viewed(&mut self, path: &str) {
+        let Some(key) = self.review_key() else {
+            return;
+        };
+        let Some(hash) = self.pulls.list.detail.as_ref().map(|d| patch_hash(d, path)) else {
+            return;
+        };
+        let viewed = self.pull_file_viewed(path);
+        let list = &mut self.pulls.list;
+        let files = list.viewed.entry(key).or_default();
+        if viewed {
+            files.remove(path);
+        } else {
+            files.insert(path.to_owned(), hash);
+        }
+        list.fold_override.remove(path);
+        list.version += 1;
+    }
+
+    pub fn pull_toggle_fold(&mut self, path: &str) {
+        let folded = self.pull_file_folded(path);
+        let list = &mut self.pulls.list;
+        list.fold_override.insert(path.to_owned(), !folded);
+        list.version += 1;
     }
 
     pub fn current_draft(&self) -> Option<&ReviewDraft> {

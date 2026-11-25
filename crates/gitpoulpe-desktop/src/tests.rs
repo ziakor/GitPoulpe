@@ -454,7 +454,7 @@ fn menu(rt: &mut Runtime<State>, key: &str) {
 fn rect_of(rt: &Runtime<State>, key: &str) -> Option<[f32; 4]> {
     rt.elements()
         .into_iter()
-        .find(|e| e.key.as_deref() == Some(key))
+        .find(|e| e.key.as_deref() == Some(key) && !e.exiting)
         .map(|e| e.rect)
 }
 
