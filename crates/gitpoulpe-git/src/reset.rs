@@ -31,8 +31,9 @@ impl std::fmt::Display for ResetError {
             ),
             Self::NeedsConfirmation(files) => write!(
                 f,
-                "ce reset effacerait des modifications non enregistrées ({} fichier(s)) : une confirmation explicite est requise",
-                files.len()
+                "ce reset effacerait des modifications non enregistrées ({} {}) : une confirmation explicite est requise",
+                files.len(),
+                if files.len() > 1 { "fichiers" } else { "fichier" }
             ),
             Self::Refused(m) => write!(f, "Git refuse : {m}"),
             Self::Exec(e) => write!(f, "{e}"),

@@ -154,7 +154,7 @@ fn an_empty_message_or_a_stale_index_commits_nothing_and_keeps_what_was_typed() 
     settle_commit(&mut rt);
     assert_eq!(
         rt.state.notice.as_deref(),
-        Some("Écris un message de commit.")
+        Some("Écrivez un message de commit.")
     );
 
     rt.state.commit_message.text = "Will not be created".to_owned();

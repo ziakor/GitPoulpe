@@ -197,7 +197,7 @@ fn the_form_shows_branches_and_the_diff_then_creates_a_draft_once() {
     let dir = repo(&format!("{}/octo/proj.git", fake.base()), "feature/x");
     let mut rt = screen(dir.path(), &fake, &["Octo"]);
     assert!(shows(&rt, "octo/proj:feature/x → octo/proj:main"));
-    assert!(shows(&rt, "2 commit(s) d'avance, 1 de retard"));
+    assert!(shows(&rt, "2 commits d'avance, 1 de retard"));
     assert!(shows(&rt, "modified src/a.rs (+3 −1)"));
     assert!(shows(&rt, "Compte : Octo@"));
     assert_eq!(rt.state.pulls.title.text, "X");
@@ -763,7 +763,7 @@ fn an_update_during_the_review_flags_what_to_reread_without_losing_the_work_and_
     step(&mut rt);
     click(&mut rt, "prv-submit");
     step(&mut rt);
-    assert!(shows(&rt, "1 commentaire(s) du brouillon sont à relire"));
+    assert!(shows(&rt, "1 commentaire du brouillon est à relire"));
     click(&mut rt, "prv-read0");
     step(&mut rt);
     click(&mut rt, "prv-submit");
@@ -1025,7 +1025,7 @@ fn only_allowed_methods_are_offered_with_their_effect_and_the_blockers_are_liste
     ));
     assert!(shows(&rt, "« lint » n'a pas réussi"));
     assert!(shows(&rt, "« missing » est absente"));
-    assert!(shows(&rt, "1 approbation(s) sur 2 requise(s)"));
+    assert!(shows(&rt, "1 approbation sur 2 requises"));
     rt.state.select_pull(4);
     merge_ready(&mut rt, 4);
     assert!(rect_of(&rt, "mrg-merge").is_none());

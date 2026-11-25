@@ -199,7 +199,7 @@ fn an_incomplete_profile_is_refused_with_a_reason_and_nothing_is_saved() {
     state.save_profile();
     assert_eq!(
         state.form.error.as_deref(),
-        Some("Indique une adresse e-mail valide (user.email).")
+        Some("Indiquez une adresse e-mail valide (user.email).")
     );
     assert!(state.book.profiles.is_empty());
     assert!(

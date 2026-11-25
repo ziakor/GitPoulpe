@@ -289,8 +289,8 @@ impl State {
         match result {
             Ok(PatchOutcome::Applied(files)) => {
                 patches.notice = Some(format!(
-                    "Patch appliqué ({mode}) : {} fichier(s) modifié(s).",
-                    files.len()
+                    "Patch appliqué ({mode}) : {}.",
+                    crate::widgets::counted(files.len(), "fichier modifié", "fichiers modifiés")
                 ));
                 patches.checked = None;
             }
@@ -373,7 +373,8 @@ impl State {
         match result {
             Ok(size) => {
                 patches.notice = Some(format!(
-                    "Patch exporté : {size} octet(s) écrits dans {}.",
+                    "Patch exporté : {} dans {}.",
+                    crate::widgets::counted(size, "octet écrit", "octets écrits"),
                     patches.destination.text.trim()
                 ));
                 patches.overwrite = false;

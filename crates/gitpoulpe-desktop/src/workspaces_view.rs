@@ -2,7 +2,7 @@ use rune::{El, ScrollSpec, col, el, row, text};
 
 use crate::state::State;
 use crate::theme;
-use crate::widgets::{action, field, screen_head};
+use crate::widgets::{action, counted, field, screen_head};
 use crate::workspaces::{RepoHealth, health};
 
 fn status(health: RepoHealth) -> (&'static str, bool) {
@@ -51,10 +51,10 @@ pub fn workspaces_screen(s: &State) -> El {
                 .child(
                     row().w_full().h(40.0).center_y().child(
                         text(format!(
-                            "{}{} · {} dépôt(s)",
+                            "{}{} · {}",
                             workspace.name,
                             if active { " (actif)" } else { "" },
-                            workspace.repos.len()
+                            counted(workspace.repos.len(), "dépôt", "dépôts")
                         ))
                         .font(theme::BODY)
                         .color(p.text)

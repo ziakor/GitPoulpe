@@ -23,6 +23,7 @@ pub struct GraphRow {
     pub closing: Vec<usize>,
     pub opening: Vec<usize>,
     pub linking: Vec<usize>,
+    pub entered: bool,
     pub continues: bool,
     pub width: usize,
 }
@@ -74,6 +75,7 @@ impl GraphLayout {
             column,
             through,
             closing,
+            entered: !waiting.is_empty(),
             continues: !commit.parents.is_empty(),
             ..GraphRow::default()
         };
@@ -197,6 +199,11 @@ mod tests {
         let a = layout.push(&commit("a", &["base"]));
         assert_eq!((a.column, a.through.clone()), (0, vec![1]));
         let base = layout.push(&commit("base", &[]));
+        assert_eq!(
+            [m.entered, b.entered, a.entered, base.entered],
+            [false, true, true, true],
+            "only a branch tip starts without a line from above"
+        );
         assert_eq!(base.column, 0);
         assert_eq!(
             base.closing,

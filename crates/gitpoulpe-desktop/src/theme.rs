@@ -20,6 +20,7 @@ pub struct Palette {
     pub text: Color,
     pub muted: Color,
     pub line: Color,
+    pub edge: Color,
     pub hover: Color,
     pub accent: Color,
     pub on_accent: Color,
@@ -28,6 +29,7 @@ pub struct Palette {
     pub red: Color,
     pub added: Color,
     pub removed: Color,
+    pub lanes: [Color; 6],
 }
 
 fn color(value: &str) -> Color {
@@ -44,6 +46,7 @@ impl Palette {
                 text: color("#e2edeb"),
                 muted: color("#a2b8ba"),
                 line: color("#2b4145"),
+                edge: color("#76959a"),
                 hover: color("#20383d"),
                 accent: color("#a0d7de"),
                 on_accent: color("#102e37"),
@@ -52,6 +55,14 @@ impl Palette {
                 red: color("#ecad9d"),
                 added: color("#22392d"),
                 removed: color("#3f302f"),
+                lanes: [
+                    color("#a0d7de"),
+                    color("#e3bd74"),
+                    color("#eba3b8"),
+                    color("#a5ca96"),
+                    color("#bcaaf0"),
+                    color("#f0a582"),
+                ],
             }
         } else {
             Self {
@@ -61,6 +72,7 @@ impl Palette {
                 text: color("#162f36"),
                 muted: color("#52696e"),
                 line: color("#cddbd7"),
+                edge: color("#687e83"),
                 hover: color("#e3ece8"),
                 accent: color("#075d70"),
                 on_accent: color("#ffffff"),
@@ -69,8 +81,20 @@ impl Palette {
                 red: color("#9e4241"),
                 added: color("#e5eee5"),
                 removed: color("#f3e5e1"),
+                lanes: [
+                    color("#075d70"),
+                    color("#835400"),
+                    color("#9a2f57"),
+                    color("#326a48"),
+                    color("#5a46a6"),
+                    color("#9c4520"),
+                ],
             }
         }
+    }
+
+    pub fn lane(&self, index: usize) -> Color {
+        self.lanes[index % self.lanes.len()]
     }
 }
 

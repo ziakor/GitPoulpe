@@ -110,7 +110,7 @@ fn open_revision(rt: &mut Runtime<State>, subject: &str) -> String {
 fn the_history_lists_every_step_and_marks_a_change_of_path() {
     let dir = lineage();
     let rt = history_screen(dir.path());
-    assert!(shows(&rt, "Historique de dir_c.txt · 6 révision(s)"));
+    assert!(shows(&rt, "Historique de dir_c.txt · 6 révisions"));
     assert!(shows(&rt, "recreate c") && shows(&rt, "delete c") && shows(&rt, "rename to c"));
     assert!(shows(&rt, "renommé depuis b.txt"));
     assert!(shows(&rt, "chemin : b.txt"));
@@ -182,7 +182,7 @@ fn a_shallow_clone_says_its_history_is_incomplete() {
     std::fs::write(clone.path().join("f.txt"), "local\n").unwrap();
     let rt = history_screen(clone.path());
     assert!(shows(&rt, "Historique incomplet"));
-    assert!(shows(&rt, "2 révision(s)"));
+    assert!(shows(&rt, "2 révisions"));
 }
 
 #[test]
@@ -224,7 +224,7 @@ fn the_local_file_blame_tells_unsaved_lines_from_historical_ones() {
     blame_ready(&mut rt);
     assert!(shows(
         &rt,
-        "Blame de dir_c.txt · fichier local (copie de travail) · 2 ligne(s) dont 1 non enregistrée(s)"
+        "Blame de dir_c.txt · fichier local (copie de travail) · 2 lignes dont 1 non enregistrée"
     ));
     let blame = rt.state.file_history.blame.as_ref().unwrap();
     assert!(blame.lines[0].oid.is_some() && blame.lines[1].oid.is_none());

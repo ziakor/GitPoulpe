@@ -222,7 +222,7 @@ impl Git {
         let remote = remotes
             .into_iter()
             .find(|r| r.name == name && !r.name.starts_with('-'))
-            .ok_or_else(|| NetError::Refused("ce remote n'existe pas".to_owned()))?;
+            .ok_or_else(|| NetError::Refused("ce dépôt distant n'existe pas".to_owned()))?;
         let dir = info.worktree.as_deref().unwrap_or(&info.git_dir);
         let url = remote.fetch_urls.first().map(String::as_str);
         let run = self

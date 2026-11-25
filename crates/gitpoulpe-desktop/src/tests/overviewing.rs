@@ -132,8 +132,8 @@ fn every_state_names_its_repository_and_one_failure_never_spreads() {
         step(&mut rt);
     }
     assert!(shows(&rt, &text(a.path())) && shows(&rt, &text(b.path())));
-    assert!(shows(&rt, "1 indexé(s) · 1 modifié(s) · 1 non suivi(s)"));
-    assert!(shows(&rt, "0 indexé(s) · 0 modifié(s) · 0 non suivi(s)"));
+    assert!(shows(&rt, "1 indexé · 1 modifié · 1 non suivi"));
+    assert!(shows(&rt, "0 indexé · 0 modifié · 0 non suivi"));
     assert_eq!(super::head_context(&rt, "ov-head"), "4 dépôts suivis sur 4");
     assert!(shows(&rt, "dépôt ouvert") && shows(&rt, "favori"));
 }

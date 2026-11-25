@@ -127,8 +127,8 @@ fn preview(s: &State, key: &str, title: String, version: Option<&Version>) -> El
                     .join("\n");
                 if lines.len() > PREVIEW_LINES {
                     shown.push_str(&format!(
-                        "\n… {} ligne(s) de plus",
-                        lines.len() - PREVIEW_LINES
+                        "\n… {} de plus",
+                        counted(lines.len() - PREVIEW_LINES, "ligne", "lignes")
                     ));
                 }
                 shown
@@ -365,7 +365,19 @@ fn footer(s: &State) -> El {
                 .border(1.0, p.red)
                 .child(
                     text(format!(
-                        "Abandonner la {caption} rétablit l'état d'avant. Vos {saved} résolution(s) déjà faite(s) seront défaites, mais les fichiers sont copiés dans .git/gitpoulpe-backup avant. Les fichiers non suivis sont conservés."
+                        "Abandonner la {caption} rétablit l'état d'avant{}. Les fichiers sont d'abord copiés dans .git/gitpoulpe-backup ; les fichiers non suivis sont conservés.",
+                        if saved == 0 {
+                            String::new()
+                        } else {
+                            format!(
+                                " : {}",
+                                counted(
+                                    saved,
+                                    "résolution déjà faite sera défaite",
+                                    "résolutions déjà faites seront défaites"
+                                )
+                            )
+                        }
                     ))
                     .font(theme::SMALL)
                     .color(p.red)
@@ -407,8 +419,8 @@ fn footer(s: &State) -> El {
         "Tous les fichiers sont résolus.".to_owned()
     } else {
         format!(
-            "Il reste {} fichier(s) à résoudre ou à valider.",
-            c.remaining()
+            "Il reste {} à résoudre ou à valider.",
+            counted(c.remaining(), "fichier", "fichiers")
         )
     };
     let skippable = c.operation.as_ref().is_some_and(|o| {

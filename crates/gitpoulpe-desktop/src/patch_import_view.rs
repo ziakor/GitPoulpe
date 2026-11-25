@@ -4,7 +4,7 @@ use rune::{El, ScrollSpec, col, row, text};
 use crate::patch_import::{PatchTab, SourceKind, mode_caption};
 use crate::state::State;
 use crate::theme;
-use crate::widgets::{action, field};
+use crate::widgets::{action, counted, field};
 
 fn mode_button(s: &State, key: &str, mode: ApplyMode) -> El {
     action(s, key, mode_caption(mode), s.patches.mode == mode)
@@ -73,15 +73,11 @@ fn export_body(s: &State, mut body: El) -> El {
         .on_edit(|s: &mut State| &mut s.patches.destination),
     )
     .child(
-        action(
+        crate::widgets::toggle(
             s,
             "pt-overwrite",
-            if screen.overwrite {
-                "[x] Remplacer le fichier s'il existe"
-            } else {
-                "[ ] Remplacer le fichier s'il existe"
-            },
-            false,
+            "Remplacer le fichier s'il existe",
+            screen.overwrite,
         )
         .on_press(|s: &mut State| s.patch_toggle_overwrite()),
     )
@@ -198,9 +194,13 @@ pub fn patch_import_screen(s: &State) -> El {
         None => {}
         Some(preview) => {
             body = body.child(
-                text(format!("{} fichier(s) ciblé(s)", preview.files.len()))
-                    .font(theme::BODY_STRONG)
-                    .color(p.text),
+                text(counted(
+                    preview.files.len(),
+                    "fichier ciblé",
+                    "fichiers ciblés",
+                ))
+                .font(theme::BODY_STRONG)
+                .color(p.text),
             );
             if preview.has_message {
                 body = body.child(
@@ -246,15 +246,11 @@ pub fn patch_import_screen(s: &State) -> El {
                         .child(mode_button(s, "pt-mode-index", ApplyMode::IndexOnly)),
                 )
                 .child(
-                    action(
+                    crate::widgets::toggle(
                         s,
                         "pt-3way",
-                        if screen.three_way {
-                            "[x] Repli à trois voies : les conflits sont laissés dans les fichiers"
-                        } else {
-                            "[ ] Repli à trois voies : les conflits sont laissés dans les fichiers"
-                        },
-                        false,
+                        "Repli à trois voies : les conflits sont laissés dans les fichiers",
+                        screen.three_way,
                     )
                     .on_press(|s: &mut State| s.patch_toggle_three_way()),
                 )

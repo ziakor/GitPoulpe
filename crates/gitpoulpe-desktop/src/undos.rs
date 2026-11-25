@@ -24,7 +24,9 @@ fn irreversible(action: &str) -> Option<&'static str> {
         | "remote-set-url"
         | "remote-set-push-url"
         | "remote-rename"
-        | "remote-remove" => Some("la configuration des remotes se modifie depuis l'écran Remotes"),
+        | "remote-remove" => Some(
+            "la configuration des dépôts distants se modifie depuis l'écran « Dépôts distants »",
+        ),
         _ => None,
     }
 }

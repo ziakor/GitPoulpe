@@ -222,6 +222,6 @@ fn without_any_remote_the_panel_says_how_to_add_one() {
             .as_ref()
             .is_some_and(|p| p.error.is_some())
     });
-    assert!(shows(&rt, "Aucun remote"));
+    assert!(shows(&rt, "Aucun dépôt distant n'est configuré"));
     assert!(rect_of(&rt, "publish-confirm").is_none());
 }

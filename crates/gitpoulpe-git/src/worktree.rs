@@ -62,9 +62,19 @@ impl std::fmt::Display for WorktreeError {
             ),
             Self::NeedsDecision(r) => write!(
                 f,
-                "ce worktree contient {} fichier(s) modifié(s) et {} non suivi(s) : une décision explicite est requise",
+                "ce worktree contient {} {} et {} {} : une décision explicite est requise",
                 r.changed.len(),
-                r.untracked.len()
+                if r.changed.len() > 1 {
+                    "fichiers modifiés"
+                } else {
+                    "fichier modifié"
+                },
+                r.untracked.len(),
+                if r.untracked.len() > 1 {
+                    "non suivis"
+                } else {
+                    "non suivi"
+                }
             ),
             Self::NotLocked => f.write_str("ce worktree n'est pas verrouillé"),
             Self::AlreadyLocked => f.write_str("ce worktree est déjà verrouillé"),

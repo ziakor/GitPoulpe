@@ -177,14 +177,15 @@ impl State {
                 let (message, open) = match &outcome {
                     SequenceOutcome::Done { created, .. } => (
                         format!(
-                            "{name} terminé : {created} commit(s) créé(s) sur la branche courante."
+                            "{name} terminé : {} sur la branche courante.",
+                            crate::widgets::counted(*created, "commit créé", "commits créés")
                         ),
                         false,
                     ),
                     SequenceOutcome::Conflicts { files } => (
                         format!(
-                            "Le {name} s'est arrêté sur un conflit ({} fichier(s)) : les commits restants sont gardés par Git, résolvez puis continuez, ou abandonnez.",
-                            files.len()
+                            "Le {name} s'est arrêté sur un conflit ({}) : les commits restants sont gardés par Git, résolvez puis continuez, ou abandonnez.",
+                            crate::widgets::counted(files.len(), "fichier", "fichiers")
                         ),
                         true,
                     ),

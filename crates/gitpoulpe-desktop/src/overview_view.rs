@@ -18,12 +18,12 @@ fn summary(overview: &gitpoulpe_git::RepoOverview) -> String {
     let mut parts = vec![
         format!("branche {branch}"),
         distance,
-        format!("{} indexé(s)", overview.staged),
-        format!("{} modifié(s)", overview.unstaged),
-        format!("{} non suivi(s)", overview.untracked),
+        counted(overview.staged as usize, "indexé", "indexés"),
+        counted(overview.unstaged as usize, "modifié", "modifiés"),
+        counted(overview.untracked as usize, "non suivi", "non suivis"),
     ];
     if overview.conflicts > 0 {
-        parts.push(format!("{} conflit(s)", overview.conflicts));
+        parts.push(counted(overview.conflicts as usize, "conflit", "conflits"));
     }
     if let Some(operation) = overview.operation {
         parts.push(operation.to_owned());
@@ -106,11 +106,11 @@ pub fn overview_screen(s: &State) -> El {
             .gap(8.0)
             .center_y()
             .child(
-                action(
+                crate::widgets::check(
                     s,
                     &format!("ov-toggle{index}"),
-                    if selected { "[x]" } else { "[ ]" },
-                    false,
+                    &format!("Suivre {}", candidate.name),
+                    selected,
                 )
                 .on_press(move |s: &mut State| s.overview_toggle(&toggle_path)),
             )

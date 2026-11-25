@@ -22,6 +22,7 @@ mod file_history;
 mod file_history_view;
 mod gitflow_screen;
 mod gitflow_screen_view;
+mod graph_view;
 mod history_state;
 mod history_view;
 mod hook_screen;
@@ -136,6 +137,11 @@ fn demo_history(state: &mut State) {
     state.drain();
 }
 
+fn demo_history_light(state: &mut State) {
+    state.set_dark(false);
+    demo_history(state);
+}
+
 fn demo_branches(state: &mut State) {
     demo(state);
     state.open_branches();
@@ -225,6 +231,7 @@ fn main() {
             ("demo-device", demo_device),
             ("demo-review-focus", demo_review_focus),
             ("demo-history", demo_history),
+            ("demo-history-light", demo_history_light),
             ("demo-branches", demo_branches),
             ("demo-switcher", demo_switcher),
         ],

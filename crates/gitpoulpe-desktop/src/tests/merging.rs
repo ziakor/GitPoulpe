@@ -172,7 +172,7 @@ fn a_divergent_merge_creates_a_merge_commit_and_the_option_forces_one_when_linea
     open_preview(&mut rt, "feature");
     click(&mut rt, "merge-no-ff");
     step(&mut rt);
-    assert!(shows(&rt, "[x] Toujours créer un commit de fusion"));
+    assert!(super::ticked(&rt, "merge-no-ff"));
     click(&mut rt, "merge-confirm");
     settle(&mut rt, |s| s.branches.merge.is_none() && idle(s));
     assert_eq!(
@@ -201,7 +201,7 @@ fn predicted_conflicts_are_shown_and_a_conflicting_merge_opens_the_resolution() 
     let dir = conflicting();
     let mut rt = screen(dir.path());
     open_preview(&mut rt, "feature");
-    assert!(shows(&rt, "1 fichier(s) en conflit prévu(s) : a.txt"));
+    assert!(shows(&rt, "1 fichier en conflit prévu : a.txt"));
     click(&mut rt, "merge-confirm");
     settle(&mut rt, |s| s.conflicts.open && s.operation_kind.is_some());
     assert_eq!(rt.state.conflicts.files.len(), 1);
@@ -229,7 +229,7 @@ fn local_work_that_would_be_overwritten_blocks_the_merge_until_it_is_set_aside()
     let head = git(p, &["rev-parse", "HEAD"]);
     let mut rt = screen(p);
     open_preview(&mut rt, "feature");
-    assert!(shows(&rt, "ont des modifications locales (a.txt)"));
+    assert!(shows(&rt, "1 fichier a des modifications locales (a.txt)"));
     click(&mut rt, "merge-confirm");
     settle(&mut rt, |s| {
         s.branches

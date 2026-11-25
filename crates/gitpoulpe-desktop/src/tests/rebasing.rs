@@ -109,7 +109,7 @@ fn screen(dir: &Path, base: &str) -> Runtime<State> {
 fn the_plan_lists_the_base_and_commits_and_a_squash_rebase_runs() {
     let (dir, base) = repo();
     let mut rt = screen(dir.path(), &base);
-    assert!(shows(&rt, "3 commit(s) réécrits"));
+    assert!(shows(&rt, "3 commits réécrits"));
     assert!(shows(&rt, "add a") && shows(&rt, "add c"));
     click(&mut rt, "rebase-act1");
     for _ in 0..2 {

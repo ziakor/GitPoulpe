@@ -128,7 +128,7 @@ fn an_active_merge_is_announced_and_its_conflicts_are_listed_with_their_kind() {
     let dir = repo();
     let mut rt = runtime(super::opened(dir.path()));
     settle(&mut rt, |s| s.operation_kind.is_some());
-    assert!(shows(&rt, "Fusion en cours · 3 fichier(s) en conflit"));
+    assert!(shows(&rt, "Fusion en cours · 3 fichiers en conflit"));
     click(&mut rt, "conflicts-open");
     settle(&mut rt, |s| s.conflicts.open && idle(s));
     let paths: Vec<String> = rt
@@ -157,7 +157,7 @@ fn the_versions_are_named_after_the_branches_and_a_side_can_be_taken() {
         std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
         "line1\nfeature\nline3\n"
     );
-    assert!(shows(&rt, "Il reste 2 fichier(s)"));
+    assert!(shows(&rt, "Il reste 2 fichiers"));
     assert!(rect_of(&rt, "cf-continue").is_none() && rect_of(&rt, "cf-continue-off").is_some());
 }
 

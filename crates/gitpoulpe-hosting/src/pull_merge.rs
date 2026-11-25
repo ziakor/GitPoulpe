@@ -65,6 +65,18 @@ pub struct HostedMerge {
     pub verified_merged: bool,
 }
 
+pub(crate) fn missing_approvals(approvals: u64, required: u64) -> String {
+    format!(
+        "{approvals} {} sur {required} {}",
+        if approvals > 1 {
+            "approbations"
+        } else {
+            "approbation"
+        },
+        if required > 1 { "requises" } else { "requise" }
+    )
+}
+
 fn explain(state: &str) -> Option<&'static str> {
     match state {
         "blocked" => Some(
@@ -227,9 +239,7 @@ pub async fn prepare_merge(
         }
     }
     if approvals < required_approvals {
-        blockers.push(format!(
-            "{approvals} approbation(s) sur {required_approvals} requise(s)"
-        ));
+        blockers.push(missing_approvals(approvals, required_approvals));
     }
     if changes {
         blockers.push("des changements ont été demandés par un relecteur".to_owned());

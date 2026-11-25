@@ -6,7 +6,9 @@ use crate::github::{GithubError, interpret_failure};
 use crate::gitlab_pulls::{flag, get_json, mr_base, project_path, text, valid_path};
 use crate::gitlab_review::{current_head, failure};
 use crate::http::ApiClient;
-use crate::pull_merge::{HostedMerge, MergeMethod, MergeReadiness, MergeRequest, RequiredCheck};
+use crate::pull_merge::{
+    HostedMerge, MergeMethod, MergeReadiness, MergeRequest, RequiredCheck, missing_approvals,
+};
 use crate::pull_read::PullState;
 use crate::pulls::encode;
 use crate::repos::pages;
@@ -266,9 +268,7 @@ pub(crate) async fn prepare_merge(
         }
     }
     if approvals < required_approvals {
-        blockers.push(format!(
-            "{approvals} approbation(s) sur {required_approvals} requise(s)"
-        ));
+        blockers.push(missing_approvals(approvals, required_approvals));
     } else if status == "not_approved" {
         blockers.push("des règles d'approbation du projet ne sont pas satisfaites".to_owned());
     }

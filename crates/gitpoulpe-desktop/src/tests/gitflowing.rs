@@ -199,10 +199,9 @@ fn a_conflict_while_finishing_opens_the_resolution_screen_and_explains_the_resum
     click(&mut rt, "gf-confirm");
     settle(&mut rt, |s| s.conflicts.open);
     assert!(
-        rt.state
-            .notice
-            .as_deref()
-            .is_some_and(|n| n.contains("Flux interrompu") && n.contains("seront reprises")),
+        rt.state.notice.as_deref().is_some_and(
+            |n| n.contains("Flux interrompu") && n.contains("l'étape restante sera reprise")
+        ),
         "{:?}",
         rt.state.notice
     );

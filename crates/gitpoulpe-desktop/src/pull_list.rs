@@ -1360,9 +1360,15 @@ impl State {
             .map(|d| d.entries.iter().filter(|e| e.to_reread).count())
             .filter(|c| *c > 0)
         {
-            Some(format!(
-                "{count} commentaire(s) du brouillon sont à relire (fichier modifié) : marquez-les relus ou retirez-les."
-            ))
+            Some(if count > 1 {
+                format!(
+                    "{count} commentaires du brouillon sont à relire (fichier modifié) : marquez-les relus ou retirez-les."
+                )
+            } else {
+                format!(
+                    "{count} commentaire du brouillon est à relire (fichier modifié) : marquez-le relu ou retirez-le."
+                )
+            })
         } else if submission.decision != ReviewDecision::Comment
             && author.eq_ignore_ascii_case(&login)
         {

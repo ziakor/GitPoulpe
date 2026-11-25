@@ -16,8 +16,10 @@ fn state_line(w: &gitpoulpe_core::Worktree) -> String {
         return "propre".to_owned();
     }
     format!(
-        "{} indexé(s) · {} modifié(s) · {} non suivi(s)",
-        w.staged, w.unstaged, w.untracked
+        "{} · {} · {}",
+        counted(w.staged, "indexé", "indexés"),
+        counted(w.unstaged, "modifié", "modifiés"),
+        counted(w.untracked, "non suivi", "non suivis")
     )
 }
 

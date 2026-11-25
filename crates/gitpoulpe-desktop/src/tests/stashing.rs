@@ -104,7 +104,7 @@ fn work_is_set_aside_with_the_chosen_scope_and_listed_with_its_content() {
     step(&mut rt);
     click(&mut rt, "st-untracked");
     step(&mut rt);
-    assert!(shows(&rt, "[x] Inclure les fichiers non suivis"));
+    assert!(super::ticked(&rt, "st-untracked"));
     click(&mut rt, "st-create");
     settle(&mut rt, |s| idle(s) && s.stashes.stashes.len() == 1);
     assert!(git(dir.path(), &["status", "--porcelain"]).is_empty());

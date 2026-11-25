@@ -7,7 +7,6 @@ use crate::state::State;
 use crate::theme;
 
 const ROW_HEIGHT: f32 = 28.0;
-const GLYPH_CELL: f32 = 8.0;
 
 fn commit_row(s: &State, index: usize) -> El {
     let p = s.palette;
@@ -16,7 +15,7 @@ fn commit_row(s: &State, index: usize) -> El {
         return el().h(ROW_HEIGHT);
     };
     let selected = history.selected == Some(index);
-    let glyphs = gitpoulpe_core::glyphs(graph, history.width);
+    let fill = if selected { p.selected } else { p.bg };
     let short: String = commit.oid.chars().take(8).collect();
     let mut line = row()
         .w_full()
@@ -24,10 +23,13 @@ fn commit_row(s: &State, index: usize) -> El {
         .px(12.0)
         .gap(10.0)
         .center_y()
-        .child(
-            el().w(history.width.max(1) as f32 * 2.0 * GLYPH_CELL)
-                .child(text(glyphs).font(theme::CODE).color(p.accent)),
-        )
+        .child(crate::graph_view::graph_cell(
+            &p,
+            graph,
+            history.width,
+            ROW_HEIGHT,
+            commit.parents.len() > 1,
+        ))
         .child(
             text(commit.subject.clone())
                 .font(theme::BODY)
@@ -40,7 +42,7 @@ fn commit_row(s: &State, index: usize) -> El {
         line = line.child(
             text(commit.refs.join(" · "))
                 .font(theme::SMALL)
-                .color(p.accent)
+                .color(p.lane(graph.column))
                 .max_w(220.0)
                 .truncate(),
         );
@@ -67,7 +69,7 @@ fn commit_row(s: &State, index: usize) -> El {
         .focus_ring(2.0, -2.0, p.accent)
         .w_full()
         .h(ROW_HEIGHT)
-        .fill(if selected { p.selected } else { p.bg })
+        .fill(fill)
         .hover(p.hover)
         .on_press(move |s: &mut State| s.select_commit(index))
         .child(line)
@@ -236,15 +238,15 @@ fn sequence_card(s: &State) -> Option<El> {
     };
     card = card.child(
         text(format!(
-            "Sur {} · {} commit(s){}.",
+            "Sur {} · {}{}.",
             preview.branch.as_deref().unwrap_or("HEAD détaché"),
-            preview.commits.len(),
+            crate::widgets::counted(preview.commits.len(), "commit", "commits"),
             if preview.local_changes.is_empty() {
                 String::new()
             } else {
                 format!(
-                    " · {} fichier(s) avec modifications locales",
-                    preview.local_changes.len()
+                    " · {} avec modifications locales",
+                    crate::widgets::counted(preview.local_changes.len(), "fichier", "fichiers")
                 )
             }
         ))
@@ -374,10 +376,10 @@ fn rebase_card(s: &State) -> Option<El> {
     card = card
         .child(
             text(format!(
-                "Base : {} · sur {} · {} commit(s) réécrits, du plus ancien au plus récent.",
+                "Base : {} · sur {} · {}, du plus ancien au plus récent.",
                 info.base.chars().take(8).collect::<String>(),
                 info.branch.as_deref().unwrap_or("HEAD détaché"),
-                info.commits.len()
+                crate::widgets::counted(info.commits.len(), "commit réécrit", "commits réécrits")
             ))
             .key("rebase-summary")
             .font(theme::SMALL)
@@ -554,8 +556,12 @@ fn reset_card(s: &State, oid: &str) -> Option<El> {
                 "soft : « {branch} » passe sur ce commit ; l'index et les fichiers ne changent pas, les commits retirés restent en changements indexés."
             ),
             ResetMode::Mixed => format!(
-                "mixed : « {branch} » passe sur ce commit et l'index est remis dessus ; les fichiers ne changent pas. {} fichier(s) indexé(s) redeviennent non indexés.",
-                preview.staged.len()
+                "mixed : « {branch} » passe sur ce commit et l'index est remis dessus ; les fichiers ne changent pas. {}.",
+                crate::widgets::counted(
+                    preview.staged.len(),
+                    "fichier indexé redevient non indexé",
+                    "fichiers indexés redeviennent non indexés"
+                )
             ),
             ResetMode::Hard => format!(
                 "hard : « {branch} » passe sur ce commit, l'index et les fichiers suivis sont remis dessus. Les fichiers non suivis ne sont pas touchés."
@@ -571,8 +577,8 @@ fn reset_card(s: &State, oid: &str) -> Option<El> {
         if preview.entering > 0 && preview.leaving.is_empty() {
             card = card.child(
                 text(format!(
-                    "La branche avance de {} commit(s).",
-                    preview.entering
+                    "La branche avance de {}.",
+                    crate::widgets::counted(preview.entering, "commit", "commits")
                 ))
                 .font(theme::SMALL)
                 .color(p.muted),
@@ -599,8 +605,12 @@ fn reset_card(s: &State, oid: &str) -> Option<El> {
             };
             card = card.child(
                 text(format!(
-                    "{} commit(s) ne seront plus sur la branche :\n{list}{more}",
-                    preview.leaving.len()
+                    "{} :\n{list}{more}",
+                    crate::widgets::counted(
+                        preview.leaving.len(),
+                        "commit ne sera plus sur la branche",
+                        "commits ne seront plus sur la branche"
+                    )
                 ))
                 .key("reset-leaving")
                 .font(theme::PATH_SMALL)
@@ -900,7 +910,7 @@ pub fn history_screen(s: &State) -> El {
         HistoryStatus::NoCommits => message(
             s,
             "Aucun commit",
-            "Ce dépôt n'a pas encore de commit : crée le premier depuis l'écran des changements.",
+            "Ce dépôt n'a pas encore de commit : créez le premier depuis l'écran des changements.",
         ),
         HistoryStatus::Failed(error) => message(s, "Lecture de l'historique impossible", error),
         _ => {

@@ -192,7 +192,7 @@ impl State {
         let name = self.remotes.new_name.text.trim().to_owned();
         let url = self.remotes.new_url.text.trim().to_owned();
         if name.is_empty() || url.is_empty() {
-            self.notice = Some("Donnez un nom et une URL au remote.".to_owned());
+            self.notice = Some("Donnez un nom et une URL au dépôt distant.".to_owned());
             return;
         }
         self.send_remote_op(RemoteOp::Add { name, url });
@@ -346,7 +346,7 @@ impl State {
                 self.request_refresh(false);
             }
             Err(message) => {
-                self.notice = Some(format!("Remote non modifié : {message}"));
+                self.notice = Some(format!("Dépôt distant non modifié : {message}"));
                 self.reload_remotes();
             }
         }

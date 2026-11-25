@@ -7,7 +7,7 @@ use crate::file_history::PanelMode;
 use crate::history_state::format_date;
 use crate::state::State;
 use crate::theme;
-use crate::widgets::action;
+use crate::widgets::{action, counted};
 
 const ROW_HEIGHT: f32 = 52.0;
 const MAX_LINES: usize = 3000;
@@ -223,11 +223,14 @@ fn blame_panel(s: &State) -> El {
     };
     panel = panel.child(
         text(format!(
-            "Blame de {} · {scope} · {} ligne(s){}",
+            "Blame de {} · {scope} · {}{}",
             blame.path,
-            blame.lines.len(),
+            counted(blame.lines.len(), "ligne", "lignes"),
             if local > 0 {
-                format!(" dont {local} non enregistrée(s)")
+                format!(
+                    " dont {}",
+                    counted(local, "non enregistrée", "non enregistrées")
+                )
             } else {
                 String::new()
             }
@@ -385,7 +388,11 @@ pub fn file_history_screen(s: &State) -> El {
     let title = if screen.loading {
         format!("Historique de {} · lecture…", screen.path)
     } else {
-        format!("Historique de {} · {count} révision(s)", screen.path)
+        format!(
+            "Historique de {} · {}",
+            screen.path,
+            counted(count, "révision", "révisions")
+        )
     };
     let header = row()
         .w_full()

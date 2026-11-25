@@ -3,6 +3,7 @@ use rune::TextEdit;
 
 use crate::engine::Command;
 use crate::state::State;
+use crate::widgets::counted;
 
 pub struct GitflowState {
     pub open: bool,
@@ -301,8 +302,8 @@ impl State {
             }
             Ok(FlowOutcome::Finished { steps }) => {
                 self.gitflow.done = Some(format!(
-                    "Flux terminé : {} étape(s) exécutée(s).",
-                    steps.len()
+                    "Flux terminé : {}.",
+                    counted(steps.len(), "étape exécutée", "étapes exécutées")
                 ));
             }
             Ok(FlowOutcome::Interrupted {
@@ -312,11 +313,15 @@ impl State {
                 files,
             }) => {
                 self.notice = Some(format!(
-                    "Flux interrompu après {} étape(s) : {} a produit des conflits dans {} fichier(s). Résolvez-les, puis terminez le flux à nouveau : les {} étape(s) restantes seront reprises.",
-                    done.len(),
+                    "Flux interrompu après {} : {} a produit des conflits dans {}. Résolvez-les, puis terminez le flux à nouveau : {}.",
+                    counted(done.len(), "étape", "étapes"),
                     at.describe(),
-                    files.len(),
-                    remaining.len()
+                    counted(files.len(), "fichier", "fichiers"),
+                    if remaining.len() > 1 {
+                        format!("les {} étapes restantes seront reprises", remaining.len())
+                    } else {
+                        "l'étape restante sera reprise".to_owned()
+                    }
                 ));
                 self.request_refresh(false);
                 self.probe_operation();

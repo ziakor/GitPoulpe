@@ -32,13 +32,13 @@ pub enum ProfileError {
 impl std::fmt::Display for ProfileError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Self::EmptyLabel => "Donne un nom au profil.",
+            Self::EmptyLabel => "Donnez un nom au profil.",
             Self::DuplicateLabel => "Un profil porte déjà ce nom.",
-            Self::EmptyName => "Indique le nom Git (user.name).",
+            Self::EmptyName => "Indiquez le nom Git (user.name).",
             Self::InvalidName => {
                 "Le nom Git ne peut contenir ni retour à la ligne ni les caractères < et >."
             }
-            Self::InvalidEmail => "Indique une adresse e-mail valide (user.email).",
+            Self::InvalidEmail => "Indiquez une adresse e-mail valide (user.email).",
             Self::UnknownProfile => "Ce profil n'existe plus.",
         })
     }

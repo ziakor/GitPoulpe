@@ -145,7 +145,9 @@ impl Git {
             .into_iter()
             .find(|r| r.name == remote)
             .ok_or_else(|| {
-                PullRangeError::Net(NetError::Refused("ce remote n'existe pas".to_owned()))
+                PullRangeError::Net(NetError::Refused(
+                    "ce dépôt distant n'existe pas".to_owned(),
+                ))
             })?;
         let url = found.fetch_urls.first().cloned();
         let dir = info

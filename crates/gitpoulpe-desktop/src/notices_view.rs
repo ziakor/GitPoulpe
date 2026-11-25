@@ -47,11 +47,11 @@ pub fn notices_screen(s: &State) -> El {
     for kind in NoticeKind::ALL {
         let muted = prefs.muted_kinds.contains(&kind);
         prefs_row = prefs_row.child(
-            action(
+            crate::widgets::toggle(
                 s,
                 &format!("nt-kind-{kind:?}").to_lowercase(),
-                &format!("{} {}", if muted { "[ ]" } else { "[x]" }, kind.caption()),
-                false,
+                kind.caption(),
+                !muted,
             )
             .on_press(move |s: &mut State| s.notices_toggle_kind(kind)),
         );
@@ -61,16 +61,11 @@ pub fn notices_screen(s: &State) -> El {
         let id = connection.id.clone();
         let muted = prefs.muted_connections.contains(&id);
         accounts_row = accounts_row.child(
-            action(
+            crate::widgets::toggle(
                 s,
                 &format!("nt-account{index}"),
-                &format!(
-                    "{} {}@{}",
-                    if muted { "[ ]" } else { "[x]" },
-                    connection.login,
-                    connection.host_caption()
-                ),
-                false,
+                &format!("{}@{}", connection.login, connection.host_caption()),
+                !muted,
             )
             .on_press(move |s: &mut State| s.notices_toggle_connection(&id)),
         );

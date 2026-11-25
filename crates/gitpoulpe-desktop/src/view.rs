@@ -158,7 +158,8 @@ fn footer(s: &State) -> El {
         _ => match s.notices_unread() {
             0 => hints(s),
             unread => format!(
-                "{unread} notification(s) non lue(s) (Ctrl+K puis Notifications) · {}",
+                "{} (Ctrl+K puis Notifications) · {}",
+                crate::widgets::counted(unread, "notification non lue", "notifications non lues"),
                 hints(s)
             ),
         },
@@ -629,8 +630,9 @@ fn operation_banner(s: &State) -> Option<El> {
         .map_or(0, |r| r.snapshot.conflicts().count());
     let message = if conflicts > 0 {
         format!(
-            "{} en cours · {conflicts} fichier(s) en conflit",
-            capitalized(kind.caption())
+            "{} en cours · {}",
+            capitalized(kind.caption()),
+            crate::widgets::counted(conflicts, "fichier en conflit", "fichiers en conflit")
         )
     } else {
         format!("{} en cours", capitalized(kind.caption()))
@@ -1094,26 +1096,13 @@ fn signing_summary(s: &State) -> El {
 }
 
 fn amend_toggle(s: &State) -> El {
-    let p = s.palette;
-    let label = if s.amend_mode {
-        "☑ Amender le dernier commit"
-    } else {
-        "☐ Amender le dernier commit"
-    };
-    el().key("amend-toggle")
-        .role("checkbox")
-        .label("Amender le dernier commit")
-        .focusable(true)
-        .focus_ring(2.0, 2.0, p.accent)
-        .h(26.0)
-        .px(2.0)
-        .center_y()
-        .hover(p.hover)
+    crate::widgets::toggle(s, "amend-toggle", "Amender le dernier commit", s.amend_mode)
+        .self_start()
+        .px(0.0)
         .on_press(|s: &mut State| {
             let on = !s.amend_mode;
             s.set_amend_mode(on);
         })
-        .child(text(label.to_owned()).font(theme::SMALL).color(p.text))
 }
 
 fn amend_warning(s: &State) -> Option<El> {
@@ -1303,19 +1292,14 @@ fn mark_box(s: &State, position: usize, index: usize) -> El {
         el().key(format!("mk{index}"))
             .role("checkbox")
             .label(label)
-            .w(18.0)
-            .h(18.0)
+            .checked(marked)
+            .w(24.0)
+            .h(24.0)
             .radius(3.0)
             .center()
-            .fill(if marked { p.accent } else { p.raised })
-            .border(1.0, if marked { p.accent } else { p.line })
             .hover(p.hover)
             .on_press(move |s: &mut State| s.toggle_mark(position))
-            .child(
-                text(if marked { "✓" } else { "" })
-                    .font(theme::TINY)
-                    .color(p.on_accent),
-            ),
+            .child(crate::widgets::check_mark(s, marked)),
     )
 }
 

@@ -1846,19 +1846,19 @@ impl State {
                 Refusal::NothingToUnstage => {
                     format!("{} n'a rien à désindexer.", display_label(&path))
                 }
-                Refusal::NotPartial => "Ce fichier ne peut pas être traité bloc par bloc ou ligne par ligne (non suivi, supprimé, renommé ou changement de mode) : traite le fichier entier.".to_owned(),
-                Refusal::FilterConfigured => "Ce dépôt utilise des filtres Git : l'indexation par bloc ou par ligne est désactivée pour ne pas indexer un contenu différent de celui affiché. Indexe le fichier entier.".to_owned(),
+                Refusal::NotPartial => "Ce fichier ne peut pas être traité bloc par bloc ou ligne par ligne (non suivi, supprimé, renommé ou changement de mode) : traitez le fichier entier.".to_owned(),
+                Refusal::FilterConfigured => "Ce dépôt utilise des filtres Git : l'indexation par bloc ou par ligne est désactivée pour ne pas indexer un contenu différent de celui affiché. Indexez le fichier entier.".to_owned(),
                 Refusal::NothingSelected => {
                     "La sélection ne contient aucune ligne ajoutée ou supprimée.".to_owned()
                 }
-                Refusal::Incompatible => "Cette sélection est impossible dans un bloc qui touche la fin d'un fichier sans saut de ligne : sélectionne tout le bloc.".to_owned(),
+                Refusal::Incompatible => "Cette sélection est impossible dans un bloc qui touche la fin d'un fichier sans saut de ligne : sélectionnez tout le bloc.".to_owned(),
             },
             Ok(StageOutcome::Stale { paths }) => format!(
-                "Rien n'a été modifié : {} a changé depuis son affichage. L'état a été relu, vérifie puis recommence.",
+                "Rien n'a été modifié : {} a changé depuis son affichage. L'état a été relu, vérifiez puis recommencez.",
                 paths.first().map_or_else(String::new, |p| display_label(p))
             ),
             Err(WriteError::IndexLocked(path)) => format!(
-                "Git est occupé : le verrou {path} existe. Termine l'autre opération Git puis réessaie ; GitPoulpe ne supprime jamais ce verrou."
+                "Git est occupé : le verrou {path} existe. Terminez l'autre opération Git puis réessayez ; GitPoulpe ne supprime jamais ce verrou."
             ),
             Err(WriteError::NoWorktree) => {
                 "Ce dépôt n'a pas de répertoire de travail.".to_owned()
@@ -2357,7 +2357,7 @@ impl State {
         if !info.published_on.is_empty() && !self.amend_confirming {
             self.amend_confirming = true;
             self.notice = Some(
-                "Ce commit est déjà publié : lis l'avertissement puis confirme pour l'amender."
+                "Ce commit est déjà publié : lisez l'avertissement puis confirmez pour l'amender."
                     .to_owned(),
             );
             return;
@@ -2488,13 +2488,13 @@ impl State {
                 }
                 self.notice = Some(
                     match reason {
-                        CommitRefusal::EmptyMessage => "Écris un message de commit.",
-                        CommitRefusal::EmptyIndex => "Rien n'est indexé : indexe des changements avant de créer le commit.",
+                        CommitRefusal::EmptyMessage => "Écrivez un message de commit.",
+                        CommitRefusal::EmptyIndex => "Rien n'est indexé : indexez des changements avant de créer le commit.",
                         CommitRefusal::Conflicts => "Des conflits ne sont pas résolus : ouvrez « Résoudre » pour les traiter, aucun commit n'a été créé.",
-                        CommitRefusal::Stale => "L'index ou le dernier commit a changé depuis son affichage : l'état a été relu, vérifie puis recommence. Ton message est conservé.",
+                        CommitRefusal::Stale => "L'index ou le dernier commit a changé depuis son affichage : l'état a été relu, vérifiez puis recommencez. Votre message est conservé.",
                         CommitRefusal::NoCommit => "Il n'y a aucun commit à amender.",
                         CommitRefusal::NothingToAmend => "Rien à amender : le message est inchangé et aucun changement n'est indexé.",
-                        CommitRefusal::Published => "Ce commit est déjà publié : confirme l'amendement pour continuer.",
+                        CommitRefusal::Published => "Ce commit est déjà publié : confirmez l'amendement pour continuer.",
                     }
                     .to_owned(),
                 );
@@ -2508,11 +2508,11 @@ impl State {
                         "La signature a échoué : le commit n'a pas été créé."
                     }
                     CommitFailureKind::Hook => {
-                        "Un hook Git a refusé le commit. Corrige le problème puis réessaie."
+                        "Un hook Git a refusé le commit. Corrigez le problème puis réessayez."
                     }
                     CommitFailureKind::Other => "Git a refusé le commit.",
                 };
-                self.notice = Some(format!("{lead} Ton message est conservé."));
+                self.notice = Some(format!("{lead} Votre message est conservé."));
                 self.commit_report = Some(format!("{lead}\n{output}"));
             }
             Err(error) => {

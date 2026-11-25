@@ -1706,7 +1706,7 @@ async fn run(
                                     .map(Box::new)
                                     .map_err(|e| e.to_string()),
                                 None => Err(
-                                    "Aucun remote n'est configuré : ajoutez-en un depuis l'écran Remotes."
+                                    "Aucun dépôt distant n'est configuré : ajoutez-en un depuis l'écran « Dépôts distants »."
                                         .to_owned(),
                                 ),
                             };
@@ -2922,7 +2922,7 @@ async fn remote_op(shared: Arc<Shared>, session: Arc<Session>, request: u64, op:
             git.add_remote(info, name, url)
                 .await
                 .map(|remote| BranchDone {
-                    message: format!("Remote {} ajouté.", remote.name),
+                    message: format!("Dépôt distant {} ajouté.", remote.name),
                     journal: Some((
                         "remote-add".into(),
                         None,
@@ -2972,7 +2972,7 @@ async fn remote_op(shared: Arc<Shared>, session: Arc<Session>, request: u64, op:
                 .await
                 .map(|remote| BranchDone {
                     message: format!(
-                        "Remote {old} renommé en {}. Ses branches de suivi ont suivi.",
+                        "Dépôt distant {old} renommé en {}. Ses branches de suivi ont suivi.",
                         remote.name
                     ),
                     journal: Some((
@@ -2990,7 +2990,7 @@ async fn remote_op(shared: Arc<Shared>, session: Arc<Session>, request: u64, op:
                     let url = removed.fetch_urls.first().cloned().unwrap_or_default();
                     BranchDone {
                         message: format!(
-                            "Remote {name} supprimé. Pour le rétablir : {}",
+                            "Dépôt distant {name} supprimé. Pour le rétablir : {}",
                             crate::shell::restore_remote(name, &url)
                         ),
                         journal: Some((
@@ -3051,19 +3051,25 @@ async fn conflict_op(
             message: o.message,
             finished: o.finished,
         }),
-        ConflictOp::Abort => git.abort_operation(info, &remembered).await.map(|report| {
-            ConflictDone {
-                message: match &report.backup {
-                    Some(dir) => format!(
-                        "Opération abandonnée, l'état d'avant est rétabli. {} fichier(s) de votre travail de résolution sont conservés dans {}.",
-                        report.saved,
-                        dir.display()
-                    ),
-                    None => "Opération abandonnée, l'état d'avant est rétabli.".to_owned(),
-                },
-                finished: true,
-            }
-        }),
+        ConflictOp::Abort => {
+            git.abort_operation(info, &remembered)
+                .await
+                .map(|report| ConflictDone {
+                    message: match &report.backup {
+                        Some(dir) => format!(
+                            "Opération abandonnée, l'état d'avant est rétabli. {} dans {}.",
+                            crate::widgets::counted(
+                                report.saved,
+                                "fichier de votre travail de résolution est conservé",
+                                "fichiers de votre travail de résolution sont conservés"
+                            ),
+                            dir.display()
+                        ),
+                        None => "Opération abandonnée, l'état d'avant est rétabli.".to_owned(),
+                    },
+                    finished: true,
+                })
+        }
     };
     shared.emit(Event::ConflictFinished {
         request,
@@ -3122,8 +3128,8 @@ async fn stash_op(shared: Arc<Shared>, session: Arc<Session>, request: u64, op: 
                 },
                 StashApplied::Conflicts { files } => StashDone {
                     message: format!(
-                        "L'application a produit des conflits dans {} fichier(s). Le stash est conservé : résolvez les conflits, il ne sera supprimé que par vous.",
-                        files.len()
+                        "L'application a produit des conflits dans {}. Le stash est conservé : résolvez les conflits, il ne sera supprimé que par vous.",
+                        crate::widgets::counted(files.len(), "fichier", "fichiers")
                     ),
                     conflicts: true,
                     journal: Some((
@@ -3202,8 +3208,12 @@ async fn worktree_op(shared: Arc<Shared>, session: Arc<Session>, request: u64, o
                     }
                     if removed.lost_untracked > 0 {
                         message.push_str(&format!(
-                            " {} fichier(s) non suivi(s) ont été effacés et ne sont pas récupérables.",
-                            removed.lost_untracked
+                            " {}.",
+                            crate::widgets::counted(
+                                removed.lost_untracked,
+                                "fichier non suivi a été effacé et n'est pas récupérable",
+                                "fichiers non suivis ont été effacés et ne sont pas récupérables"
+                            )
                         ));
                     }
                     done(

@@ -115,7 +115,7 @@ fn a_worktree_is_created_listed_with_its_own_state_and_opened() {
     rt.state.reload_worktrees();
     settle(&mut rt, idle);
     assert!(shows(&rt, "topic"));
-    assert!(shows(&rt, "1 modifié(s)"));
+    assert!(shows(&rt, "1 modifié"));
     assert_eq!(
         std::fs::read_to_string(e.repo.path().join("a.txt")).unwrap(),
         "one\n"
@@ -189,10 +189,9 @@ fn removing_a_modified_worktree_names_the_files_and_needs_the_second_decision() 
             .is_some_and(|n| n.contains("sauvegardées sous refs/gitpoulpe/recovery"))
     );
     assert!(
-        rt.state
-            .notice
-            .as_deref()
-            .is_some_and(|n| n.contains("1 fichier(s) non suivi(s)"))
+        rt.state.notice.as_deref().is_some_and(
+            |n| n.contains("1 fichier non suivi a été effacé et n'est pas récupérable")
+        )
     );
 }
 

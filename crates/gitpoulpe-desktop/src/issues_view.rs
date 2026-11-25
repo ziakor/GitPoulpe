@@ -40,10 +40,10 @@ fn issue_row(s: &State, index: usize) -> El {
             )
             .child(
                 text(format!(
-                    "{} · {} · {} commentaire(s){}",
+                    "{} · {} · {}{}",
                     if issue.open { "ouverte" } else { "fermée" },
                     issue.author,
-                    issue.comments,
+                    counted(issue.comments as usize, "commentaire", "commentaires"),
                     if issue.labels.is_empty() {
                         String::new()
                     } else {
@@ -232,7 +232,7 @@ fn detail(s: &State) -> El {
         );
     }
     panel = panel.child(
-        text(format!("{} commentaire(s)", detail.notes.len()))
+        text(counted(detail.notes.len(), "commentaire", "commentaires"))
             .font(theme::BODY_STRONG)
             .color(p.text),
     );

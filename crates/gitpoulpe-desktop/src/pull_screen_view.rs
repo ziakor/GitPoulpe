@@ -2,7 +2,7 @@ use rune::{El, ScrollSpec, col, row, text};
 
 use crate::state::State;
 use crate::theme;
-use crate::widgets::{action, field, toggle};
+use crate::widgets::{action, counted, field, toggle};
 
 pub fn pulls_screen(s: &State) -> El {
     if s.pulls.list.open {
@@ -172,10 +172,14 @@ pub fn pulls_screen(s: &State) -> El {
     if let Some(comparison) = &target.comparison {
         body = body.child(
             text(format!(
-                "{} commit(s) d'avance, {} de retard · {} fichier(s) modifié(s){}",
-                comparison.ahead,
+                "{} d'avance, {} de retard · {}{}",
+                counted(comparison.ahead as usize, "commit", "commits"),
                 comparison.behind,
-                comparison.files.len(),
+                counted(
+                    comparison.files.len(),
+                    "fichier modifié",
+                    "fichiers modifiés"
+                ),
                 if comparison.files_truncated {
                     " (liste tronquée)"
                 } else {

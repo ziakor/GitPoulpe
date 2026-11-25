@@ -94,7 +94,7 @@ async fn every_gitlab_blocker_is_listed_in_plain_words() {
     let has = |list: &[String], needle: &str| list.iter().any(|b| b.contains(needle));
     assert!(has(
         &blockers(API, 21).await,
-        "1 approbation(s) sur 2 requise(s)"
+        "1 approbation sur 2 requises"
     ));
     assert!(has(&blockers(API, 22).await, "conflits"));
     assert!(has(&blockers(API, 23).await, "« Pipeline » est en attente"));

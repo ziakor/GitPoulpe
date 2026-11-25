@@ -91,7 +91,7 @@ impl Git {
         let found = match target {
             FetchTarget::Remote(name) => usable
                 .find(|r| &r.name == name)
-                .ok_or_else(|| NetError::Refused("ce remote n'existe pas".to_owned()))?,
+                .ok_or_else(|| NetError::Refused("ce dépôt distant n'existe pas".to_owned()))?,
             FetchTarget::Upstream(upstream) => usable
                 .filter(|r| {
                     upstream

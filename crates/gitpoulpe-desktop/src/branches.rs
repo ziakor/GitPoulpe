@@ -258,8 +258,8 @@ impl State {
                     ),
                     MergeOutcome::Conflicts { files } => (
                         format!(
-                            "La fusion de « {source} » a produit des conflits dans {} fichier(s) : résolvez-les ou abandonnez la fusion.",
-                            files.len()
+                            "La fusion de « {source} » a produit des conflits dans {} : résolvez-les ou abandonnez la fusion.",
+                            crate::widgets::counted(files.len(), "fichier", "fichiers")
                         ),
                         None,
                     ),

@@ -28,7 +28,7 @@ impl std::fmt::Display for LfsError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotInstalled(how) => write!(f, "Git LFS n'est pas installé : {how}"),
-            Self::InvalidRemote => f.write_str("remote ou branche invalide"),
+            Self::InvalidRemote => f.write_str("dépôt distant ou branche invalide"),
             Self::AccessDenied(m) => write!(f, "accès refusé par le serveur LFS : {m}"),
             Self::NotFound(m) => write!(f, "dépôt ou objet LFS introuvable : {m}"),
             Self::Server(m) => write!(f, "erreur du serveur LFS (réessayez plus tard) : {m}"),

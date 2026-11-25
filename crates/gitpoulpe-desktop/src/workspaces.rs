@@ -355,9 +355,15 @@ impl State {
             Some(path) => {
                 self.workspace_open_repo(path);
                 if missing > 0 {
-                    self.notice = Some(format!(
-                        "{missing} dépôt(s) de l'espace sont introuvables : réparez-les dans les espaces de travail."
-                    ));
+                    self.notice = Some(if missing > 1 {
+                        format!(
+                            "{missing} dépôts de l'espace sont introuvables : réparez-les dans les espaces de travail."
+                        )
+                    } else {
+                        format!(
+                            "{missing} dépôt de l'espace est introuvable : réparez-le dans les espaces de travail."
+                        )
+                    });
                 }
             }
             None if workspace.repos.is_empty() => {

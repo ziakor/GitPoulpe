@@ -114,7 +114,7 @@ fn each_mode_is_described_before_it_runs_and_the_previous_tip_is_announced() {
     let e = env();
     let mut rt = screen(&e);
     assert!(shows(&rt, "mixed : « main » passe sur ce commit"));
-    assert!(shows(&rt, "2 commit(s) ne seront plus sur la branche"));
+    assert!(shows(&rt, "2 commits ne seront plus sur la branche"));
     click(&mut rt, "reset-soft");
     settle(&mut rt, |s| {
         s.resetting

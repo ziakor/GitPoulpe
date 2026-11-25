@@ -39,9 +39,9 @@ impl std::fmt::Display for PushError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidBranch => f.write_str("cette branche n'existe pas ou n'a pas de commit"),
-            Self::NoSuchRemote => f.write_str("ce remote n'existe pas"),
+            Self::NoSuchRemote => f.write_str("ce dépôt distant n'existe pas"),
             Self::NothingKnown => f.write_str(
-                "la protection de l'historique réécrit a besoin de l'état distant connu : récupérez d'abord ce remote",
+                "la protection de l'historique réécrit a besoin de l'état distant connu : récupérez d'abord ce dépôt distant",
             ),
             Self::Rejected(PushRejection::NonFastForward) => f.write_str(
                 "refusé : le distant a des commits que votre branche n'a pas (non fast-forward). Votre travail est intact ; récupérez puis intégrez les changements distants, ou, si vous avez réécrit l'historique, utilisez la publication protégée",

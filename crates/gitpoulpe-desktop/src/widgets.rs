@@ -51,11 +51,43 @@ pub fn field(s: &State, key: &str, label: &str, edit: &TextEdit, placeholder: &s
         })
 }
 
+pub fn check_mark(s: &State, on: bool) -> El {
+    let p = s.palette;
+    el().w(16.0)
+        .h(16.0)
+        .radius(3.0)
+        .center()
+        .fill(if on { p.accent } else { p.raised })
+        .border(1.5, if on { p.accent } else { p.edge })
+        .child(
+            text(if on { "✓" } else { "" })
+                .font(theme::TINY)
+                .color(p.on_accent),
+        )
+}
+
+pub fn check(s: &State, key: &str, label: &str, on: bool) -> El {
+    let p = s.palette;
+    el().key(key.to_owned())
+        .role("checkbox")
+        .label(label.to_owned())
+        .checked(on)
+        .focusable(true)
+        .focus_ring(2.0, 2.0, p.accent)
+        .w(28.0)
+        .h(28.0)
+        .center()
+        .radius(3.0)
+        .hover(p.hover)
+        .child(check_mark(s, on))
+}
+
 pub fn toggle(s: &State, key: &str, caption: &str, on: bool) -> El {
     let p = s.palette;
     el().key(key.to_owned())
         .role("checkbox")
         .label(caption.to_owned())
+        .checked(on)
         .focusable(true)
         .focus_ring(2.0, 2.0, p.accent)
         .min_h(28.0)
@@ -64,10 +96,13 @@ pub fn toggle(s: &State, key: &str, caption: &str, on: bool) -> El {
         .radius(3.0)
         .hover(p.hover)
         .child(
-            text(format!("{} {caption}", if on { "[x]" } else { "[ ]" }))
-                .font(theme::SMALL)
-                .color(p.text)
-                .wrap(),
+            row().gap(8.0).center_y().child(check_mark(s, on)).child(
+                text(caption.to_owned())
+                    .font(theme::SMALL)
+                    .color(p.text)
+                    .shrink()
+                    .wrap(),
+            ),
         )
 }
 

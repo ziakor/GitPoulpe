@@ -92,8 +92,9 @@ fn check_section(s: &State, mut panel: El, remote_name: &str) -> El {
                             .to_owned()
                     } else {
                         format!(
-                            "Récupération terminée : {} référence(s) mise(s) à jour dont {news} nouvelle(s). Votre travail local n'a pas été touché.",
-                            outcome.updates.len()
+                            "Récupération terminée : {} à jour dont {}. Votre travail local n'a pas été touché.",
+                            counted(outcome.updates.len(), "référence mise", "références mises"),
+                            counted(news, "nouvelle", "nouvelles")
                         )
                     })
                     .key("rm-fetch-ok")
@@ -149,9 +150,9 @@ fn check_section(s: &State, mut panel: El, remote_name: &str) -> El {
         CheckStatus::Running => panel,
         CheckStatus::Reachable(check) => panel.child(
             text(format!(
-                "Accès réussi : {} branche(s), {} tag(s){}.",
-                check.branches,
-                check.tags,
+                "Accès réussi : {}, {}{}.",
+                counted(check.branches, "branche", "branches"),
+                counted(check.tags, "tag", "tags"),
                 check
                     .head
                     .as_deref()
@@ -363,9 +364,13 @@ fn selected_detail(s: &State, mut panel: El) -> El {
                     };
                     let url = remote.fetch_urls.first().cloned().unwrap_or_default();
                     format!(
-                        "Supprimer « {} » retire {} branche(s) de suivi ; {branches}. Les branches locales et les commits restent. Pour le rétablir : {}",
+                        "Supprimer « {} » retire {} ; {branches}. Les branches locales et les commits restent. Pour le rétablir : {}",
                         remote.name,
-                        impact.tracking_refs,
+                        counted(
+                            impact.tracking_refs,
+                            "branche de suivi",
+                            "branches de suivi"
+                        ),
                         crate::shell::restore_remote(&remote.name, &url)
                     )
                 }
@@ -384,7 +389,7 @@ fn selected_detail(s: &State, mut panel: El) -> El {
                         row()
                             .gap(8.0)
                             .child(
-                                action(s, "rm-remove-confirm", "Supprimer le remote", true)
+                                action(s, "rm-remove-confirm", "Supprimer le dépôt distant", true)
                                     .on_press(|s: &mut State| s.remote_remove()),
                             )
                             .child(
@@ -395,7 +400,7 @@ fn selected_detail(s: &State, mut panel: El) -> El {
             )
         }
         _ => panel.child(
-            action(s, "rm-remove", "Supprimer ce remote", false)
+            action(s, "rm-remove", "Supprimer ce dépôt distant", false)
                 .on_press(|s: &mut State| s.remote_ask_remove()),
         ),
     }
@@ -416,7 +421,7 @@ fn detail(s: &State) -> El {
             stick_bottom: false,
         })
         .child(
-            text("Nouveau remote".to_owned())
+            text("Nouveau dépôt distant".to_owned())
                 .font(theme::BODY_STRONG)
                 .color(p.text),
         )
@@ -424,7 +429,7 @@ fn detail(s: &State) -> El {
             field(
                 s,
                 "rm-new-name",
-                "Nom du remote",
+                "Nom du dépôt distant",
                 &s.remotes.new_name,
                 "origin",
             )
@@ -434,7 +439,7 @@ fn detail(s: &State) -> El {
             field(
                 s,
                 "rm-new-url",
-                "URL du remote",
+                "URL du dépôt distant",
                 &s.remotes.new_url,
                 "https://exemple.org/depot.git",
             )
@@ -461,7 +466,7 @@ pub fn remotes_screen(s: &State) -> El {
         )
     } else if s.remotes.remotes.is_empty() && !s.remotes.loading {
         col().w_full().grow(1.0).center().child(
-            text("Aucun remote dans ce dépôt.".to_owned())
+            text("Aucun dépôt distant dans ce dépôt.".to_owned())
                 .key("remotes-empty")
                 .font(theme::BODY)
                 .color(p.muted),

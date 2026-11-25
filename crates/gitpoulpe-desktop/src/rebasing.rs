@@ -223,8 +223,8 @@ impl State {
                     }
                     RebaseOutcome::Conflicts { files, marker } => (
                         format!(
-                            "Le rebase s'est arrêté sur un conflit ({} fichier(s)). L'ancien sommet est gardé sous {marker} ; résolvez puis continuez, ou abandonnez.",
-                            files.len()
+                            "Le rebase s'est arrêté sur un conflit ({}). L'ancien sommet est gardé sous {marker} ; résolvez puis continuez, ou abandonnez.",
+                            crate::widgets::counted(files.len(), "fichier", "fichiers")
                         ),
                         true,
                     ),

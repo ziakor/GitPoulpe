@@ -63,7 +63,7 @@ async fn only_the_methods_the_repository_allows_are_offered_with_protections_and
     let all = ready.blockers.join(" | ");
     assert!(all.contains("« lint » n'a pas réussi"), "{all}");
     assert!(all.contains("« missing » est absente"), "{all}");
-    assert!(all.contains("1 approbation(s) sur 2 requise(s)"), "{all}");
+    assert!(all.contains("1 approbation sur 2 requises"), "{all}");
     assert!(!all.contains("« build »"), "{all}");
     assert!(ready.can_attempt());
 }

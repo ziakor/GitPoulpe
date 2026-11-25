@@ -93,7 +93,7 @@ fn the_patch_is_inspected_before_anything_is_applied() {
     let mut rt = screen(dir.path());
     assert!(shows(&rt, "Importer un patch"));
     load(&mut rt, patch);
-    assert!(shows(&rt, "1 fichier(s) ciblé(s)"));
+    assert!(shows(&rt, "1 fichier ciblé"));
     assert!(shows(&rt, "a.txt"));
     assert_eq!(
         std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
@@ -257,7 +257,7 @@ fn commits_are_exported_and_the_file_reapplies_on_a_compatible_base() {
     let other = repo();
     let mut import = screen(other.path());
     load(&mut import, file);
-    assert!(shows(&import, "1 fichier(s) ciblé(s)"));
+    assert!(shows(&import, "1 fichier ciblé"));
     click(&mut import, "pt-check");
     settle(&mut import, |s| {
         !s.patches.busy && s.patches.checked.is_some()

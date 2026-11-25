@@ -155,7 +155,14 @@ impl State {
                 let fetched = outcome.fetched_updates;
                 let (message, moved, open) = match &outcome.integration {
                     Integration::UpToDate => (
-                        format!("Déjà à jour ({fetched} référence(s) distante(s) mise(s) à jour)."),
+                        format!(
+                            "Déjà à jour ({} à jour).",
+                            crate::widgets::counted(
+                                fetched,
+                                "référence distante mise",
+                                "références distantes mises"
+                            )
+                        ),
                         None,
                         false,
                     ),
@@ -176,9 +183,9 @@ impl State {
                     ),
                     Integration::Conflicts { files } => (
                         format!(
-                            "L'intégration ({}) a produit des conflits dans {} fichier(s) : résolvez-les ou abandonnez.",
+                            "L'intégration ({}) a produit des conflits dans {} : résolvez-les ou abandonnez.",
                             strategy.caption(),
-                            files.len()
+                            crate::widgets::counted(files.len(), "fichier", "fichiers")
                         ),
                         None,
                         true,

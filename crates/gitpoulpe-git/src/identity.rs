@@ -161,13 +161,13 @@ fn check_ssh_key(path: &Path) -> SigningCheck {
     let read = std::fs::File::open(path).and_then(|mut file| file.read(&mut head));
     let Ok(count) = read else {
         return SigningCheck::Problem(format!(
-            "La clé « {show} » est introuvable ou illisible. Corrige le chemin du fichier .pub dans le profil."
+            "La clé « {show} » est introuvable ou illisible. Corrigez le chemin du fichier .pub dans le profil."
         ));
     };
     let head = String::from_utf8_lossy(&head[..count]);
     if head.starts_with("-----BEGIN") {
         return SigningCheck::Problem(format!(
-            "« {show} » est une clé privée. Indique la clé publique correspondante (fichier .pub) : GitPoulpe ne lit ni ne copie jamais les clés privées."
+            "« {show} » est une clé privée. Indiquez la clé publique correspondante (fichier .pub) : GitPoulpe ne lit ni ne copie jamais les clés privées."
         ));
     }
     if !SSH_KEY_PREFIXES
@@ -175,7 +175,7 @@ fn check_ssh_key(path: &Path) -> SigningCheck {
         .any(|prefix| head.starts_with(prefix))
     {
         return SigningCheck::Problem(format!(
-            "« {show} » n'est pas une clé publique SSH. Indique le fichier .pub (par exemple id_ed25519.pub)."
+            "« {show} » n'est pas une clé publique SSH. Indiquez le fichier .pub (par exemple id_ed25519.pub)."
         ));
     }
     SigningCheck::Ready
@@ -188,7 +188,7 @@ async fn check_gpg_key(key_id: &str, env: &[(OsString, OsString)]) -> SigningChe
         || id.chars().any(|c| c.is_control() || c.is_whitespace())
     {
         return SigningCheck::Problem(
-            "L'identifiant de clé GPG est invalide : utilise l'empreinte ou l'identifiant long (gpg --list-secret-keys --keyid-format long)."
+            "L'identifiant de clé GPG est invalide : utilisez l'empreinte ou l'identifiant long (gpg --list-secret-keys --keyid-format long)."
                 .to_owned(),
         );
     }
@@ -204,15 +204,15 @@ async fn check_gpg_key(key_id: &str, env: &[(OsString, OsString)]) -> SigningChe
     let status = tokio::time::timeout(SIGNING_CHECK_TIMEOUT, command.status()).await;
     match status {
         Err(_) => SigningCheck::Problem(
-            "gpg ne répond pas : vérifie le trousseau puis réessaie.".to_owned(),
+            "gpg ne répond pas : vérifiez le trousseau puis réessayez.".to_owned(),
         ),
         Ok(Err(_)) => SigningCheck::Problem(
-            "gpg est introuvable : installe GnuPG ou choisis une autre signature dans le profil."
+            "gpg est introuvable : installez GnuPG ou choisissez une autre signature dans le profil."
                 .to_owned(),
         ),
         Ok(Ok(status)) if status.success() => SigningCheck::Ready,
         Ok(Ok(_)) => SigningCheck::Problem(format!(
-            "Aucune clé secrète GPG ne correspond à « {id} ». Vérifie l'identifiant avec « gpg --list-secret-keys --keyid-format long »."
+            "Aucune clé secrète GPG ne correspond à « {id} ». Vérifiez l'identifiant avec « gpg --list-secret-keys --keyid-format long »."
         )),
     }
 }

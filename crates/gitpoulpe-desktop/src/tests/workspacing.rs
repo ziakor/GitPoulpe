@@ -83,7 +83,7 @@ fn a_workspace_is_created_renamed_and_deleted_after_a_confirmation_without_touch
     let a = repo("ws-a-");
     let mut rt = app(a.path());
     workspace_of(&mut rt, "Travail");
-    assert!(shows(&rt, "Travail · 0 dépôt(s)"));
+    assert!(shows(&rt, "Travail · 0 dépôt"));
     click(&mut rt, "ws-add-current");
     step(&mut rt);
     assert!(shows(&rt, &text_of(a.path())));
@@ -91,7 +91,7 @@ fn a_workspace_is_created_renamed_and_deleted_after_a_confirmation_without_touch
     step(&mut rt);
     click(&mut rt, "ws-rename");
     step(&mut rt);
-    assert!(shows(&rt, "Boulot · 1 dépôt(s)"));
+    assert!(shows(&rt, "Boulot · 1 dépôt"));
     rt.state.workspaces.new_name = TextEdit::new("boulot");
     step(&mut rt);
     click(&mut rt, "ws-create");
@@ -164,7 +164,7 @@ fn restarting_offline_restores_the_workspace_with_its_repositories_and_saved_vie
     rt.on_key = Some(crate::keys::on_key);
     rt.state.open_workspaces();
     step(&mut rt);
-    assert!(shows(&rt, "Deux (actif) · 2 dépôt(s)"));
+    assert!(shows(&rt, "Deux (actif) · 2 dépôts"));
     click(&mut rt, "ws-restore");
     wait_for(&mut rt, "the restored repository", |s| {
         s.repo.is_some() && s.view == ViewKind::Staged && s.current.is_some()
@@ -233,7 +233,7 @@ fn a_moved_or_broken_repository_is_flagged_and_repairable_without_blocking_the_w
         rt.state
             .notice
             .as_deref()
-            .is_some_and(|n| n.contains("1 dépôt(s) de l'espace sont introuvables"))
+            .is_some_and(|n| n.contains("1 dépôt de l'espace est introuvable"))
     );
     rt.state.open_workspaces();
     step(&mut rt);

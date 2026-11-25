@@ -443,7 +443,7 @@ mod access {
         settle(&mut rt, finished);
         assert!(shows(
             &rt,
-            "Accès réussi : 2 branche(s), 1 tag(s), HEAD sur main"
+            "Accès réussi : 2 branches, 1 tag, HEAD sur main"
         ));
     }
 

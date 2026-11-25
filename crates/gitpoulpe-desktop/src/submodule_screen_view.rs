@@ -39,8 +39,9 @@ fn submodule_row(s: &State, index: usize) -> El {
     }
     if sub.dirty() {
         detail.push_str(&format!(
-            " · {} modifié(s), {} non suivi(s)",
-            sub.modified, sub.untracked
+            " · {}, {}",
+            counted(sub.modified, "modifié", "modifiés"),
+            counted(sub.untracked, "non suivi", "non suivis")
         ));
     }
     let indent = 16.0 + sub.depth as f32 * 16.0;
@@ -171,8 +172,9 @@ fn panel(s: &State) -> El {
     if sub.state != SubmoduleState::NotInitialized {
         panel = panel.child(
             text(format!(
-                "En avance de {} commit(s), en retard de {}.",
-                sub.ahead, sub.behind
+                "En avance de {}, en retard de {}.",
+                counted(sub.ahead, "commit", "commits"),
+                sub.behind
             ))
             .key("sm-counts")
             .font(theme::SMALL)

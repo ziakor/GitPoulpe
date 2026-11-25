@@ -40,17 +40,24 @@ impl std::fmt::Display for SubmoduleError {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            Self::UnsavedCommits(commits) => write!(
-                f,
-                "le submodule porte {} commit(s) qu'aucune branche n'atteint ({}) : la mise à jour les laisserait orphelins, une décision explicite est requise",
-                commits.len(),
-                commits
-                    .iter()
-                    .take(3)
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(" ; ")
-            ),
+            Self::UnsavedCommits(commits) => {
+                let (noun, effect) = if commits.len() > 1 {
+                    ("commits", "les laisserait orphelins")
+                } else {
+                    ("commit", "le laisserait orphelin")
+                };
+                write!(
+                    f,
+                    "le submodule porte {} {noun} qu'aucune branche n'atteint ({}) : la mise à jour {effect}, une décision explicite est requise",
+                    commits.len(),
+                    commits
+                        .iter()
+                        .take(3)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(" ; ")
+                )
+            }
             Self::Net(e) => write!(f, "{e} ; l'état local du submodule n'a pas changé"),
             Self::Refused(m) => write!(f, "Git refuse : {m}"),
         }

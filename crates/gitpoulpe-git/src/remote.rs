@@ -24,17 +24,17 @@ pub enum RemoteError {
 impl std::fmt::Display for RemoteError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidName => f.write_str("nom de remote invalide pour Git"),
+            Self::InvalidName => f.write_str("nom de dépôt distant invalide pour Git"),
             Self::InvalidUrl(why) => write!(f, "URL refusée : {why}"),
             Self::AlreadyExists => {
-                f.write_str("un remote porte déjà ce nom : sa configuration n'est pas remplacée")
+                f.write_str("un dépôt distant porte déjà ce nom : sa configuration n'est pas remplacée")
             }
-            Self::NoSuchRemote => f.write_str("ce remote n'existe pas"),
+            Self::NoSuchRemote => f.write_str("ce dépôt distant n'existe pas"),
             Self::MultipleUrls => f.write_str(
-                "ce remote a plusieurs URL : modifiez-les avec git config pour ne pas en perdre",
+                "ce dépôt distant a plusieurs URL : modifiez-les avec git config pour ne pas en perdre",
             ),
             Self::Changed => {
-                f.write_str("le remote a changé depuis l'affichage, rien n'a été modifié")
+                f.write_str("le dépôt distant a changé depuis l'affichage, rien n'a été modifié")
             }
             Self::Refused(message) => write!(f, "Git refuse : {message}"),
             Self::GitUnavailable(d) => write!(f, "Git n'a pas pu démarrer : {d}"),

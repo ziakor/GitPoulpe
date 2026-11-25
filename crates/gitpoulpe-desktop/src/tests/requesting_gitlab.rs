@@ -32,7 +32,7 @@ fn a_merge_request_is_created_as_a_draft_once_for_a_project_in_nested_groups() {
         &rt,
         "acme/platform/api:feature/x → acme/platform/api:main"
     ));
-    assert!(shows(&rt, "2 commit(s) d'avance, 1 de retard"));
+    assert!(shows(&rt, "2 commits d'avance, 1 de retard"));
     assert!(shows(&rt, "modified src/a.rs (+2 −1)"));
     assert!(shows(&rt, "Créer la merge request"));
     rt.state.pulls.title = TextEdit::new("Add the thing");
@@ -152,7 +152,7 @@ fn gitlab_blockers_are_shown_next_to_the_merge_buttons() {
             .as_ref()
             .is_some_and(|m| m.head_sha.starts_with("33"))
     });
-    assert!(shows(&rt, "1 approbation(s) sur 2 requise(s)"));
+    assert!(shows(&rt, "1 approbation sur 2 requises"));
     rt.state.select_pull(22);
     loaded(&mut rt, 22);
     settle(&mut rt, |s| {

@@ -229,12 +229,20 @@ fn merge_panel(s: &State) -> Option<El> {
             preview.source
         ),
         MergeKind::FastForward => format!(
-            "Avance rapide : « {current} » avance de {} commit(s) jusqu'à « {} », sans commit de fusion.",
-            preview.only_in_source, preview.source
+            "Avance rapide : « {current} » avance de {} jusqu'à « {} », sans commit de fusion.",
+            counted(preview.only_in_source, "commit", "commits"),
+            preview.source
         ),
         MergeKind::TrueMerge => format!(
-            "Commit de fusion : {} commit(s) de « {} » rejoignent « {current} » ({} commit(s) propres à « {current} »).",
-            preview.only_in_source, preview.source, preview.only_in_head
+            "Commit de fusion : {} de « {} » {} « {current} » ({} à « {current} »).",
+            counted(preview.only_in_source, "commit", "commits"),
+            preview.source,
+            if preview.only_in_source > 1 {
+                "rejoignent"
+            } else {
+                "rejoint"
+            },
+            counted(preview.only_in_head, "commit propre", "commits propres")
         ),
     };
     card = card
@@ -267,8 +275,12 @@ fn merge_panel(s: &State) -> Option<El> {
         Some(files) => {
             card = card.child(
                 text(format!(
-                    "{} fichier(s) en conflit prévu(s) : {}. La fusion s'arrêtera pour vous laisser les résoudre.",
-                    files.len(),
+                    "{} : {}. La fusion s'arrêtera pour vous laisser résoudre les conflits.",
+                    counted(
+                        files.len(),
+                        "fichier en conflit prévu",
+                        "fichiers en conflit prévus"
+                    ),
                     files
                         .iter()
                         .take(5)
@@ -287,8 +299,8 @@ fn merge_panel(s: &State) -> Option<El> {
     if !preview.local_changes.is_empty() {
         card = card.child(
             text(format!(
-                "{} fichier(s) ont des modifications locales ({}). Git refuse la fusion si elle devait les écraser ; sinon elles sont conservées.",
-                preview.local_changes.len(),
+                "{} des modifications locales ({}). Git refuse la fusion si elle devait les écraser ; sinon elles sont conservées.",
+                counted(preview.local_changes.len(), "fichier a", "fichiers ont"),
                 preview
                     .local_changes
                     .iter()
@@ -402,11 +414,11 @@ fn pull_panel(s: &State) -> Option<El> {
         card = card
             .child(
                 text(format!(
-                    "Branche suivie : {} → {} ({}) · {} commit(s) chez vous, {} chez le distant, d'après la dernière récupération.",
+                    "Branche suivie : {} → {} ({}) · {} chez vous, {} chez le distant, d'après la dernière récupération.",
                     preview.upstream,
                     preview.branch,
                     crate::pulling::kind_caption(preview.kind),
-                    preview.ahead,
+                    counted(preview.ahead, "commit", "commits"),
                     preview.behind
                 ))
                 .key("pull-status")
@@ -560,20 +572,29 @@ fn publish_panel(s: &State) -> Option<El> {
                 preview.remote, preview.destination
             ),
             PushKind::FastForward => format!(
-                "{} commit(s) à envoyer vers {} ({}), sans rien écraser.",
-                preview.ahead, preview.remote, preview.destination
+                "{} à envoyer vers {} ({}), sans rien écraser.",
+                counted(preview.ahead, "commit", "commits"),
+                preview.remote,
+                preview.destination
             ),
             PushKind::UpToDate => format!(
                 "Déjà à jour sur {} ({}).",
                 preview.remote, preview.destination
             ),
             PushKind::Behind => format!(
-                "Le distant a {} commit(s) de plus que votre branche : récupérez et intégrez-les ; rien à envoyer.",
-                preview.behind
+                "Le distant a {} de plus que votre branche : récupérez et {} ; rien à envoyer.",
+                counted(preview.behind, "commit", "commits"),
+                if preview.behind > 1 {
+                    "intégrez-les"
+                } else {
+                    "intégrez-le"
+                }
             ),
             PushKind::Diverged => format!(
-                "Votre branche et {} ont divergé ({} commit(s) chez vous, {} chez le distant). Un envoi simple serait refusé.",
-                preview.remote, preview.ahead, preview.behind
+                "Votre branche et {} ont divergé ({} chez vous, {} chez le distant). Un envoi simple serait refusé.",
+                preview.remote,
+                counted(preview.ahead, "commit", "commits"),
+                preview.behind
             ),
         };
         card = card

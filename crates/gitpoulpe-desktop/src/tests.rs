@@ -537,6 +537,19 @@ fn focused(rt: &Runtime<State>) -> Option<String> {
         .and_then(|e| e.key)
 }
 
+fn ticked(rt: &Runtime<State>, key: &str) -> bool {
+    let Some(outer) = rect_of(rt, key) else {
+        return false;
+    };
+    rt.elements().into_iter().any(|e| {
+        e.text.as_deref() == Some("✓")
+            && e.rect[0] >= outer[0]
+            && e.rect[1] >= outer[1]
+            && e.rect[0] + e.rect[2] <= outer[0] + outer[2]
+            && e.rect[1] + e.rect[3] <= outer[1] + outer[3]
+    })
+}
+
 fn press(rt: &mut Runtime<State>, key: rune::Key) {
     rt.key(rune::KeyEvent {
         key,
