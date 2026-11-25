@@ -9,7 +9,7 @@ use crate::review_files_view::{files_tab, send_status};
 use crate::review_side_view::side_sections;
 use crate::state::State;
 use crate::theme;
-use crate::widgets::{action, area, quiet, text_tab};
+use crate::widgets::{action, area, icon_button, panel_icon, quiet, text_tab};
 
 const ROW_HEIGHT: f32 = 88.0;
 const RAIL_ROW_HEIGHT: f32 = 50.0;
@@ -175,12 +175,17 @@ fn rail(s: &State) -> El {
             row()
                 .w_full()
                 .px(6.0)
-                .py(9.0)
+                .py(5.0)
+                .center_y()
                 .border_sides([0.0, 0.0, 1.0, 0.0], p.line)
                 .child(
-                    quiet(s, "prl-list-toggle", "Liste")
-                        .label("Afficher la liste des pull requests".to_owned())
-                        .on_press(|s: &mut State| s.toggle_pull_list_width()),
+                    icon_button(
+                        s,
+                        "prl-list-toggle",
+                        &format!("Afficher la liste des {}s", s.pull_noun()),
+                        panel_icon(p.muted, false),
+                    )
+                    .on_press(|s: &mut State| s.toggle_pull_list_width()),
                 ),
         )
         .child(
@@ -269,24 +274,34 @@ fn list_column(s: &State, width: f32) -> El {
     let list = &s.pulls.list;
     let filters = row()
         .w_full()
-        .px(16.0)
-        .gap(18.0)
+        .pl(14.0)
+        .pr(6.0)
+        .gap(14.0)
         .center_y()
         .border_sides([0.0, 0.0, 1.0, 0.0], p.line)
         .child(filter_tab(s, "prl-open", "Ouvertes", PullFilter::Open))
         .child(filter_tab(s, "prl-closed", "Fermées", PullFilter::Closed))
         .child(filter_tab(s, "prl-all", "Toutes", PullFilter::All))
-        .child(el().grow(1.0))
+        .child(el().grow(1.0).min_w(0.0))
         .child(
-            text(list.items.len().to_string())
-                .key("prl-count")
-                .font(theme::SMALL)
-                .color(p.muted),
-        )
-        .child(
-            quiet(s, "prl-list-toggle", "Réduire")
-                .label("Réduire la liste des pull requests".to_owned())
-                .on_press(|s: &mut State| s.toggle_pull_list_width()),
+            row()
+                .gap(2.0)
+                .center_y()
+                .child(
+                    text(list.items.len().to_string())
+                        .key("prl-count")
+                        .font(theme::SMALL)
+                        .color(p.muted),
+                )
+                .child(
+                    icon_button(
+                        s,
+                        "prl-list-toggle",
+                        &format!("Réduire la liste des {}s", s.pull_noun()),
+                        panel_icon(p.muted, true),
+                    )
+                    .on_press(|s: &mut State| s.toggle_pull_list_width()),
+                ),
         );
     let message = |key: &str, words: String, red: bool| {
         text(words)

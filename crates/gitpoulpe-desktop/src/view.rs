@@ -177,7 +177,7 @@ fn footer(s: &State) -> El {
 fn hints(s: &State) -> String {
     let palette = format!("{} : palette de commandes", s.shortcut_for("palette"));
     if s.pulls.open && s.pulls.list.open {
-        return format!("Cliquez une ligne du diff pour la commenter · {palette}");
+        return format!("Cliquez ou glissez sur les lignes du diff pour commenter · {palette}");
     }
     if s.place() != crate::nav::Place::Changes {
         return format!("Échap : fermer l'écran · {palette}");

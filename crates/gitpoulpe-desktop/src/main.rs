@@ -125,6 +125,12 @@ fn demo_review(state: &mut State) {
     review_demo::review_scene(state);
 }
 
+fn demo_review_list(state: &mut State) {
+    demo(state);
+    review_demo::review_scene(state);
+    state.pulls.list.list_compact = Some(false);
+}
+
 fn demo_review_files(state: &mut State) {
     demo(state);
     review_demo::review_files_scene(state);
@@ -228,6 +234,7 @@ fn main() {
             ("demo-review", demo_review),
             ("demo-review-light", demo_review_light),
             ("demo-review-files", demo_review_files),
+            ("demo-review-list", demo_review_list),
             ("demo-device", demo_device),
             ("demo-review-focus", demo_review_focus),
             ("demo-history", demo_history),

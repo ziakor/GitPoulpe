@@ -1,4 +1,4 @@
-use rune::{El, Key, TextEdit, col, el, row, text, text_input};
+use rune::{Color, El, Key, LineCap, Shape, TextEdit, canvas, col, el, row, text, text_input};
 
 use crate::state::State;
 use crate::theme;
@@ -209,6 +209,43 @@ pub fn quiet(s: &State, key: &str, caption: &str) -> El {
         .radius(3.0)
         .hover(p.hover)
         .child(text(caption.to_owned()).font(theme::SMALL).color(p.accent))
+}
+
+pub fn panel_icon(color: Color, collapse: bool) -> El {
+    let (back, tip) = if collapse { (11.5, 9.0) } else { (9.0, 11.5) };
+    let shape = Shape::new()
+        .stroke_with(
+            vec![[1.75, 2.75], [14.25, 2.75], [14.25, 13.25], [1.75, 13.25]],
+            true,
+            1.5,
+            LineCap::Butt,
+            color,
+        )
+        .line([6.0, 2.75], [6.0, 13.25], 1.5, LineCap::Butt, color)
+        .stroke_with(
+            vec![[back, 5.5], [tip, 8.0], [back, 10.5]],
+            false,
+            1.5,
+            LineCap::Round,
+            color,
+        );
+    canvas(shape).w(16.0).h(16.0)
+}
+
+pub fn icon_button(s: &State, key: &str, label: &str, icon: El) -> El {
+    let p = s.palette;
+    el().key(key.to_owned())
+        .role("button")
+        .label(label.to_owned())
+        .help(label.to_owned())
+        .focusable(true)
+        .focus_ring(2.0, 0.0, p.accent)
+        .w(28.0)
+        .h(28.0)
+        .center()
+        .radius(4.0)
+        .hover(p.hover)
+        .child(icon)
 }
 
 pub fn counted(n: usize, one: &str, many: &str) -> String {

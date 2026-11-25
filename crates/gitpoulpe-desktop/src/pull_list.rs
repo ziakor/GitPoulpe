@@ -8,7 +8,7 @@ use gitpoulpe_hosting::{
     Side, is_merged, list_comments, list_pulls, list_reviews, load_checks, load_pull, merge_pull,
     post_comment, post_line_comment, prepare_merge, reply_to_comment, review_exists, submit_review,
 };
-use rune::TextEdit;
+use rune::{Drag, Phase, TextEdit, Tx};
 
 use crate::attachments::Media;
 use crate::engine::{Command, Event};
@@ -20,6 +20,14 @@ pub struct LinePick {
     pub line: u64,
     pub start: Option<u64>,
     pub side: Side,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LineDrag {
+    pub path: String,
+    pub side: Side,
+    pub anchor: u64,
+    pub end: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,8 +100,9 @@ pub struct PullListState {
     pub comments_request: u64,
     pub comment_request: u64,
     pub pick: Option<LinePick>,
-    pub range_mode: bool,
-    pub range_start: Option<LinePick>,
+    pub pick_anchor: Option<u64>,
+    pub line_drag: Option<LineDrag>,
+    pub press_handled: bool,
     pub compose: TextEdit,
     pub reply_to: Option<u64>,
     pub sending: bool,
@@ -130,12 +139,34 @@ pub struct Numbered {
     pub files: Rc<Vec<Vec<NumberedLine>>>,
 }
 
+fn diff_line_key(segment: &str) -> Option<(usize, usize)> {
+    let (file, row) = segment.strip_prefix("prl-f")?.split_once('l')?;
+    Some((file.parse().ok()?, row.parse().ok()?))
+}
+
 pub fn patch_size(detail: &PullDetail) -> usize {
     detail
         .files
         .iter()
         .map(|f| f.patch.as_ref().map_or(0, String::len) + 1)
         .sum()
+}
+
+pub fn current_numbered(
+    cached: Option<&Numbered>,
+    detail: &PullDetail,
+) -> Rc<Vec<Vec<NumberedLine>>> {
+    match cached {
+        Some(cached)
+            if cached.number == detail.summary.number
+                && cached.head == detail.summary.head_sha
+                && cached.files.len() == detail.files.len()
+                && cached.size == patch_size(detail) =>
+        {
+            cached.files.clone()
+        }
+        _ => number_files(detail),
+    }
 }
 
 pub fn number_files(detail: &PullDetail) -> Rc<Vec<Vec<NumberedLine>>> {
@@ -179,8 +210,9 @@ impl Default for PullListState {
             comments_request: 0,
             comment_request: 0,
             pick: None,
-            range_mode: false,
-            range_start: None,
+            pick_anchor: None,
+            line_drag: None,
+            press_handled: false,
             compose: TextEdit::new(""),
             reply_to: None,
             sending: false,
@@ -384,7 +416,7 @@ impl State {
             list.comments_request += 1;
             list.comment_request += 1;
             list.pick = None;
-            list.range_start = None;
+            list.pick_anchor = None;
             list.reply_to = None;
             list.sending = false;
             list.send_error = None;
@@ -926,58 +958,132 @@ impl State {
         true
     }
 
-    pub fn pull_pick_line(&mut self, path: String, line: u64, side: Side) {
+    fn pull_range_anchor(&self, path: &str, side: Side) -> Option<u64> {
+        if self.pull_is_gitlab() {
+            return None;
+        }
+        let list = &self.pulls.list;
+        let pick = list
+            .pick
+            .as_ref()
+            .filter(|k| k.path == path && k.side == side)?;
+        Some(
+            list.pick_anchor
+                .filter(|a| (pick.start.unwrap_or(pick.line)..=pick.line).contains(a))
+                .unwrap_or(pick.start.unwrap_or(pick.line)),
+        )
+    }
+
+    fn pull_set_pick(&mut self, path: String, side: Side, anchor: u64, end: u64) {
+        let (start, line) = (anchor.min(end), anchor.max(end));
         let list = &mut self.pulls.list;
         list.reply_to = None;
-        if list.range_mode {
-            match list.range_start.take() {
-                Some(start) if start.path == path && start.side == side && line >= start.line => {
-                    list.pick = Some(LinePick {
-                        path,
-                        line,
-                        start: Some(start.line),
-                        side,
-                    });
-                }
-                _ => {
-                    list.range_start = Some(LinePick {
-                        path: path.clone(),
-                        line,
-                        start: None,
-                        side,
-                    });
-                    list.pick = Some(LinePick {
-                        path,
-                        line,
-                        start: None,
-                        side,
-                    });
+        list.pick = Some(LinePick {
+            path,
+            line,
+            start: (start != line).then_some(start),
+            side,
+        });
+        list.pick_anchor = Some(anchor);
+        list.version += 1;
+    }
+
+    pub fn pull_pick_line(&mut self, path: String, line: u64, side: Side) {
+        self.pull_set_pick(path, side, line, line);
+    }
+
+    pub fn pull_extend_pick(&mut self, path: String, line: u64, side: Side) {
+        let anchor = self.pull_range_anchor(&path, side).unwrap_or(line);
+        self.pull_set_pick(path, side, anchor, line);
+    }
+
+    pub fn pull_line_pressed(&mut self, path: String, line: u64, side: Side, extend: bool) {
+        if std::mem::take(&mut self.pulls.list.press_handled) {
+            return;
+        }
+        if extend {
+            self.pull_extend_pick(path, line, side);
+        } else {
+            self.pull_pick_line(path, line, side);
+        }
+    }
+
+    pub fn pull_line_drag(&mut self, path: &str, line: u64, side: Side, drag: &Drag, tx: &mut Tx) {
+        match drag.phase {
+            Phase::Down => {
+                let anchor = tx
+                    .mods()
+                    .shift
+                    .then(|| self.pull_range_anchor(path, side))
+                    .flatten()
+                    .unwrap_or(line);
+                let list = &mut self.pulls.list;
+                list.press_handled = false;
+                list.line_drag = Some(LineDrag {
+                    path: path.to_owned(),
+                    side,
+                    anchor,
+                    end: line,
+                });
+                list.version += 1;
+            }
+            Phase::Move => {
+                let [x, y] = drag.window_point();
+                tx.element_at_in("prl-files", x, y, |s: &mut State, picked, _| {
+                    s.pull_drag_over(picked.as_ref().map(rune::Picked::path));
+                });
+            }
+            Phase::Up => {
+                let list = &mut self.pulls.list;
+                list.press_handled = true;
+                let Some(done) = list.line_drag.take() else {
+                    return;
+                };
+                list.version += 1;
+                if !drag.cancelled() {
+                    self.pull_set_pick(done.path, done.side, done.anchor, done.end);
                 }
             }
-        } else {
-            list.pick = Some(LinePick {
-                path,
-                line,
-                start: None,
-                side,
-            });
         }
-        list.version += 1;
+    }
+
+    fn pull_drag_over(&mut self, path: Option<&str>) {
+        let Some((file, row)) = path.and_then(|p| p.split('/').find_map(diff_line_key)) else {
+            return;
+        };
+        let gitlab = self.pull_is_gitlab();
+        let list = &mut self.pulls.list;
+        let (Some(detail), Some(drag)) = (list.detail.as_ref(), list.line_drag.as_mut()) else {
+            return;
+        };
+        if gitlab
+            || detail
+                .files
+                .get(file)
+                .is_none_or(|f| f.change.path != drag.path)
+        {
+            return;
+        }
+        let numbered = current_numbered(list.numbered.as_ref(), detail);
+        let Some((line, side)) = numbered
+            .get(file)
+            .and_then(|l| l.get(row))
+            .and_then(|l| l.anchor)
+        else {
+            return;
+        };
+        if side == drag.side && line != drag.end {
+            drag.end = line;
+            list.version += 1;
+        }
     }
 
     pub fn pull_clear_target(&mut self) {
         let list = &mut self.pulls.list;
         list.pick = None;
         list.reply_to = None;
-        list.range_start = None;
-        list.range_mode = false;
-        list.version += 1;
-    }
-
-    pub fn pull_toggle_range(&mut self) {
-        let list = &mut self.pulls.list;
-        list.range_mode = !list.range_mode;
-        list.range_start = None;
+        list.pick_anchor = None;
+        list.line_drag = None;
         list.version += 1;
     }
 
@@ -1078,7 +1184,7 @@ impl State {
             Ok(()) => {
                 list.compose = TextEdit::new("");
                 list.pick = None;
-                list.range_start = None;
+                list.pick_anchor = None;
                 list.reply_to = None;
                 list.send_notice = Some("Commentaire publié.".to_owned());
                 self.reload_pull_comments();
@@ -1209,7 +1315,7 @@ impl State {
         });
         list.compose = TextEdit::new("");
         list.pick = None;
-        list.range_start = None;
+        list.pick_anchor = None;
         list.send_error = None;
         list.send_notice = Some("Commentaire ajouté au brouillon de revue.".to_owned());
         list.version += 1;

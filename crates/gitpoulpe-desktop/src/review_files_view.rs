@@ -5,10 +5,10 @@ use gitpoulpe_hosting::{PullDetail, PullFile, ReviewComment, Side};
 use rune::{Align, El, GrowthSpec, col, el, row, text};
 
 use crate::attachments_view::{Body, binary_file, rich_body};
-use crate::pull_list::{CommentKind, NumberedLine, number_files, patch_size, when};
+use crate::pull_list::{CommentKind, NumberedLine, current_numbered, when};
 use crate::state::State;
 use crate::theme;
-use crate::widgets::{action, area, quiet, toggle};
+use crate::widgets::{action, area, quiet};
 
 const LINE: f32 = 22.0;
 const NUMBER: f32 = 44.0;
@@ -79,9 +79,11 @@ fn line_composer(s: &State) -> El {
     let target = match (&list.reply_to, &list.pick) {
         (Some(_), _) => "Réponse au fil".to_owned(),
         (None, Some(k)) => format!(
-            "Commentaire sur la ligne {}{} ({}) de {}",
-            k.start.map(|s| format!("{s}–")).unwrap_or_default(),
-            k.line,
+            "Commentaire sur {} ({}) de {}",
+            match k.start {
+                Some(start) => format!("les lignes {start} à {}", k.line),
+                None => format!("la ligne {}", k.line),
+            },
             if k.side == Side::Left {
                 "ancien côté"
             } else {
@@ -107,15 +109,17 @@ fn line_composer(s: &State) -> El {
                 .w_full()
                 .wrap(),
         );
-    if list.reply_to.is_none() {
+    if list.reply_to.is_none()
+        && list.pick.as_ref().is_some_and(|k| k.start.is_none())
+        && !s.pull_is_gitlab()
+    {
         block = block.child(
-            toggle(
-                s,
-                "prc-range",
-                "Étendre à une plage (cliquez ensuite la dernière ligne)",
-                list.range_mode,
-            )
-            .on_press(|s: &mut State| s.pull_toggle_range()),
+            text("Plusieurs lignes : glissez de la première à la dernière, ou Maj+clic sur la dernière.".to_owned())
+                .key("prc-range-hint")
+                .font(theme::SMALL)
+                .color(p.muted)
+                .w_full()
+                .wrap(),
         );
     }
     block = block.child(
@@ -253,11 +257,21 @@ fn diff_line(s: &State, path: &str, file_index: usize, n: usize, line: &Numbered
         Some(_) => (None, " ", p.muted, rest),
         None => (None, " ", p.muted, ""),
     };
-    let picked = list.pick.as_ref().is_some_and(|k| {
-        k.path == path
-            && line.anchor.is_some_and(|(l, side)| {
-                side == k.side && l >= k.start.unwrap_or(k.line) && l <= k.line
-            })
+    let chosen = match (&list.line_drag, &list.pick) {
+        (Some(d), _) => Some((
+            d.path.as_str(),
+            d.side,
+            d.anchor.min(d.end),
+            d.anchor.max(d.end),
+        )),
+        (None, Some(k)) => Some((k.path.as_str(), k.side, k.start.unwrap_or(k.line), k.line)),
+        (None, None) => None,
+    };
+    let picked = chosen.is_some_and(|(at, chosen_side, first, last)| {
+        at == path
+            && line
+                .anchor
+                .is_some_and(|(l, side)| side == chosen_side && (first..=last).contains(&l))
     });
     let rule = if picked {
         el().w(2.0).h_full().fill(p.accent)
@@ -298,12 +312,17 @@ fn diff_line(s: &State, path: &str, file_index: usize, n: usize, line: &Numbered
         el_line = el_line.fill(p.selected);
     }
     if let Some((number, side)) = line.anchor {
-        let path = path.to_owned();
+        let (pressed, dragged) = (path.to_owned(), path.to_owned());
         el_line = el_line
             .role("button")
             .label(format!("Commenter la ligne {number}"))
             .hover(p.hover)
-            .on_press(move |s: &mut State| s.pull_pick_line(path.clone(), number, side));
+            .on_press_tx(move |s: &mut State, tx| {
+                s.pull_line_pressed(pressed.clone(), number, side, tx.mods().shift)
+            })
+            .on_drag(move |s: &mut State, drag, tx| {
+                s.pull_line_drag(&dragged, number, side, drag, tx)
+            });
     }
     el_line
 }
@@ -492,17 +511,7 @@ fn build_row(s: &State, row: FileRow, numbered: &[Vec<NumberedLine>]) -> El {
 
 pub fn files_tab(s: &State, detail: &PullDetail) -> El {
     let list = &s.pulls.list;
-    let numbered = match &list.numbered {
-        Some(cached)
-            if cached.number == detail.summary.number
-                && cached.head == detail.summary.head_sha
-                && cached.files.len() == detail.files.len()
-                && cached.size == patch_size(detail) =>
-        {
-            cached.files.clone()
-        }
-        _ => number_files(detail),
-    };
+    let numbered = current_numbered(list.numbered.as_ref(), detail);
     let rows = Rc::new(plan(s, detail, &numbered));
     let keys = rows.clone();
     col()

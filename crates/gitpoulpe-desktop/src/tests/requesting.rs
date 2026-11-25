@@ -512,7 +512,7 @@ fn a_line_comment_targets_the_revision_side_and_line_shown_and_threads_are_visib
 }
 
 #[test]
-fn replies_join_their_thread_and_a_range_needs_two_lines_on_the_same_side() {
+fn replies_join_their_thread_and_a_range_stays_on_one_side() {
     let fake = Fake::start();
     let (_dir, mut rt) = list_screen(&fake);
     click(&mut rt, "prlk0");
@@ -536,19 +536,105 @@ fn replies_join_their_thread_and_a_range_needs_two_lines_on_the_same_side() {
                 .any(|c| c.body == "agreed" && c.in_reply_to == Some(10))
     });
     assert!(shows(&rt, "agreed"));
-    rt.state.pull_toggle_range();
-    rt.state
-        .pull_pick_line("f1.rs".to_owned(), 1, gitpoulpe_hosting::Side::Right);
     rt.state
         .pull_pick_line("f1.rs".to_owned(), 3, gitpoulpe_hosting::Side::Right);
+    rt.state
+        .pull_extend_pick("f1.rs".to_owned(), 1, gitpoulpe_hosting::Side::Right);
     step(&mut rt);
-    assert!(shows(&rt, "ligne 1–3 (nouveau côté) de f1.rs"));
+    assert!(shows(&rt, "les lignes 1 à 3 (nouveau côté) de f1.rs"));
     rt.state
-        .pull_pick_line("f1.rs".to_owned(), 5, gitpoulpe_hosting::Side::Left);
-    rt.state
-        .pull_pick_line("f1.rs".to_owned(), 2, gitpoulpe_hosting::Side::Left);
+        .pull_extend_pick("f1.rs".to_owned(), 2, gitpoulpe_hosting::Side::Left);
     let pick = rt.state.pulls.list.pick.clone().unwrap();
     assert_eq!((pick.start, pick.line), (None, 2));
+}
+
+fn longer_first_file(rt: &mut Runtime<State>) {
+    let list = &mut rt.state.pulls.list;
+    list.detail.as_mut().unwrap().files[0].patch =
+        Some("@@ -1,3 +1,5 @@\n a\n-b\n+B\n+c\n+d\n e".to_owned());
+    list.numbered = None;
+    list.version += 1;
+    step(rt);
+}
+
+fn line_point(rt: &mut Runtime<State>, row: usize) -> (f32, f32) {
+    let key = format!("prl-f0l{row}");
+    rt.update(move |_, tx| tx.scroll_into_view_in("prl-panel", key));
+    for _ in 0..8 {
+        step(rt);
+    }
+    let rect = rect_of(rt, &format!("prl-f0l{row}")).expect("the diff line is on screen");
+    (rect[0] + 120.0, rect[1] + rect[3] / 2.0)
+}
+
+fn picked(rt: &Runtime<State>) -> (Option<u64>, u64, gitpoulpe_hosting::Side) {
+    let pick = rt.state.pulls.list.pick.clone().expect("a line is picked");
+    (pick.start, pick.line, pick.side)
+}
+
+#[test]
+fn dragging_across_diff_lines_selects_a_range_on_the_side_it_started_and_shift_extends_it() {
+    use gitpoulpe_hosting::Side::Right;
+    let fake = Fake::start();
+    let (_dir, mut rt) = list_screen(&fake);
+    click(&mut rt, "prlk0");
+    loaded(&mut rt, 1);
+    comments_ready(&mut rt);
+    click(&mut rt, "prl-tab-files");
+    longer_first_file(&mut rt);
+    let (x, top) = line_point(&mut rt, 1);
+    let (_, bottom) = line_point(&mut rt, 6);
+    let (_, removed) = line_point(&mut rt, 2);
+    rt.pointer_move(x, top);
+    rt.pointer_down(x, top);
+    step(&mut rt);
+    rt.pointer_move(x, removed);
+    rt.pointer_move(x, bottom);
+    step(&mut rt);
+    assert!(
+        rect_of(&rt, "prc-box").is_none(),
+        "the composer waits for the release, so the lines do not move under the pointer"
+    );
+    rt.pointer_up(x, bottom);
+    step(&mut rt);
+    assert_eq!(picked(&rt), (Some(1), 5, Right));
+    assert!(shows(&rt, "les lignes 1 à 5 (nouveau côté) de f1.rs"));
+    assert!(rect_of(&rt, "prc-range-hint").is_none());
+
+    let (_, third) = line_point(&mut rt, 4);
+    rt.pointer_move(x, bottom);
+    rt.pointer_down(x, bottom);
+    rt.pointer_move(x, third);
+    rt.pointer_up(x, third);
+    step(&mut rt);
+    assert_eq!(picked(&rt), (Some(3), 5, Right), "upwards works too");
+
+    let (_, second) = line_point(&mut rt, 3);
+    rt.pointer_move(x, second);
+    rt.pointer_down(x, second);
+    rt.pointer_up(x, second);
+    step(&mut rt);
+    assert_eq!(
+        picked(&rt),
+        (None, 2, Right),
+        "a plain click picks one line"
+    );
+    assert!(rect_of(&rt, "prc-range-hint").is_some());
+
+    rt.physical_input(rune::PhysicalInput::Modifiers(rune::Mods {
+        shift: true,
+        ..rune::Mods::default()
+    }));
+    let (_, last) = line_point(&mut rt, 6);
+    rt.pointer_move(x, last);
+    rt.pointer_down(x, last);
+    rt.pointer_up(x, last);
+    step(&mut rt);
+    assert_eq!(
+        picked(&rt),
+        (Some(2), 5, Right),
+        "shift-click extends from the picked line"
+    );
 }
 
 #[test]
