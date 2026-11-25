@@ -1238,6 +1238,7 @@ dependencies = [
  "gitpoulpe-hosting",
  "gitpoulpe-terminal",
  "rune",
+ "rune-kit",
  "serde_json",
  "tempfile",
  "tokio",
@@ -3173,6 +3174,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "rune-highlights"
+version = "0.0.1"
+source = "git+https://github.com/anomalyco/rune?rev=1dba3423fd1f1904553422e7814700f817abe8af#1dba3423fd1f1904553422e7814700f817abe8af"
+dependencies = [
+ "unicode-ident",
+ "wasmparser",
+]
+
+[[package]]
+name = "rune-kit"
+version = "0.0.1"
+source = "git+https://github.com/anomalyco/rune?rev=1dba3423fd1f1904553422e7814700f817abe8af#1dba3423fd1f1904553422e7814700f817abe8af"
+dependencies = [
+ "icu_normalizer",
+ "rune",
+ "rune-highlights",
+ "rune-motion",
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "rune-motion"
 version = "0.1.0"
 source = "git+https://github.com/anomalyco/rune?rev=1dba3423fd1f1904553422e7814700f817abe8af#1dba3423fd1f1904553422e7814700f817abe8af"
@@ -4234,6 +4256,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3b1f9c3798725016c6ee5f2f57869ec0831e8bbc0ab0310a86e787e97f41389e"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "wasmparser"
+version = "0.245.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f08c9adee0428b7bddf3890fc27e015ac4b761cc608c822667102b8bfd6995e"
+dependencies = [
+ "bitflags 2.13.2",
+ "indexmap",
 ]
 
 [[package]]

@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::rc::Rc;
 
 use gitpoulpe_hosting::{PullDetail, PullFile, ReviewComment, Side};
-use rune::{Align, El, GrowthSpec, col, el, row, text};
+use rune::{Align, El, GrowthSpec, Span, col, el, row, text};
 
 use crate::attachments_view::{Body, binary_file, rich_body};
 use crate::pull_list::{CommentKind, NumberedLine, current_numbered, when};
@@ -301,6 +301,16 @@ fn diff_line(s: &State, path: &str, file_index: usize, n: usize, line: &Numbered
                 } else {
                     p.text
                 })
+                .spans(
+                    line.marks
+                        .iter()
+                        .filter_map(|(range, paint)| {
+                            let mut span = Span::new(range.start, range.end);
+                            span.color = Some(p.syntax(*paint)?);
+                            Some(span)
+                        })
+                        .collect::<Vec<_>>(),
+                )
                 .grow(1.0)
                 .min_w(0.0)
                 .truncate(),

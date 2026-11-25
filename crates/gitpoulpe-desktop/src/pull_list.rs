@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
+use std::ops::Range;
 use std::rc::Rc;
 
 use gitpoulpe_hosting::{
@@ -9,6 +10,7 @@ use gitpoulpe_hosting::{
     post_comment, post_line_comment, prepare_merge, reply_to_comment, review_exists, submit_review,
 };
 use rune::{Drag, Phase, TextEdit, Tx};
+use rune_kit::syntax::{self, Paint, lang_for_path};
 
 use crate::attachments::Media;
 use crate::engine::{Command, Event};
@@ -176,7 +178,12 @@ pub fn number_files(detail: &PullDetail) -> Rc<Vec<Vec<NumberedLine>>> {
         detail
             .files
             .iter()
-            .map(|f| f.patch.as_deref().map(numbered_lines).unwrap_or_default())
+            .map(|f| {
+                f.patch
+                    .as_deref()
+                    .map(|patch| file_lines(&f.change.path, patch))
+                    .unwrap_or_default()
+            })
             .collect(),
     )
 }
@@ -1696,6 +1703,67 @@ pub struct NumberedLine {
     pub anchor: Option<(u64, Side)>,
     pub old: Option<u64>,
     pub new: Option<u64>,
+    pub marks: Vec<(Range<usize>, Paint)>,
+}
+
+pub fn file_lines(path: &str, patch: &str) -> Vec<NumberedLine> {
+    let mut lines = numbered_lines(patch);
+    if let Some(lang) = lang_for_path(path) {
+        let mut start = 0;
+        while start < lines.len() {
+            let end = lines[start + 1..]
+                .iter()
+                .position(|l| l.text.starts_with("@@"))
+                .map_or(lines.len(), |at| start + 1 + at);
+            highlight_hunk(lang, &mut lines[start..end]);
+            start = end;
+        }
+    }
+    lines
+}
+
+fn highlight_hunk(lang: &str, lines: &mut [NumberedLine]) {
+    let mut sources = [String::new(), String::new()];
+    let mut places = Vec::with_capacity(lines.len());
+    for line in lines.iter() {
+        let place = match line.text.as_bytes().first() {
+            Some(b'-') => Some(0),
+            Some(b'+' | b' ') => Some(1),
+            _ => None,
+        }
+        .map(|side| {
+            let content = &line.text[1..];
+            let offset = sources[side].len();
+            sources[side].push_str(content);
+            sources[side].push('\n');
+            if side == 1 && line.text.starts_with(' ') {
+                sources[0].push_str(content);
+                sources[0].push('\n');
+            }
+            (side, offset)
+        });
+        places.push(place);
+    }
+    let found = sources.map(|source| syntax::builtin(Some(lang), &source));
+    for (line, place) in lines.iter_mut().zip(places) {
+        let Some((side, offset)) = place else {
+            continue;
+        };
+        let end = offset + line.text.len() - 1;
+        let marks = &found[side];
+        let first = marks.partition_point(|(r, _)| r.end <= offset);
+        line.marks = marks[first..]
+            .iter()
+            .take_while(|(r, _)| r.start < end)
+            .map(|(r, paint)| {
+                (
+                    r.start.max(offset) - offset..r.end.min(end) - offset,
+                    *paint,
+                )
+            })
+            .filter(|(r, _)| !r.is_empty())
+            .collect();
+    }
 }
 
 pub fn numbered_lines(patch: &str) -> Vec<NumberedLine> {
@@ -1719,6 +1787,7 @@ pub fn numbered_lines(patch: &str) -> Vec<NumberedLine> {
                 anchor: None,
                 old: None,
                 new: None,
+                marks: Vec::new(),
             });
             continue;
         }
@@ -1743,6 +1812,7 @@ pub fn numbered_lines(patch: &str) -> Vec<NumberedLine> {
             anchor,
             old: numbers.0,
             new: numbers.1,
+            marks: Vec::new(),
         });
     }
     out

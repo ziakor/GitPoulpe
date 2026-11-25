@@ -721,6 +721,47 @@ fn a_stale_anchor_keeps_the_text_and_a_lost_answer_is_checked_before_any_retry()
 }
 
 #[test]
+fn diff_lines_are_coloured_by_the_language_of_their_file_each_side_on_its_own() {
+    use rune_kit::syntax::{Paint, Syntax};
+    let patch = "@@ -1,3 +1,3 @@\n /* a comment\n-   still old */ let a = 1;\n+   new */ fn main() { let s = \"x\"; }\n@@ -9 +9 @@\n-let b = 2;";
+    let lines = crate::pull_list::file_lines("src/main.rs", patch);
+    let tokens = |n: usize| -> Vec<(String, Syntax)> {
+        lines[n]
+            .marks
+            .iter()
+            .filter_map(|(range, paint)| match paint {
+                Paint::Kind(kind) => Some((lines[n].text[1..][range.clone()].to_owned(), *kind)),
+                Paint::Color(_) => None,
+            })
+            .collect()
+    };
+    let has = |n: usize, text: &str, kind: Syntax| {
+        tokens(n)
+            .iter()
+            .any(|(t, k)| t.trim() == text && *k == kind)
+    };
+    assert!(has(1, "/* a comment", Syntax::Comment));
+    assert!(
+        has(2, "still old */", Syntax::Comment) && has(3, "new */", Syntax::Comment),
+        "a comment opened in context goes on on both sides"
+    );
+    assert!(has(2, "let", Syntax::Keyword) && has(2, "1", Syntax::Number));
+    assert!(has(3, "fn", Syntax::Keyword) && has(3, "main", Syntax::Function));
+    assert!(has(3, "\"x\"", Syntax::String));
+    assert!(lines[4].marks.is_empty(), "hunk headers stay plain");
+    assert!(
+        has(5, "let", Syntax::Keyword),
+        "the next hunk starts afresh"
+    );
+    assert!(
+        crate::pull_list::file_lines("NOTES.unknown", patch)
+            .iter()
+            .all(|l| l.marks.is_empty()),
+        "an unknown language stays plain"
+    );
+}
+
+#[test]
 fn diff_lines_are_numbered_from_each_hunk_header_on_the_side_they_belong_to() {
     use gitpoulpe_hosting::Side::{Left, Right};
     let lines = crate::pull_list::numbered_lines(

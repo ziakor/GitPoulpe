@@ -1,6 +1,7 @@
 use rune::Color;
 use rune::color::hex;
 use rune::tok::{Family, TextStyle};
+use rune_kit::syntax::{Paint, Syntax};
 
 pub const FONTS: &[&[u8]] = &[
     include_bytes!("../assets/fonts/IBMPlexSans-Regular.ttf"),
@@ -95,6 +96,24 @@ impl Palette {
 
     pub fn lane(&self, index: usize) -> Color {
         self.lanes[index % self.lanes.len()]
+    }
+
+    pub fn syntax(&self, paint: Paint) -> Option<Color> {
+        let [cyan, amber, rose, green, violet, orange] = self.lanes;
+        let kind = match paint {
+            Paint::Kind(kind) => kind,
+            Paint::Color(_) => return None,
+        };
+        Some(match kind {
+            Syntax::Keyword => violet,
+            Syntax::String => green,
+            Syntax::Number | Syntax::Regex => orange,
+            Syntax::Type | Syntax::Heading | Syntax::Link => cyan,
+            Syntax::Function | Syntax::Attribute => amber,
+            Syntax::Property => rose,
+            Syntax::Comment | Syntax::Punctuation => self.muted,
+            _ => return None,
+        })
     }
 }
 
